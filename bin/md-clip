@@ -1,0 +1,426 @@
+#!/usr/bin/env bash
+# md-clip — Konvertiert Clipboard-Inhalt nach Markdown.
+#
+# Architektur (siehe BLUEPRINT.md für die Begründungen):
+#   1. HTML direkt aus dem Clipboard via Swift-Helper (häufigster Fall:
+#      Browser, Claude Desktop, Notion).
+#   2. RTF via macOS-Bordmittel `textutil` zu HTML, dann selber Weg wie 1.
+#   3. Plain-Text durchreichen, kein Convert.
+#
+# Default: schreibt das Ergebnis nach stdout. Mit --replace landet es
+# stattdessen zurück im Clipboard (alle Rich-Flavors werden überschrieben).
+
+# Strict-Mode für Bash:
+#   -e: Bei Fehler sofort abbrechen.
+#   -u: Zugriff auf undefinierte Variablen ist ein Fehler.
+#   -o pipefail: Wenn ein Glied einer Pipe fehlschlägt, gilt die ganze Pipe als Fehler.
+# Das macht das Skript deutlich vorhersagbarer als Default-Bash.
+set -euo pipefail
+
+# Wenn md-clip aus einer GUI-App gestartet wird (Dock-Icon, Kurzbefehle.app,
+# Automator), erbt der Prozess NICHT dein Shell-PATH. Er sieht nur den
+# System-PATH (/usr/bin:/bin:/...). Damit fehlen Brew-Binaries wie pandoc,
+# weil die unter /usr/local/bin (Intel-Mac) bzw. /opt/homebrew/bin
+# (Apple Silicon) liegen. Wir hängen beide Pfade vorne dran. Wenn sie
+# nicht existieren, schadet das nicht — PATH darf nicht-existente Pfade
+# enthalten.
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+# Gleicher GUI-Stolperstein wie beim PATH: GUI-Prozesse haben oft entweder
+# kein Locale gesetzt oder das C/POSIX-Locale, das Bytes über 0x7F als
+# „undefiniert" behandelt. Folge: pandoc, perl, sed interpretieren UTF-8-
+# Bytes falsch, Umlaute (ä = 0xc3 0xa4) werden zerlegt und kommen als
+# „Ã¤" oder „√§" o.ä. raus.
+# Wir setzen LC_ALL hart auf UTF-8 — Clipboard-Inhalte sind auf macOS
+# immer UTF-8, ein anderes Locale macht hier keinen Sinn. LC_ALL über-
+# schreibt alle anderen LC_*-Variablen und LANG, also reicht das hier.
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
+
+# ---------- Konstanten ----------
+
+VERSION="1.0.0"
+
+# Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
+# BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
+# realpath löst Symlinks auf — wichtig, damit der Helper-Pfad stimmt, wenn
+# md-clip per Symlink in /usr/local/bin/ liegt.
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+HTML_HELPER="$PROJECT_ROOT/helpers/clipboard-html"
+RTF_HELPER="$PROJECT_ROOT/helpers/clipboard-rtf"
+
+# Standard-Optionen für pandoc.
+#   -f html         : HTML als Input-Format.
+#   -t gfm-raw_html : GitHub-Flavored Markdown ohne raw_html-Extension.
+#                     Nicht abbildbare HTML-Tags werden VERWORFEN statt
+#                     durchgereicht. Killt Tailwind-Müll im Output.
+#   --wrap=none     : Kein Auto-Wrap bei ~78 Zeichen.
+# Diese Optionen sind im Spike validiert (siehe BLUEPRINT.md).
+PANDOC_OPTS=(-f html -t gfm-raw_html --wrap=none)
+
+# ---------- Flag-Defaults ----------
+
+# Globale Flags, die wir per Argument setzen. Default-Werte hier.
+REPLACE=0       # --replace: Ergebnis ins Clipboard schreiben statt stdout
+PLAIN=0         # --plain: Plain-Text-Modus, kein Convert
+FROM="auto"     # --from: auto|html|rtf|plain
+TO="gfm"        # --to: pandoc-Ziel-Dialekt (gfm|markdown|commonmark)
+QUIET=0         # --quiet: keine Status-Logs auf stderr
+NOTIFY=0        # --notify: macOS-Notification bei Erfolg
+VERBOSE=0       # --verbose: Diagnose-Output auf stderr
+
+# ---------- Hilfsfunktionen ----------
+
+# log: Schreibt auf stderr, außer --quiet ist gesetzt.
+# Nutze das für normale Status-Meldungen.
+log() {
+  if [ "$QUIET" -eq 0 ]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+# vlog: Verbose-Log. Nur sichtbar mit --verbose.
+# Für Diagnose-Details (welcher Flavor, welcher Pfad).
+vlog() {
+  if [ "$VERBOSE" -eq 1 ]; then
+    printf '[md-clip] %s\n' "$*" >&2
+  fi
+}
+
+# err: Fehler-Output auf stderr. Immer sichtbar (auch mit --quiet),
+# weil Fehler nie unterdrückt werden sollen.
+err() {
+  printf 'md-clip: %s\n' "$*" >&2
+}
+
+# notify: macOS-Notification anzeigen, wenn --notify gesetzt ist.
+# osascript ist macOS-Bordmittel, kein extra Install nötig.
+notify() {
+  if [ "$NOTIFY" -eq 1 ]; then
+    # Anführungszeichen im Text müssen escaped werden — wir bauen die
+    # AppleScript-Zeile als Heredoc-String, daher reicht einfaches Quoten.
+    osascript -e "display notification \"$1\" with title \"md-clip\"" || true
+  fi
+}
+
+# die: Fehler ausgeben, ggf. Notification, dann mit Exit-Code beenden.
+# Argument 1 = Exit-Code, Rest = Fehlermeldung.
+die() {
+  local code="$1"; shift
+  err "$*"
+  notify "Fehler: $*"
+  exit "$code"
+}
+
+# usage: Hilfetext ausgeben.
+usage() {
+  cat <<'EOF'
+md-clip — Clipboard-Inhalt nach Markdown konvertieren.
+
+USAGE
+  md-clip [OPTIONS]
+
+OPTIONS
+  -r, --replace        Markdown-Ergebnis zurück ins Clipboard schreiben
+                       (statt nach stdout).
+  -p, --plain          Plain-Text-Modus: keine Konvertierung, nur Clipboard-
+                       Inhalt als Plain-Text durchreichen. Mit --replace
+                       ersetzt der Plain-Text das Clipboard (alle Rich-
+                       Flavors gehen verloren — die echte „Paste as Plain
+                       Text"-Funktion als CLI).
+  -f, --from FORMAT    Eingabe-Format erzwingen: auto|html|rtf|plain
+                       (default: auto).
+  -t, --to FORMAT      Pandoc-Ziel-Dialekt: gfm|markdown|commonmark
+                       (default: gfm).
+  -q, --quiet          Keine Status-Ausgaben auf stderr.
+  -n, --notify         macOS-Notification bei Erfolg (für Wrapper-Aufrufe).
+  -V, --verbose        Diagnose-Output (welche Flavors, welcher Pfad).
+  -v, --version        Versionsnummer ausgeben.
+  -h, --help           Diese Hilfe anzeigen.
+
+EXIT-CODES
+  0  Erfolg
+  1  Nichts Konvertierbares auf dem Clipboard
+  2  Dependency fehlt (pandoc, textutil, Swift-Helper)
+  3  Konvertierungsfehler (pandoc o.ä. mit non-zero exit)
+
+BEISPIELE
+  md-clip                     # nach stdout
+  md-clip --replace           # Clipboard durch Markdown ersetzen
+  md-clip -p -r               # Clipboard auf reines Plain-Text reduzieren
+  md-clip --verbose           # Diagnose, welcher Pfad gewählt wird
+EOF
+}
+
+# ---------- Flag-Parsing ----------
+
+# Argumente durchgehen, lange und kurze Form akzeptieren.
+# `getopts` (Bash-Builtin) kann nur kurze Optionen — daher manuell.
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -r|--replace)   REPLACE=1 ;;
+    -p|--plain)     PLAIN=1 ;;
+    -f|--from)
+      # Wert prüfen: muss eines der erlaubten Formate sein.
+      shift
+      case "${1:-}" in
+        auto|html|rtf|plain) FROM="$1" ;;
+        *) die 2 "Ungültiges --from: '${1:-}' (erlaubt: auto, html, rtf, plain)" ;;
+      esac
+      ;;
+    -t|--to)
+      shift
+      case "${1:-}" in
+        gfm|markdown|commonmark) TO="$1" ;;
+        *) die 2 "Ungültiges --to: '${1:-}' (erlaubt: gfm, markdown, commonmark)" ;;
+      esac
+      ;;
+    -q|--quiet)     QUIET=1 ;;
+    -n|--notify)    NOTIFY=1 ;;
+    -V|--verbose)   VERBOSE=1 ;;
+    -v|--version)   printf 'md-clip %s\n' "$VERSION"; exit 0 ;;
+    -h|--help)      usage; exit 0 ;;
+    --) shift; break ;;
+    -*) die 2 "Unbekannte Option: $1 (siehe --help)" ;;
+    *)  die 2 "Unerwartetes Argument: $1 (siehe --help)" ;;
+  esac
+  shift
+done
+
+# Pandoc-Optionen entsprechend --to anpassen, falls vom Default abweichend.
+# `-t gfm-raw_html` ist Default; bei anderen Zielen lassen wir raw_html ebenfalls weg.
+PANDOC_OPTS=(-f html -t "${TO}-raw_html" --wrap=none)
+
+# ---------- Dependency-Checks ----------
+
+# command -v $cmd liefert leeren Output und Exit 1, wenn $cmd nicht im PATH ist.
+# Wir prüfen hier alle Pflicht-Binaries — early-fail mit klarem Fehlertext.
+check_dependencies() {
+  local missing=()
+  command -v pandoc   >/dev/null 2>&1 || missing+=("pandoc")
+  command -v textutil >/dev/null 2>&1 || missing+=("textutil")
+  command -v pbpaste  >/dev/null 2>&1 || missing+=("pbpaste")
+  command -v pbcopy   >/dev/null 2>&1 || missing+=("pbcopy")
+  command -v perl     >/dev/null 2>&1 || missing+=("perl")
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    die 2 "Fehlende Dependencies: ${missing[*]}. Installation: brew install pandoc"
+  fi
+
+  # Swift-Helper separat prüfen — die werden im Projekt mitgeliefert,
+  # nicht im PATH. Wenn einer fehlt, deuten wir auf install.sh hin.
+  for helper in "$HTML_HELPER" "$RTF_HELPER"; do
+    if [ ! -x "$helper" ]; then
+      die 2 "Swift-Helper nicht gefunden oder nicht ausführbar: $helper (install.sh ausführen)"
+    fi
+  done
+}
+
+# ---------- Preprocessor + Cleaner (aus dem Spike) ----------
+
+# preprocess_claude_desktop: Normalisiert HTML aus modernen Electron-Apps,
+# allen voran Claude Desktop. Vier Schritte hintereinander als Pipe.
+# Siehe BLUEPRINT.md "Was nicht funktioniert" für die Begründung jedes Schrittes.
+preprocess_claude_desktop() {
+  # 1a. <div data-line="N">INHALT</div> → INHALT + echtes Newline.
+  #     Claude Desktop kodiert Code-Zeilen als CSS-Subgrid-Divs OHNE \n im DOM.
+  #     Diese Regel macht aus dem visuellen CSS-Layout echte Plain-Text-Zeilen.
+  #     perl -0pe: `-0` slurpt die ganze Eingabe (Multiline-Match möglich),
+  #     `-p` druckt nach jeder Iteration, `-e` führt den Ausdruck aus.
+  #     /s = `.` matcht auch Newlines. /g = global ersetzen.
+  perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs' \
+    | \
+  # 1b. ALLE übrigen <div>/</div> innerhalb <pre>...</pre> entfernen.
+  #     Vor allem das umschließende <div data-content>. Damit sieht pandoc
+  #     einen sauberen <pre><code>...</code></pre>-Block ohne illegale Verschachtelung.
+  #     /e = Replacement-Teil ist Perl-Code (kein einfacher String).
+  perl -0pe '
+    s{(<pre[^>]*>.*?</pre>)}{
+      my $block = $1;
+      $block =~ s{</?div[^>]*>}{}g;
+      $block;
+    }gse' \
+    | \
+  # 1c. style="..."-Attribute komplett entfernen.
+  #     Tailwind packt 1-2 KB Inline-CSS an JEDES Element. Reines Rauschen.
+  perl -0pe 's/\s+style="[^"]*"//g' \
+    | \
+  # 1d. data-*-Attribute entfernen.
+  #     data-file, data-line-type, data-tw-* etc. — alles ohne semantischen Wert.
+  perl -0pe 's/\s+data-[a-z-]+="[^"]*"//g'
+}
+
+# clean_html: Löst <span>-Wrapper um reinen Text auf.
+# Wichtig: ([^<]*) matcht AUCH ein einzelnes Leerzeichen.
+# Claude Desktop nutzt <span> </span> als Whitespace zwischen Inline-Elementen —
+# der Inhalt (incl. Leerzeichen) muss erhalten bleiben.
+# Zweimal laufen lassen, weil sed nicht greedy-nicht-überlappend matcht
+# und damit einfache Verschachtelung in zwei Durchläufen auflöst.
+clean_html() {
+  sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g' \
+    | sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g'
+}
+
+# ---------- Konvertierungs-Pfade ----------
+
+# convert_html: HTML-String von stdin lesen, durch Preprocessor + Cleaner +
+# pandoc schicken, Markdown auf stdout ausgeben.
+convert_html() {
+  vlog "Pfad: HTML → pandoc"
+  preprocess_claude_desktop \
+    | clean_html \
+    | pandoc "${PANDOC_OPTS[@]}"
+}
+
+# strip_single_column_tables: Entfernt 1-Spalten-Tabellen mit leerem
+# Header aus Markdown-Output. Diese entstehen, wenn textutil RTFs aus
+# Office-Dokumenten konvertiert, in denen Layout-Wrapper-Tabellen für
+# Zentrierung etc. missbraucht werden. Pandoc kann das nicht weglassen,
+# weil aus Pandoc-Sicht ist eine 1×1-Tabelle eine valide Tabelle.
+# Heuristik:
+#   - Drei aufeinanderfolgende Zeilen
+#   - 1. Zeile: nur `|` und Whitespace dazwischen (Header-Zeile, leer)
+#   - 2. Zeile: nur `|`, `-` und Whitespace (Separator)
+#   - 3. Zeile: `| inhalt |` (Datenzeile)
+#   → ersetze die drei Zeilen durch `inhalt` als normalen Absatz.
+strip_single_column_tables() {
+  perl -0pe 's{
+      ^ \| \s* \| \s*\n         # leere Header-Zeile
+      \| [-\s]+ \| \s*\n        # Separator-Zeile
+      \| \s* ([^\n|]+?) \s* \| \s*\n   # Datenzeile mit Inhalt in $1
+    }{$1\n}gmx'
+}
+
+# convert_rtf: RTF-String von stdin lesen, via textutil zu HTML, dann
+# selber Weg wie HTML — plus Post-Processing, um Office-Layout-Reste
+# rauszuwerfen.
+convert_rtf() {
+  vlog "Pfad: RTF → textutil → HTML → pandoc"
+  textutil -convert html -format rtf -stdin -stdout \
+    | clean_html \
+    | pandoc "${PANDOC_OPTS[@]}" \
+    | strip_single_column_tables
+}
+
+# try_html: Versucht HTML aus dem Clipboard zu holen.
+# Liefert HTML auf stdout und Exit 0, wenn vorhanden; sonst Exit 1.
+try_html() {
+  "$HTML_HELPER" 2>/dev/null
+}
+
+# is_mso_html: Prüft, ob ein HTML-Blob aus Microsoft Word stammt.
+# Word legt seine eigene HTML-Variante aufs Clipboard, voller Office-XML-
+# Namespaces und mso-*-CSS — strukturell so verbogen, dass Pandoc damit
+# komplett überfordert ist (Output: rohes HTML statt Markdown). Wenn wir
+# diese Variante erkennen, ist der RTF-Pfad fast immer das bessere
+# Ergebnis. Heuristik:
+#   1. Office-Namespace im <html>-Tag (sehr zuverlässig), ODER
+#   2. mehr als 10 `mso-`-Marker im Body (Fallback für variantenreiche
+#      Office-Versionen).
+# Argument: $1 = HTML-Inhalt.
+# Rückgabe: 0 wenn MSO, 1 wenn normales HTML.
+is_mso_html() {
+  local html="$1"
+
+  # Schneller, exakter Check: Office-XML-Namespace im <html>-Tag.
+  case "$html" in
+    *'microsoft-com:office'*)  return 0 ;;
+    *'Microsoft Word'*'Generator'*)  return 0 ;;
+    *'name=Generator content="Microsoft'*)  return 0 ;;
+  esac
+
+  # Langsamer Fallback: zähle mso-Marker. grep -c liefert die Anzahl,
+  # `|| true` verhindert Exit 1 bei 0 Treffern (set -e würde uns sonst killen).
+  local count
+  count=$(printf '%s' "$html" | grep -c 'mso-' 2>/dev/null || true)
+  [ "${count:-0}" -ge 10 ] && return 0
+
+  return 1
+}
+
+# try_rtf: Versucht RTF aus dem Clipboard zu holen.
+# Wir nutzen den Swift-Helper statt `pbpaste -Prefer rtf`, weil pbpaste
+# auf Plain Text ausweicht, sobald zusätzlich zum RTF auch RTFD auf dem
+# Clipboard liegt (typisch für TextEdit-Inhalte mit Bildern). Der Helper
+# greift direkt auf den .rtf-Flavor in NSPasteboard zu — zuverlässig.
+try_rtf() {
+  "$RTF_HELPER" 2>/dev/null
+}
+
+# ---------- Hauptlogik ----------
+
+check_dependencies
+
+# Output-Variable: hier sammeln wir das fertige Markdown,
+# bevor wir es entweder nach stdout oder ins Clipboard schicken.
+output=""
+
+# Sonderpfad: --plain überspringt jede Konvertierung.
+if [ "$PLAIN" -eq 1 ]; then
+  vlog "Plain-Modus: pbpaste durchreichen"
+  output=$(pbpaste || true)
+  if [ -z "$output" ]; then
+    die 1 "Clipboard ist leer."
+  fi
+else
+  # Quelle bestimmen anhand --from.
+  case "$FROM" in
+    html)
+      html=$(try_html) || die 1 "Kein HTML auf dem Clipboard (--from html)."
+      output=$(printf '%s' "$html" | convert_html) || die 3 "Pandoc-Konvertierung fehlgeschlagen."
+      ;;
+    rtf)
+      rtf=$(try_rtf) || die 1 "Kein RTF auf dem Clipboard (--from rtf)."
+      output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
+      ;;
+    plain)
+      output=$(pbpaste || true)
+      [ -z "$output" ] && die 1 "Clipboard ist leer (--from plain)."
+      ;;
+    auto)
+      # Reihenfolge per Blueprint: HTML zuerst (häufigster Fall),
+      # dann RTF, dann Plain-Text-Durchreichung.
+      #
+      # AUSNAHME: Microsoft Word legt eigenes HTML aufs Clipboard, das
+      # voller MSO-Namespaces ist und Pandoc komplett überfordert. Wenn
+      # wir das erkennen und RTF auch da ist, nehmen wir RTF.
+      if html=$(try_html); then
+        if is_mso_html "$html" && rtf=$(try_rtf); then
+          vlog "HTML ist Microsoft-Word-Format — verwende stattdessen RTF"
+          output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
+        else
+          if is_mso_html "$html"; then
+            vlog "HTML ist Microsoft-Word-Format, aber kein RTF da — versuche HTML trotzdem (Ergebnis vermutlich unsauber)"
+          fi
+          output=$(printf '%s' "$html" | convert_html) || die 3 "Pandoc-Konvertierung fehlgeschlagen."
+        fi
+      elif rtf=$(try_rtf); then
+        output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
+      else
+        # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
+        plain=$(pbpaste || true)
+        if [ -z "$plain" ]; then
+          die 1 "Clipboard leer oder kein konvertierbares Format."
+        fi
+        vlog "Pfad: Plain-Text durchgereicht"
+        output="$plain"
+      fi
+      ;;
+  esac
+fi
+
+# Output ausliefern: entweder Clipboard ersetzen oder stdout.
+if [ "$REPLACE" -eq 1 ]; then
+  # pbcopy liest von stdin und ersetzt den Clipboard-Inhalt komplett —
+  # alle Rich-Flavors (HTML, RTF) verschwinden, nur Plain bleibt.
+  printf '%s' "$output" | pbcopy
+  log "md-clip: Clipboard ersetzt (${#output} Zeichen)."
+  notify "Clipboard nach Markdown konvertiert."
+else
+  printf '%s\n' "$output"
+  notify "Markdown auf stdout geschrieben."
+fi
+
+exit 0
