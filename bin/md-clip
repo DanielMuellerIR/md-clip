@@ -31,9 +31,14 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 # „undefiniert" behandelt. Folge: pandoc, perl, sed interpretieren UTF-8-
 # Bytes falsch, Umlaute (ä = 0xc3 0xa4) werden zerlegt und kommen als
 # „Ã¤" oder „√§" o.ä. raus.
-# Wir setzen LC_ALL hart auf UTF-8 — Clipboard-Inhalte sind auf macOS
-# immer UTF-8, ein anderes Locale macht hier keinen Sinn. LC_ALL über-
-# schreibt alle anderen LC_*-Variablen und LANG, also reicht das hier.
+# Wir setzen LC_ALL hart auf UTF-8.
+#
+# ACHTUNG: pbcopy/pbpaste haben eine macOS-Quirk — sie korrumpieren
+# UTF-8 GERADE DANN, wenn LC_ALL auf eine named UTF-8-Locale wie
+# en_US.UTF-8 gesetzt ist (sie verdoppelt-encoden). Mit C-Locale werden
+# Bytes 1:1 durchgereicht. Lösung: alle pbcopy/pbpaste-Aufrufe weiter
+# unten setzen LC_ALL=C inline, sodass nur pandoc/perl die UTF-8-Locale
+# sehen.
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 
@@ -48,8 +53,24 @@ VERSION="1.0.0"
 SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-HTML_HELPER="$PROJECT_ROOT/helpers/clipboard-html"
-RTF_HELPER="$PROJECT_ROOT/helpers/clipboard-rtf"
+
+# Helper-Suche: zwei Layouts werden unterstützt.
+#   Projekt-Layout: bin/md-clip ruft helpers/clipboard-* (Schwester-Ordner).
+#   Bundle-Layout:  alle Binaries liegen NEBEN dem Skript (Contents/Resources/bin/).
+# Wir probieren erst Bundle (kürzerer Pfad), dann Projekt.
+if [ -x "$SCRIPT_DIR/clipboard-html" ]; then
+  HTML_HELPER="$SCRIPT_DIR/clipboard-html"
+  RTF_HELPER="$SCRIPT_DIR/clipboard-rtf"
+else
+  HTML_HELPER="$PROJECT_ROOT/helpers/clipboard-html"
+  RTF_HELPER="$PROJECT_ROOT/helpers/clipboard-rtf"
+fi
+
+# Wenn pandoc neben uns mitgeliefert ist (Bundle-Fall), Vorrang vor System-PATH.
+# Damit funktioniert die .app auch auf Macs ohne Homebrew-pandoc.
+if [ -x "$SCRIPT_DIR/pandoc" ]; then
+  export PATH="$SCRIPT_DIR:$PATH"
+fi
 
 # Standard-Optionen für pandoc.
 #   -f html         : HTML als Input-Format.
@@ -360,7 +381,7 @@ output=""
 # Sonderpfad: --plain überspringt jede Konvertierung.
 if [ "$PLAIN" -eq 1 ]; then
   vlog "Plain-Modus: pbpaste durchreichen"
-  output=$(pbpaste || true)
+  output=$(LC_ALL=C pbpaste || true)
   if [ -z "$output" ]; then
     die 1 "Clipboard ist leer."
   fi
@@ -376,7 +397,7 @@ else
       output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
       ;;
     plain)
-      output=$(pbpaste || true)
+      output=$(LC_ALL=C pbpaste || true)
       [ -z "$output" ] && die 1 "Clipboard ist leer (--from plain)."
       ;;
     auto)
@@ -400,7 +421,7 @@ else
         output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
       else
         # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
-        plain=$(pbpaste || true)
+        plain=$(LC_ALL=C pbpaste || true)
         if [ -z "$plain" ]; then
           die 1 "Clipboard leer oder kein konvertierbares Format."
         fi
@@ -415,7 +436,10 @@ fi
 if [ "$REPLACE" -eq 1 ]; then
   # pbcopy liest von stdin und ersetzt den Clipboard-Inhalt komplett —
   # alle Rich-Flavors (HTML, RTF) verschwinden, nur Plain bleibt.
-  printf '%s' "$output" | pbcopy
+  # LC_ALL=C ist hier essentiell: pbcopy korrumpiert Umlaute, wenn
+  # LC_ALL auf eine named-UTF-8-Locale wie en_US.UTF-8 gesetzt ist —
+  # macOS-Quirk. Mit C-Locale werden Bytes 1:1 durchgereicht.
+  printf '%s' "$output" | LC_ALL=C pbcopy
   log "md-clip: Clipboard ersetzt (${#output} Zeichen)."
   notify "Clipboard nach Markdown konvertiert."
 else
