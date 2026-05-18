@@ -94,33 +94,20 @@ Ab jetzt: Text irgendwo markieren, `⌘C`, `⌃⌥⌘M`, `⌘V` — das Eingefü
 
 ## Vergleich mit der eingebauten macOS-Alternative
 
-macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Markdown aus formatiertem Text erstellen"** (frühere Versionen hießen „Aus Rich Text Markdown erstellen"). Wenn du nur ein paar Sätze in eine Notiz schieben willst, reicht die meistens. Auf realen Webseiten und in Dokumenten zeigen sich aber spürbare Unterschiede:
+macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Markdown aus formatiertem Text erstellen"** (in älteren Versionen „Aus Rich Text Markdown erstellen"). Für einfache Texte reicht sie. Bei dokumenten-typischem Material — Tabellen, Code-Schnipsel, längerem Aufbau — fallen reproduzierbare Unterschiede auf.
 
 | Inhalt | macOS-Kurzbefehl | md-clip |
 |---|---|---|
-| Tabellen | Spalten und Zeilen werden zusammengeschoben, Struktur weg | bleiben echte Markdown-Tabellen |
-| Fettdruck an Übergängen | erzeugt regelmäßig `**Wort******` mit überzähligen Sternchen | sauber |
-| `<code>`-Inline-Schnipsel im HTML | werden als normaler Text wiedergegeben | werden mit Backticks umrahmt |
-| Webseiten ohne Rich-Text-Anteil (z.B. Claude Desktop, viele Web-Apps) | liefert nichts | konvertiert normal über den HTML-Pfad |
-| Aufruf aus Skripten und Pipes | nur über den Umweg eines Kurzbefehls möglich | direkter CLI-Befehl |
-| Microsoft-Word-Dokumente | sauberer linearer Output | derzeit unsauberer als die Apple-Variante, siehe Roadmap |
+| HTML-Tabellen | werden zu unstrukturiertem Plain Text flachgewalzt | bleiben Markdown-Pipe-Tabellen |
+| Inline-Code (`<code>`) | wird als normaler Text wiedergegeben | wird mit Backticks umrahmt |
+| Aufruf aus Skripten und Pipes | nur über den Umweg eines Kurzbefehls | direkter CLI-Befehl |
+| Microsoft-Word-Dokumente | sauberer linearer Output | derzeit unsauberer, siehe Roadmap |
 
-Konkretes Beispiel an einem einzigen Satz mit einem Fett-zu-Link-Übergang:
+**Reproduzierbares Beispiel:** Eine längere README mit Feature-Tabelle aus dem Browser kopieren (z.B. [github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)). In der gleichen Stichprobe gemessen:
 
-**Original (kopiert aus dem Browser):**
-> **The self-improving AI agent built by [Nous Research](https://nousresearch.com).**
-
-**macOS-Kurzbefehl:**
-```markdown
-**The self-improving AI agent built by ****[Nous Research**](https://nousresearch.com)**.**
-```
-
-**md-clip:**
-```markdown
-**The self-improving AI agent built by** [**Nous Research**](https://nousresearch.com)**.**
-```
-
-Die vier aufeinanderfolgenden Sternchen `****` in der Apple-Variante sind kaputter Markdown — der Renderer zeigt sie wörtlich an oder verschluckt sie ganz.
+- md-clip übersetzt die Feature- und Kommando-Tabellen 1:1 als Markdown-Pipe-Tabellen (72 Tabellen-Zeilen erhalten).
+- Apples Aktion gibt **null** Markdown-Tabellen-Zeilen aus — Spalten landen als isolierte Plain-Text-Zeilen ohne Trennzeichen, die Tabellenstruktur ist verloren.
+- md-clip übersetzt 44 Inline-Code-Schnipsel in `` `Backticks` ``. Apple lässt davon nur 2 stehen, der Rest erscheint als normaler Text.
 
 ## Was nicht funktioniert
 
