@@ -1,0 +1,18 @@
+# Kompilierte Swift-Helper-Binaries — werden via install.sh erzeugt.
+helpers/clipboard-html
+helpers/clipboard-rtf
+
+# Spike-Binary (gleicher Source wie helpers/clipboard-html.swift).
+spike/clipboard-html
+
+# Kompilierter Test-Helper — wird von tests/compare-file.sh erzeugt.
+tests/load-clipboard
+
+# Manuell gesammelte Clipboard-Aufnahmen — Test-Daten, keine Source.
+tests/captures/
+
+# Gebaute Dock-App — wird via wrappers/build-app.sh erzeugt.
+wrappers/md-clip.app
+
+# macOS-Metadaten.
+.DS_Store

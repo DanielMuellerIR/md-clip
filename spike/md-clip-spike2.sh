@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# md-clip-spike2.sh — Phase 0.5 mit Claude-Desktop-Preprocessor v2.
+# Neu in v2: <div>-Wrapper innerhalb von <pre>-Blöcken werden gestrippt,
+# damit Pandoc den Code-Block als fenced (```...```) statt indented (4 Spaces)
+# rausgibt. Claude Desktop wrapped Code-Zeilen in <div data-content><div data-line>,
+# was HTML-illegal in <code> ist und Pandoc auf Indent-Style degradiert.
+
+set -euo pipefail
+
+HTML_HELPER="$(dirname "$0")/clipboard-html"
+PANDOC_OPTS=(-f html -t gfm-raw_html --wrap=none)
+
+# Schritt 1: Claude-Desktop-spezifische Strukturen normalisieren.
+preprocess_claude_desktop() {
+  # 1a. <div data-line="N">INHALT</div> → INHALT + Newline.
+  #     Das ist Claude Desktops CSS-Grid-Subgrid-Konstrukt für Code-Zeilen,
+  #     ohne echte \n im DOM. Nach dieser Zeile haben Code-Blöcke korrekte Zeilen.
+  perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs' \
+    | \
+  # 1b. ALLE übrigen <div>/<\/div> innerhalb von <pre>...</pre> rauswerfen.
+  #     Vor allem das umschließende <div data-content>. Damit sieht Pandoc
+  #     einen sauberen <pre><code>...</code></pre>-Block und kann Fenced ausgeben.
+  #     /s = . matcht auch Newlines (für mehrzeilige Pre-Blöcke).
+  #     /e = der Replacement-Teil ist Perl-Code.
+  perl -0pe '
+    s{(<pre[^>]*>.*?</pre>)}{
+      my $block = $1;
+      $block =~ s{</?div[^>]*>}{}g;
+      $block;
+    }gse' \
+    | \
+  # 1c. style="..."-Attribute komplett raus. Sie sind nie informativ,
+  #     aber durch Tailwind-Inline-Styles oft ~1.5 KB pro Tag.
+  perl -0pe 's/\s+style="[^"]*"//g' \
+    | \
+  # 1d. data-*-Attribute weg (data-file, data-line-type, data-tw-*, etc.).
+  perl -0pe 's/\s+data-[a-z-]+="[^"]*"//g'
+}
+
+# Schritt 2: <span>-Wrapper um reinen Text auflösen.
+# Zweimal laufen lassen für eine Ebene Verschachtelung.
+# Wichtig: ([^<]*) matcht auch ein einzelnes Leerzeichen — signifikante
+# Whitespaces zwischen Inline-Elementen bleiben erhalten.
+clean_html() {
+  sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g' \
+    | sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g'
+}
+
+echo "=== Clipboard-Inhalt (Flavors): ===" >&2
+osascript -e 'clipboard info' >&2 || true
+echo >&2
+
+# --- Versuch 1: HTML direkt aus dem Clipboard (via Swift-Helper) ---
+if html=$("$HTML_HELPER" 2>/dev/null); then
+  echo "=== Quelle: HTML, Markdown-Output: ===" >&2
+  echo "$html" \
+    | preprocess_claude_desktop \
+    | clean_html \
+    | pandoc "${PANDOC_OPTS[@]}"
+  exit 0
+fi
+
+# --- Versuch 2: RTF via textutil-Umweg ---
+rtf=$(pbpaste -Prefer rtf)
+if [ -n "$rtf" ]; then
+  echo "=== Quelle: RTF (via textutil → HTML), Markdown-Output: ===" >&2
+  echo "$rtf" \
+    | textutil -convert html -format rtf -stdin -stdout \
+    | clean_html \
+    | pandoc "${PANDOC_OPTS[@]}"
+  exit 0
+fi
+
+# --- Versuch 3: Plain Text durchreichen ---
+plain=$(pbpaste)
+if [ -n "$plain" ]; then
+  echo "=== Quelle: Plain Text, durchgereicht: ===" >&2
+  echo "$plain"
+  exit 0
+fi
+
+echo "Clipboard leer oder nicht konvertierbar." >&2
+exit 1
