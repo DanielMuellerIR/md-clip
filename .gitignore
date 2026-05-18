@@ -14,5 +14,8 @@ tests/captures/
 # Gebaute Dock-App — wird via wrappers/build-app.sh erzeugt.
 wrappers/md-clip.app
 
+# Build-Ordner für das self-contained .app-Bundle (inkl. pandoc-Cache).
+build/
+
 # macOS-Metadaten.
 .DS_Store
