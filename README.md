@@ -94,7 +94,7 @@ Ab jetzt: Text irgendwo markieren, `⌘C`, `⌃⌥⌘M`, `⌘V` — das Eingefü
 
 ## Vergleich mit der eingebauten macOS-Alternative
 
-macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Aus Rich Text Markdown erstellen"**. Wenn du nur ein paar Sätze in eine Notiz schieben willst, reicht die meistens. Auf realen Webseiten und in Dokumenten zeigen sich aber spürbare Unterschiede:
+macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Markdown aus formatiertem Text erstellen"** (frühere Versionen hießen „Aus Rich Text Markdown erstellen"). Wenn du nur ein paar Sätze in eine Notiz schieben willst, reicht die meistens. Auf realen Webseiten und in Dokumenten zeigen sich aber spürbare Unterschiede:
 
 | Inhalt | macOS-Kurzbefehl | md-clip |
 |---|---|---|
