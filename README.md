@@ -2,20 +2,23 @@
 
 **Verwandelt formatierten Text aus dem macOS-Clipboard in sauberes Markdown — per Befehl, Dock-Klick oder Hotkey.**
 
-Du kopierst Text aus einem Browser, aus Claude Desktop, aus Notion, aus Word. Beim Einfügen in einen Markdown-Editor willst du eigentlich Markdown, nicht den HTML-Müll, der mitkopiert wurde. `md-clip` macht genau diese eine Sache.
+Beim Einfügen in einen Markdown-Editor möchte man Markdown — nicht den HTML-Code, der beim Kopieren mit übernommen wurde. `md-clip` macht genau diese eine Sache.
 
-## Installation ohne Terminal (für Klick-Nutzer)
+## Installation der fertigen App
 
-Lade die neueste fertige App von der **[Releases-Seite](https://github.com/DanielMuellerIR/md-clip/releases/latest)** als `.dmg` herunter:
+Lade die neueste Version von der **[Releases-Seite](https://github.com/DanielMuellerIR/md-clip/releases/latest)** als `.dmg` herunter:
 
 1. `md-clip-X.Y.Z.dmg` doppelklicken
-2. md-clip-Icon ins **Programme**-Ordner-Symbol ziehen
-3. Aus dem Programme-Ordner einmalig mit **Rechtsklick → Öffnen** starten
-4. Optional: ins Dock ziehen
+2. md-clip-Icon in den **Programme**-Ordner ziehen
+3. md-clip aus dem Programme-Ordner per Doppelklick starten
+4. Beim ersten Start fragt md-clip, ob der Kommandozeilen-Befehl `md-clip` zusätzlich eingerichtet werden soll. Empfehlung: ja — damit lässt sich md-clip auch in Skripten oder im Terminal verwenden. (Das macOS-Passwort wird einmalig abgefragt, weil ein Verweis in `/usr/local/bin/` angelegt wird.)
+5. Optional: App ins Dock ziehen
 
 Ab jetzt: formatierten Text irgendwo markieren (`⌘C`), md-clip-Icon klicken, in einem Markdown-Editor `⌘V` — Markdown ist da.
 
-Voraussetzungen: macOS 11+ auf Apple Silicon (M1/M2/M3/...). Intel-Macs werden derzeit nicht unterstützt. Alles Nötige (pandoc, Helper) ist in der App schon drin — kein Homebrew nötig.
+**Wenn man im Erststart-Dialog „Nicht mehr fragen" gewählt hat und sich umentscheidet:** im Terminal `defaults delete io.github.danielmuellerir.md-clip CliInstallDeclined` ausführen, dann fragt md-clip beim nächsten Start wieder.
+
+Voraussetzung: macOS 11 oder neuer auf Apple Silicon. Eine separate Installation von Homebrew oder pandoc ist nicht erforderlich — alles Nötige ist im Programm enthalten.
 
 ## Beispiel
 
@@ -42,7 +45,7 @@ Das ist **fetter** Text mit einem [Link](https://example.com) und einer Liste:
 
 Einfügen, fertig.
 
-## Installation mit Terminal (für Entwickler)
+## Installation aus dem Quelltext
 
 Voraussetzungen: macOS, [Homebrew](https://brew.sh), Xcode Command Line Tools (`xcode-select --install`).
 
