@@ -11,12 +11,9 @@ Lade die neueste Version von der **[Releases-Seite](https://github.com/DanielMue
 1. `md-clip-X.Y.Z.dmg` doppelklicken
 2. md-clip-Icon in den **Programme**-Ordner ziehen
 3. md-clip aus dem Programme-Ordner per Doppelklick starten
-4. Beim ersten Start fragt md-clip, ob der Kommandozeilen-Befehl `md-clip` zusätzlich eingerichtet werden soll. Empfehlung: ja — damit lässt sich md-clip auch in Skripten oder im Terminal verwenden. (Das macOS-Passwort wird einmalig abgefragt, weil ein Verweis in `/usr/local/bin/` angelegt wird.)
-5. Optional: App ins Dock ziehen
+4. Optional: App ins Dock ziehen
 
 Ab jetzt: formatierten Text irgendwo markieren (`⌘C`), md-clip-Icon klicken, in einem Markdown-Editor `⌘V` — Markdown ist da.
-
-**Wenn man im Erststart-Dialog „Nicht mehr fragen" gewählt hat und sich umentscheidet:** im Terminal `defaults delete io.github.danielmuellerir.md-clip CliInstallDeclined` ausführen, dann fragt md-clip beim nächsten Start wieder.
 
 Voraussetzung: macOS 11 oder neuer auf Apple Silicon. Eine separate Installation von Homebrew oder pandoc ist nicht erforderlich — alles Nötige ist im Programm enthalten.
 
