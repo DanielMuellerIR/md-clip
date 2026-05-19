@@ -24,7 +24,7 @@ set -euo pipefail
 # GitHub-Pages-Seite existiert, ist die Domain rechtlich uns.
 BUNDLE_ID="io.github.danielmuellerir.md-clip"
 APP_NAME="md-clip"
-APP_VERSION="1.0.0"
+APP_VERSION="1.0.1"
 
 # Mindest-macOS für das Bundle. 11.0 (Big Sur) ist die erste Version mit
 # nativer Apple-Silicon-Unterstützung und gleichzeitig der Cutoff, bis
@@ -109,6 +109,18 @@ cp "$BUILD_DIR/clipboard-html"     "$APP_BUNDLE/Contents/Resources/bin/clipboard
 cp "$BUILD_DIR/clipboard-rtf"      "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"
 cp "$BUILD_DIR/pandoc"             "$APP_BUNDLE/Contents/Resources/bin/pandoc"
 
+# Icon-Datei mitliefern. .icns muss in Contents/Resources/ liegen und im
+# Info.plist als CFBundleIconFile referenziert werden, damit macOS es im
+# Dock, Finder und Launchpad anzeigt.
+ICNS_SOURCE="$PROJECT_ROOT/assets/md-clip.icns"
+if [ -f "$ICNS_SOURCE" ]; then
+  cp "$ICNS_SOURCE" "$APP_BUNDLE/Contents/Resources/md-clip.icns"
+  echo "✓ Icon mitgeliefert"
+else
+  echo "WARNUNG: kein Icon gefunden unter $ICNS_SOURCE" >&2
+  echo "         (App bekommt das macOS-Standard-Icon)" >&2
+fi
+
 chmod +x "$APP_BUNDLE/Contents/Resources/bin/"*
 
 # ---------- 5. Launcher in MacOS/ ----------
@@ -152,6 +164,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <string>${MIN_MACOS}</string>
     <key>LSUIElement</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>md-clip</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Daniel Müller. MIT License.</string>
 </dict>
