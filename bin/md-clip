@@ -31,14 +31,11 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 # „undefiniert" behandelt. Folge: pandoc, perl, sed interpretieren UTF-8-
 # Bytes falsch, Umlaute (ä = 0xc3 0xa4) werden zerlegt und kommen als
 # „Ã¤" oder „√§" o.ä. raus.
-# Wir setzen LC_ALL hart auf UTF-8.
-#
-# ACHTUNG: pbcopy/pbpaste haben eine macOS-Quirk — sie korrumpieren
-# UTF-8 GERADE DANN, wenn LC_ALL auf eine named UTF-8-Locale wie
-# en_US.UTF-8 gesetzt ist (sie verdoppelt-encoden). Mit C-Locale werden
-# Bytes 1:1 durchgereicht. Lösung: alle pbcopy/pbpaste-Aufrufe weiter
-# unten setzen LC_ALL=C inline, sodass nur pandoc/perl die UTF-8-Locale
-# sehen.
+# Wir setzen LC_ALL hart auf en_US.UTF-8 — Clipboard-Inhalte sind auf
+# macOS immer UTF-8, und sowohl pandoc/perl/sed ALS AUCH pbcopy/pbpaste
+# arbeiten nur dann korrekt mit UTF-8, wenn LC_ALL auf eine NAMED
+# UTF-8-Locale (lang.UTF-8) gesetzt ist. Mit LC_ALL=C/leer/bare UTF-8
+# interpretieren pbcopy/pbpaste die Bytes als MacRoman.
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 
@@ -381,7 +378,7 @@ output=""
 # Sonderpfad: --plain überspringt jede Konvertierung.
 if [ "$PLAIN" -eq 1 ]; then
   vlog "Plain-Modus: pbpaste durchreichen"
-  output=$(LC_ALL=C pbpaste || true)
+  output=$(pbpaste || true)
   if [ -z "$output" ]; then
     die 1 "Clipboard ist leer."
   fi
@@ -397,7 +394,7 @@ else
       output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
       ;;
     plain)
-      output=$(LC_ALL=C pbpaste || true)
+      output=$(pbpaste || true)
       [ -z "$output" ] && die 1 "Clipboard ist leer (--from plain)."
       ;;
     auto)
@@ -421,7 +418,7 @@ else
         output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
       else
         # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
-        plain=$(LC_ALL=C pbpaste || true)
+        plain=$(pbpaste || true)
         if [ -z "$plain" ]; then
           die 1 "Clipboard leer oder kein konvertierbares Format."
         fi
@@ -436,10 +433,11 @@ fi
 if [ "$REPLACE" -eq 1 ]; then
   # pbcopy liest von stdin und ersetzt den Clipboard-Inhalt komplett —
   # alle Rich-Flavors (HTML, RTF) verschwinden, nur Plain bleibt.
-  # LC_ALL=C ist hier essentiell: pbcopy korrumpiert Umlaute, wenn
-  # LC_ALL auf eine named-UTF-8-Locale wie en_US.UTF-8 gesetzt ist —
-  # macOS-Quirk. Mit C-Locale werden Bytes 1:1 durchgereicht.
-  printf '%s' "$output" | LC_ALL=C pbcopy
+  # Der globale Export LC_ALL=en_US.UTF-8 ist hier wichtig: pbcopy
+  # interpretiert Input-Bytes als MacRoman, wenn LC_ALL leer oder C ist,
+  # und legt dann FALSCHE Zeichen aufs Clipboard, was beim Einfügen in
+  # andere Apps Mojibake produziert.
+  printf '%s' "$output" | pbcopy
   log "md-clip: Clipboard ersetzt (${#output} Zeichen)."
   notify "Clipboard nach Markdown konvertiert."
 else
