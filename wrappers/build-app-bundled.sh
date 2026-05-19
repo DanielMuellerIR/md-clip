@@ -202,11 +202,9 @@ NOTE
 # ---------- Fertig ----------
 
 echo
-echo "==> Fertig"
-echo "    Bundle:  $APP_BUNDLE"
-echo "    Größe:   $(du -sh "$APP_BUNDLE" | cut -f1)"
+echo "==> Bundle gebaut (unsigniert)"
+echo "    $APP_BUNDLE"
+echo "    Größe: $(du -sh "$APP_BUNDLE" | cut -f1)"
 echo
-echo "Test:"
-echo "  open \"$APP_BUNDLE\""
-echo "  (Beim ersten Start kommt Gatekeeper-Warnung — das ist normal für"
-echo "   unsignierte Apps. Rechtsklick → Öffnen umgeht das.)"
+echo "Nächster Schritt zum Verteilen: wrappers/sign-and-release.sh"
+echo "(signiert, paketiert und notarisiert das Bundle in ein DMG.)"
