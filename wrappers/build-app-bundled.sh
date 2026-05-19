@@ -24,7 +24,7 @@ set -euo pipefail
 # GitHub-Pages-Seite existiert, ist die Domain rechtlich uns.
 BUNDLE_ID="io.github.danielmuellerir.md-clip"
 APP_NAME="md-clip"
-APP_VERSION="1.0.1"
+APP_VERSION="1.0.2"
 
 # Mindest-macOS für das Bundle. 11.0 (Big Sur) ist die erste Version mit
 # nativer Apple-Silicon-Unterstützung und gleichzeitig der Cutoff, bis
@@ -126,15 +126,12 @@ chmod +x "$APP_BUNDLE/Contents/Resources/bin/"*
 # ---------- 5. Launcher in MacOS/ ----------
 
 # Das ist die Datei, die macOS beim Doppelklick auf die .app ausführt.
-# Wir schreiben einen kleinen Bash-Launcher, der das eigentliche md-clip
-# aus Resources/bin/ mit --replace --notify aufruft.
-cat > "$APP_BUNDLE/Contents/MacOS/$APP_NAME" <<'LAUNCHER'
-#!/bin/bash
-# md-clip.app-Launcher.
-# Findet die Resources/bin/-Pfade relativ zu sich selbst und ruft md-clip auf.
-DIR="$(cd "$(dirname "$0")" && pwd)"
-"$DIR/../Resources/bin/md-clip" --replace --notify
-LAUNCHER
+# Den eigentlichen Launcher pflegen wir in einer separaten Datei
+# (wrappers/launcher.sh), die hier nur kopiert wird. Vorteile:
+#   - Syntax-Highlighting im Editor
+#   - Diffs lesbarer
+#   - Wiederverwendbar testbar (z.B. lokal ausführbar)
+cp "$SCRIPT_DIR/launcher.sh" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 # ---------- 6. Info.plist ----------
