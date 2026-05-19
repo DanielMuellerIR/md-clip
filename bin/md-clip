@@ -47,7 +47,7 @@ export LANG=en_US.UTF-8
 
 # ---------- Konstanten ----------
 
-VERSION="1.0.2"
+VERSION="1.0.3"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -204,7 +204,21 @@ while [ "$#" -gt 0 ]; do
     -q|--quiet)     QUIET=1 ;;
     -n|--notify)    NOTIFY=1 ;;
     -V|--verbose)   VERBOSE=1 ;;
-    -v|--version)   printf 'md-clip %s\n' "$VERSION"; exit 0 ;;
+    -v|--version)
+      # md-clip-Version + pandoc-Version (vorzugsweise das gebundelte
+      # Binary, sonst das aus dem PATH). Nützlich beim Bug-Reporting,
+      # weil sich das pandoc-Verhalten zwischen Versionen merklich
+      # unterscheiden kann.
+      printf 'md-clip %s\n' "$VERSION"
+      if [ -x "$SCRIPT_DIR/pandoc" ]; then
+        printf 'pandoc  %s (gebundelt)\n' "$("$SCRIPT_DIR/pandoc" --version 2>/dev/null | head -1 | awk '{print $2}')"
+      elif command -v pandoc >/dev/null 2>&1; then
+        printf 'pandoc  %s (System)\n'    "$(pandoc --version 2>/dev/null | head -1 | awk '{print $2}')"
+      else
+        printf 'pandoc  nicht installiert\n'
+      fi
+      exit 0
+      ;;
     -h|--help)      usage; exit 0 ;;
     --) shift; break ;;
     -*) die 2 "Unbekannte Option: $1 (siehe --help)" ;;
