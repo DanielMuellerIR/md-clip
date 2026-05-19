@@ -9,7 +9,7 @@
 #      Prüfen: security find-identity -v -p codesigning
 #   2. notarytool-Schlüsselbund-Profil 'md-clip-notarytool' eingerichtet:
 #      xcrun notarytool store-credentials "md-clip-notarytool" \
-#        --apple-id "nfetzen@gmail.com" \
+#        --apple-id "dm@mksr.de" \
 #        --team-id  "9QSWKSR4NQ"
 #      (App-spezifisches Passwort INTERAKTIV eingeben, nicht als Argument)
 
@@ -53,7 +53,7 @@ if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>
   echo
   echo "So einrichten (Passwort INTERAKTIV eingeben, NICHT als Argument!):" >&2
   echo "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" \\"  >&2
-  echo "    --apple-id \"nfetzen@gmail.com\" \\"                       >&2
+  echo "    --apple-id \"dm@mksr.de\" \\"                       >&2
   echo "    --team-id  \"$TEAM_ID\""                                   >&2
   echo
   echo "Danach fragt das Tool nach dem App-spezifischen Passwort." >&2

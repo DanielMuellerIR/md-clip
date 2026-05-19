@@ -88,7 +88,7 @@ ohne Sicherheits-Warnung.
   # Soll zeigen: Developer ID Application: Daniel Mueller (9QSWKSR4NQ)
   ```
 - **Team-ID:** `9QSWKSR4NQ`
-- **Apple-ID:** nfetzen@gmail.com
+- **Apple-ID:** dm@mksr.de
 
 ### Voraussetzung — vom User noch zu beschaffen
 
@@ -104,7 +104,7 @@ ohne Sicherheits-Warnung.
 
 ```bash
 xcrun notarytool store-credentials "md-clip-notarytool" \
-  --apple-id "nfetzen@gmail.com" \
+  --apple-id "dm@mksr.de" \
   --team-id "9QSWKSR4NQ" \
   --password "<app-spezifisches-passwort>"
 ```
@@ -224,7 +224,7 @@ Sobald Stufe B lokal funktioniert: in CI heben.
 |---|---|
 | `MACOS_CERTIFICATE_P12_BASE64` | `.p12`-Export des Developer-ID-Application-Zertifikats als base64 |
 | `MACOS_CERTIFICATE_P12_PASSWORD` | Passwort für den `.p12`-Export |
-| `MACOS_NOTARIZATION_APPLE_ID` | nfetzen@gmail.com |
+| `MACOS_NOTARIZATION_APPLE_ID` | dm@mksr.de |
 | `MACOS_NOTARIZATION_TEAM_ID` | 9QSWKSR4NQ |
 | `MACOS_NOTARIZATION_PASSWORD` | das App-spezifische Passwort |
 | `MACOS_KEYCHAIN_PASSWORD` | Beliebiges starkes Passwort, schützt die temporäre Runner-Keychain während des Builds |
