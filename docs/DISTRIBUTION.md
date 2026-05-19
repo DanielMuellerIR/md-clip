@@ -21,7 +21,7 @@ Terminal-Wissen läuft. Im Bundle liegen:
 - `Contents/MacOS/md-clip` — Bash-Launcher, ruft das eigentliche md-clip mit
   `--replace --notify` auf
 - `Contents/Resources/bin/md-clip` — Kopie des Hauptskripts
-- `Contents/Resources/bin/pandoc` — pandoc 3.5, arm64-only
+- `Contents/Resources/bin/pandoc` — pandoc 3.9.0.2, arm64-only
 - `Contents/Resources/bin/clipboard-html`, `clipboard-rtf` — kompilierte
   Swift-Helper
 - `Contents/Resources/Licenses/` — GPL-Volltext für pandoc, MIT-Hinweis
@@ -40,16 +40,19 @@ Bundle-Layout (alles in `Resources/bin/`).
 
 1. **PATH-Vererbung in GUI-Launches.** Dock-/Shortcuts-Aufrufe erben den
    Shell-PATH nicht. Fix in `bin/md-clip` ganz oben:
-   `export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"`.
+   `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"` (homebrew-Pfad
+   zuerst, damit auch bei verwaisten alten pandoc-Binaries unter
+   `/usr/local/bin/` das aktuelle brew-pandoc gewinnt).
 2. **Locale in GUI-Launches.** Ohne `LC_ALL` interpretieren pandoc/perl/sed
    UTF-8-Bytes als ASCII/Latin-1, Umlaute werden zerlegt. Fix:
    `export LC_ALL=en_US.UTF-8`.
-3. **pbcopy/pbpaste-Quirk.** macOS' pbcopy und pbpaste **korrumpieren UTF-8
-   GERADE DANN**, wenn `LC_ALL` auf eine named UTF-8-Locale wie
-   `en_US.UTF-8` gesetzt ist (Verdacht: Double-Encoding-Bug bei Apple). Mit
-   `LC_ALL=C` werden die Bytes 1:1 durchgereicht. Lösung: alle Aufrufe von
-   pbcopy/pbpaste setzen `LC_ALL=C` inline, sodass nur pandoc/perl die
-   UTF-8-Locale sehen. Steht in `bin/md-clip`.
+3. **pbcopy/pbpaste-Locale-Falle.** macOS' pbcopy und pbpaste arbeiten
+   nur dann korrekt mit UTF-8, wenn `LC_ALL` auf eine **named**
+   UTF-8-Locale wie `en_US.UTF-8` gesetzt ist. Bei `LC_ALL=C`/leer/bare
+   `UTF-8` interpretieren sie als MacRoman → Mojibake im Clipboard für
+   alle anderen Apps. Lösung ist EINFACH der globale Export aus Punkt 2;
+   alle pbcopy/pbpaste-Aufrufe erben den. Vollständige Geschichte inkl.
+   Symmetrie-Falle bei Roundtrip-Tests: siehe `docs/ENCODING.md`.
 
 ### So baust du Stufe A neu
 

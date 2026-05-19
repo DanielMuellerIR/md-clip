@@ -1,9 +1,9 @@
-# Beispiel-Artikel
+# Beispiel-Artikel mit Umlauten ☀
 
-Das ist ein [Link](https://example.com) in einem Absatz.
+Das ist ein [Link über Größen](https://example.com) mit **fettem** Text.
 
-- Erster Punkt
-- Zweiter Punkt mit `inline-code`
-- Dritter Punkt
+- Erster Punkt mit Café
+- Zweiter Punkt mit `inline-code` und Übergröße
+- Dritter Punkt mit Emoji 🎉
 
-> Ein Zitat.
+> Ein Zitat mit „Anführungszeichen" und ß.

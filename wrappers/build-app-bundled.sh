@@ -33,7 +33,7 @@ MIN_MACOS="11.0"
 
 # Pandoc-Version. Pinning macht den Build reproduzierbar. Bei Updates
 # diese Zahl bumpen und neu bauen.
-PANDOC_VERSION="3.5"
+PANDOC_VERSION="3.9.0.2"
 
 # ---------- Pfade ----------
 
