@@ -4,17 +4,80 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 19.05.2026, abends)
+## Status (Stand: 19.05.2026, später am Abend)
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
 - **Stufe B — Signieren und notarisieren.** ✅ Erledigt.
 - **Erststart-Dialog für optionale CLI-Installation.** ✅ Erledigt
-  (Teil von v1.0.2).
-- Aktuelle veröffentlichte Version: **v1.0.2** als signiertes,
+  (v1.0.2), in v1.0.3 verbessert.
+- **DMG-Installations-Layout** (Hintergrundbild, Applications-Symlink,
+  Drag-Anleitung). ✅ Erledigt in v1.0.3.
+- **pandoc-Würdigung + Lizenz-Klarstellung in README, pandoc-Version
+  in `--version`-Output.** ✅ Erledigt in v1.0.3.
+- Aktuelle veröffentlichte Version: **v1.0.3** als signiertes,
   notarisiertes DMG unter
   [github.com/DanielMuellerIR/md-clip/releases](https://github.com/DanielMuellerIR/md-clip/releases).
 - **Stufe C — GitHub Action für automatisierte Releases.** ⏳ Nächste
   Session.
+
+### Was in v1.0.3 dazukam
+
+- **DMG-Installations-Layout:** Beim Doppelklick auf das DMG öffnet sich
+  ein Fenster mit Hintergrundbild „md-clip installieren — Ziehe das
+  md-clip-Symbol in den Ordner Programme", links das App-Icon, rechts
+  ein Applications-Symlink, dazwischen ein Pfeil. Macht den
+  Installations-Schritt für Nutzer ohne Terminal-Erfahrung
+  selbsterklärend. Hintergrundbild liegt unter
+  [`assets/dmg-background.png`](../assets/dmg-background.png), wird
+  von [`assets/generate-dmg-background.swift`](../assets/generate-dmg-background.swift)
+  per CoreGraphics erzeugt (600×400, 2× für Retina).
+- **Launcher-Logik verbessert** ([`wrappers/launcher.sh`](../wrappers/launcher.sh)):
+  - Erkennt jetzt **dangling Symlinks** in `/usr/local/bin/md-clip` (z.B.
+    aus einer früheren git-clone-Installation, deren Quellordner
+    inzwischen weg ist) und überschreibt sie beim Install.
+  - Prüft **vor** dem CLI-Install-Dialog, ob das laufende Bundle
+    tatsächlich in `/Applications` oder `~/Applications` liegt. Sonst
+    erscheint ein Hinweis-Dialog „Bitte ziehe md-clip in den Ordner
+    Programme", weil ein CLI-Symlink ins DMG oder ins Downloads-
+    Verzeichnis sonst zum dangling Symlink wird, sobald das DMG
+    ausgeworfen / der Downloads-Ordner aufgeräumt wird.
+  - Bug-Fix: vorher kam die Warnung nicht, wenn eine korrekte
+    `/Applications`-Installation existierte und der Nutzer aus
+    Versehen die DMG-Kopie startete (der lebende Symlink in den
+    `/Applications`-Pfad hatte den Warn-Pfad blockiert).
+- **pandoc-Sichtbarkeit:**
+  - Neuer README-Abschnitt „Basiert auf pandoc" mit Link zu pandoc.org
+    und github.com/jgm/pandoc, sachliche Würdigung.
+  - Lizenz-Abschnitt klargestellt: md-clip MIT, mitgeliefertes pandoc
+    GPL v2+, Verweis auf `Contents/Resources/Licenses/` im Bundle.
+  - `md-clip --version` gibt jetzt zusätzlich die pandoc-Version aus
+    (gebundelt vs. System), hilfreich beim Bug-Reporting.
+
+### Gut zu wissen / Stolpersteine aus v1.0.3
+
+- **DMG-Hintergrundbild und AppleScript-Layout müssen synchron bleiben.**
+  Die Fenstergröße `{200,120,800,520}` (=600×400 innen) und die
+  Icon-Positionen `{150,180}`/`{450,180}` im AppleScript-Block in
+  [`wrappers/sign-and-release.sh`](../wrappers/sign-and-release.sh)
+  müssen zu den im Generator-Skript hartcodierten Werten
+  (`width=600, height=400`, `appCenter={150,180}`, `dirCenter={450,180}`)
+  passen. Wenn man eine Stelle ändert, die andere mitziehen — sonst
+  wandert der Pfeil neben den Icons ins Leere.
+- **`.background`-Ordner muss vor neugierigen Nutzern versteckt werden.**
+  Nur `chflags hidden` reicht NICHT, wenn der Nutzer im Finder
+  „unsichtbare Dateien anzeigen" (Cmd+Shift+.) aktiviert hat. Lösung:
+  zusätzlich per AppleScript `set position of item ".background" of
+  container window to {900, 900}` — also weit außerhalb der 600×400-
+  Fensterfläche parken. Greift in beiden Modi.
+- **Heredoc-Backticks-Falle.** Der osascript-Aufruf nutzt einen
+  un-quotierten Heredoc, damit `$DMG_VOLNAME` interpoliert wird. Bash
+  interpretiert in un-quotierten Heredocs auch Backticks als
+  Command-Substitution. In v1.0.3 hat ein AppleScript-Kommentar
+  versehentlich Backticks um das Wort `try` gehabt, was Bash dazu
+  brachte, `try` als Shell-Befehl aufzurufen (`command not found`).
+  Lief unkritisch durch, weil set -e den Fehler bei Substitution
+  nicht propagiert — aber als Warnung dokumentiert: keine Backticks
+  in un-quotierten Heredocs verwenden, auch nicht in Kommentaren.
 
 ---
 
@@ -356,8 +419,13 @@ versetzen, an dem wir gerade aufgehört haben:
 >    für Nutzergruppen.
 >
 > Aktueller Stand:
-> - **v1.0.2** als signiertes + notarisiertes DMG auf GitHub veröffent-
->   licht. Erststart-Dialog zur optionalen CLI-Installation funktioniert.
+> - **v1.0.3** als signiertes + notarisiertes DMG auf GitHub veröffent-
+>   licht. DMG hat Installations-Layout mit Hintergrundbild und
+>   Applications-Symlink. Erststart-Dialog für CLI-Installation
+>   erkennt jetzt dangling Symlinks und warnt, wenn das Bundle aus
+>   einem nicht-dauerhaften Ort (DMG-Mount, Downloads) gestartet wird.
+>   pandoc ist in README und `--version` sichtbar gewürdigt; Lizenz-
+>   Trennung (md-clip MIT, gebundeltes pandoc GPL v2+) klargestellt.
 > - **Stufe C** ist der nächste Schritt: GitHub Action, die bei Tag-Push
 >   automatisch baut, signiert, notarisiert, das DMG als Release-Asset
 >   hochlädt.

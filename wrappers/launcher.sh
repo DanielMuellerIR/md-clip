@@ -4,8 +4,8 @@
 # Wird beim Doppelklick auf md-clip.app ausgeführt. Zwei Aufgaben:
 #
 #   1. Erststart: Falls der Kommandozeilen-Befehl `md-clip` noch nicht
-#      in /usr/local/bin/ liegt, einen Dialog zeigen und auf Wunsch
-#      einen Symlink ins App-Bundle anlegen.
+#      sauber in /usr/local/bin/ liegt, einen Dialog zeigen und auf
+#      Wunsch einen Symlink ins App-Bundle anlegen.
 #
 #   2. Den eigentlichen md-clip-Lauf starten: Clipboard-Inhalt nach
 #      Markdown konvertieren und wieder ins Clipboard schreiben.
@@ -27,39 +27,83 @@ SYSTEM_CLI="/usr/local/bin/md-clip"
 
 # ---------- Funktionen ----------
 
-# Entscheidet, ob wir den Erststart-Dialog überhaupt anzeigen.
-# Rückgabe 0 = ja anzeigen, 1 = nein.
-should_offer_cli_install() {
-  # Fall A: Symlink existiert — prüfen, wohin er zeigt.
+# Liegt das Bundle in einem Programme-Ordner? CLI-Symlink ergibt nur
+# dann Sinn, wenn die .app an einem dauerhaften Ort liegt. Sonst zeigt
+# der Symlink später ins Leere (z.B. wenn das DMG ausgeworfen wird
+# oder die Kopie aus Downloads gelöscht wird).
+# Rückgabe 0 = in Programme-Ordner, 1 = woanders.
+is_in_applications_folder() {
+  case "$BUNDLE_DIR" in
+    /Applications/*) return 0 ;;
+    "$HOME/Applications/"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Entscheidet, was der Launcher bezüglich CLI-Installation tun soll.
+# Echo gibt einen der folgenden Strings aus:
+#   "install-ok"   — Bundle läuft aus Programme/, kein CLI sauber
+#                    installiert, nichts abgelehnt → Install-Dialog.
+#   "move-first"   — Bundle läuft NICHT aus Programme/ (z.B. direkt
+#                    aus DMG-Mount, Downloads, Desktop). Immer warnen,
+#                    egal in welchem Zustand der CLI-Symlink ist.
+#   "none"         — Nichts zu tun (CLI schon korrekt verlinkt,
+#                    fremde Installation nicht anrühren, Nutzer
+#                    hat abgelehnt).
+#
+# Reihenfolge ist wichtig: der Programme-Ordner-Check kommt VOR der
+# Symlink-Inspektion. Sonst greift bei „App ist schon in /Applications
+# installiert, aber Nutzer startet aus Versehen die DMG-Kopie" der
+# Symlink-zeigt-woandershin-Zweig und schluckt die Warnung.
+decide_cli_action() {
+  # Erstes Gate: läuft das Bundle aus einem dauerhaften Ort?
+  if ! is_in_applications_folder; then
+    echo "move-first"; return
+  fi
+
+  # Ab hier: Bundle ist in /Applications (oder ~/Applications).
+  # Jetzt CLI-Symlink-Zustand prüfen.
+
   if [ -L "$SYSTEM_CLI" ]; then
-    if [ "$(readlink "$SYSTEM_CLI")" = "$BUNDLE_CLI" ]; then
-      # Schon mit DIESEM Bundle verknüpft → nichts zu tun.
-      return 1
+    local target
+    target="$(readlink "$SYSTEM_CLI")"
+
+    # Zeigt schon auf DIESES Bundle → alles gut.
+    if [ "$target" = "$BUNDLE_CLI" ]; then
+      echo "none"; return
     fi
-    # Symlink zeigt woandershin (z.B. auf eine git-clone-Installation).
-    # Nicht ungefragt überschreiben.
-    return 1
+
+    # Symlink ist tot (Ziel existiert nicht). Den dürfen wir
+    # überschreiben — passiert typisch nach Umzug einer früheren
+    # Installation oder gelöschtem Worktree.
+    if [ ! -e "$SYSTEM_CLI" ]; then
+      echo "install-ok"; return
+    fi
+
+    # Symlink lebt und zeigt woandershin (z.B. auf eine git-clone-
+    # Installation, die der Nutzer pflegt). Nicht anfassen.
+    echo "none"; return
   fi
 
-  # Fall B: Eine reguläre Datei liegt dort. Der Nutzer hat eine eigene
-  # Installation gemacht — nicht anrühren.
+  # Reguläre Datei liegt dort. Eigene Installation des Nutzers — nicht
+  # ungefragt überschreiben.
   if [ -e "$SYSTEM_CLI" ]; then
-    return 1
+    echo "none"; return
   fi
 
-  # Fall C: Nichts liegt dort. Hat der Nutzer früher „Nicht mehr fragen"
-  # gewählt? Dann gibt `defaults read` „1" zurück.
+  # Es liegt nichts in /usr/local/bin/md-clip. Hat der Nutzer „Nicht
+  # mehr fragen" gewählt?
   local declined
   declined=$(defaults read "$BUNDLE_ID" CliInstallDeclined 2>/dev/null || echo 0)
   if [ "$declined" = "1" ]; then
-    return 1
+    echo "none"; return
   fi
 
-  # Niemand hat etwas installiert, keine Ablehnung gespeichert: fragen.
-  return 0
+  echo "install-ok"
 }
 
 # Erstellt /usr/local/bin/md-clip als Symlink ins Bundle.
+# `ln -sf` überschreibt einen vorhandenen (toten) Symlink atomar mit.
 # Erfordert Admin-Rechte (mkdir + ln im Systempfad), daher
 # `with administrator privileges` für die Passwort-Abfrage.
 install_cli() {
@@ -67,12 +111,9 @@ install_cli() {
     >/dev/null 2>&1 || true
 }
 
-# Zeigt den Erststart-Dialog und gibt die Wahl des Nutzers auf stdout aus.
-# Bei Klick auf „Später" oder ESC kommt eine leere Zeichenkette zurück.
-ask_user() {
-  # AppleScript-Dialog: drei Buttons, „Ja, einrichten" als Default rechts,
-  # „Später" als Cancel-Button (reagiert auch auf ESC).
-  # `linefeed` baut echte Zeilenumbrüche im Dialog-Text.
+# Zeigt den Erststart-Dialog (CLI installieren?) und gibt die Wahl des
+# Nutzers auf stdout aus. Bei „Später"/ESC kommt eine leere Zeichenkette.
+ask_install() {
   osascript <<'APPLESCRIPT' 2>/dev/null || true
 tell application "System Events"
   activate
@@ -87,24 +128,60 @@ end tell
 APPLESCRIPT
 }
 
+# Zeigt den Hinweis, dass das Bundle erst in den Programme-Ordner
+# verschoben werden soll. Mit Button „Im Finder zeigen", der den
+# aktuellen Bundle-Ort im Finder öffnet — von dort kann der Nutzer
+# es per Drag-and-drop in /Programme bewegen.
+ask_move_first() {
+  # BUNDLE_DIR wird per Umgebungsvariable an osascript übergeben, weil
+  # AppleScript-Strings keine einfache Bash-Variableninterpolation haben.
+  BUNDLE_DIR="$BUNDLE_DIR" osascript <<'APPLESCRIPT' 2>/dev/null || true
+tell application "System Events"
+  activate
+  set bundlePath to (system attribute "BUNDLE_DIR")
+  set msg to "md-clip läuft gerade nicht aus dem Ordner Programme." & linefeed & linefeed & "Aktueller Ort:" & linefeed & bundlePath & linefeed & linefeed & "Bitte ziehe md-clip in den Ordner Programme und starte es von dort. So bleibt die App auch nach dem Auswerfen des Installations-Fensters erreichbar, und der optionale Kommandozeilen-Befehl kann eingerichtet werden."
+  try
+    set theResult to display dialog msg buttons {"OK", "Im Finder zeigen"} default button "OK" with title "md-clip" with icon note
+    return button returned of theResult
+  on error
+    return ""
+  end try
+end tell
+APPLESCRIPT
+}
+
 # ---------- Hauptlogik ----------
 
-# Erststart-Pfad: falls nötig, Dialog zeigen und Wahl umsetzen.
-if should_offer_cli_install; then
-  answer=$(ask_user)
-  case "$answer" in
-    "Ja, einrichten")
-      install_cli
-      ;;
-    "Nicht mehr fragen")
-      defaults write "$BUNDLE_ID" CliInstallDeclined -bool true
-      ;;
-    *)
-      # „Später" oder ESC → nichts speichern, beim nächsten Start wieder fragen.
-      :
-      ;;
-  esac
-fi
+action="$(decide_cli_action)"
+
+case "$action" in
+  install-ok)
+    answer="$(ask_install)"
+    case "$answer" in
+      "Ja, einrichten")
+        install_cli
+        ;;
+      "Nicht mehr fragen")
+        defaults write "$BUNDLE_ID" CliInstallDeclined -bool true
+        ;;
+      *)
+        # „Später", ESC, oder Dialog-Fehler → nichts speichern.
+        :
+        ;;
+    esac
+    ;;
+  move-first)
+    answer="$(ask_move_first)"
+    if [ "$answer" = "Im Finder zeigen" ]; then
+      # Bundle im Finder selektieren, damit der Nutzer es direkt
+      # rüberziehen kann.
+      open -R "$BUNDLE_DIR" >/dev/null 2>&1 || true
+    fi
+    ;;
+  none|*)
+    : # nichts tun
+    ;;
+esac
 
 # Jetzt der eigentliche md-clip-Lauf. --replace ersetzt das Clipboard,
 # --notify zeigt eine macOS-Benachrichtigung bei Erfolg.

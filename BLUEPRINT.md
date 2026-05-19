@@ -57,6 +57,18 @@ Dieses Dokument ist eine **vollständige Übergabe**. Es enthält Kontext, valid
 - **Code-Blöcke kommen als 4-Space-Indent statt ` ``` `-fenced.** Valides Markdown, jeder Renderer interpretiert es korrekt. Versuche, Pandoc zu Fenced zu zwingen, haben im Spike nichts geändert. Kein Blocker. Wenn das später stört: Post-Processor mit awk, der zusammenhängende Indent-Blöcke in Fences umwandelt (Risiko: Listen-Continuation wird zu Code).
 - **Sprachannotation für Code-Blöcke geht verloren.** Claude Desktop und viele andere Quellen schicken keinen `class="language-xyz"` mit, daher kann pandoc keine Sprache annotieren. Akzeptiert.
 - **Bilder gehen verloren.** RTF-Embeds und HTML-Images werden nicht extrahiert. Phase-5-Thema, nicht v1.0.
+- **Headerlose HTML-Tabellen bekommen in GFM eine leere Header-Zeile.** Pandoc kann in Pipe-Tabellen-Syntax (GFM-Default) keine Tabelle ohne Header schreiben — die Syntax verlangt eine Separator-Zeile, die zwingend eine Header-Zeile darüber impliziert. Konsequenz im Output:
+  ```
+  |   |   |
+  |---|---|
+  | … | … |
+  ```
+  GitHub und VS-Code rendern die leere Header-Zeile unsichtbar (man sieht nur die obere Trennlinie etwas dicker). MacDown 3000 und einige strikt-CommonMark-Renderer zeigen eine sichtbare leere Top-Zeile. **Wir akzeptieren das bewusst.** Geprüfte Alternativen und warum wir sie verworfen haben:
+  - *Erste Datenzeile zum Header promoten (Lua-Filter):* funktioniert in Pipe-Table-Syntax, aber rendert die erste Datenzeile fett — bei den häufigen 2-spaltigen Feature/Beschreibung-Tabellen sieht das schlechter aus als die leere Zeile. Im Praxistest (hermes-agent-README in MacDown vs. VS-Code) war der Promote-Header-Output durchweg unschöner als der Default.
+  - *Headerlose Tabellen als Definition-Liste umbauen:* zu drastischer semantischer Eingriff. Aus „Tabelle" wird „Fließtext", was bei `md-clip --replace`-Roundtrips dem Grundprinzip „möglichst wenig Verlust und Veränderung am Original" widerspricht.
+  - *Optionales Flag `--promote-empty-table-header`:* eingeschätzter Bedarf zu gering, vermeintlich „andersdenkende" Nutzer würden zu selten anders denken — Mehrwert rechtfertigt die zusätzliche Flag-Oberfläche nicht.
+
+  Wenn das Thema später doch häufiger stört, ist der Lua-Filter mit ~30 Zeilen Code schnell wieder einsetzbar (zu finden in der Git-Historie um v1.0.3 herum).
 
 ---
 
