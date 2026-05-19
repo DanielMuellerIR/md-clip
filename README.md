@@ -101,7 +101,7 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
 | HTML-Tabellen | werden zu unstrukturiertem Plain Text flachgewalzt | bleiben Markdown-Pipe-Tabellen |
 | Inline-Code (`<code>`) | wird als normaler Text wiedergegeben | wird mit Backticks umrahmt |
 | Aufruf aus Skripten und Pipes | nur über den Umweg eines Kurzbefehls | direkter CLI-Befehl |
-| Microsoft-Word-Dokumente | sauberer linearer Output | derzeit unsauberer, siehe Roadmap |
+| Microsoft-Word-Dokumente | linearer Output mit Sternchen-Artefakten und Wingdings-`l`-Bullets | echte Markdown-Listen, keine Artefakte |
 
 **Reproduzierbares Beispiel:** Eine längere README mit Feature-Tabelle aus dem Browser kopieren (z.B. [github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)). In der gleichen Stichprobe gemessen:
 
@@ -114,7 +114,7 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
 - **Code-Blöcke** kommen meist als 4-Leerzeichen-Einrückung statt als ` ``` `-Fence. Beides ist gültiges Markdown und wird von allen Renderern korrekt erkannt.
 - **Sprach-Annotation** für Code-Blöcke geht verloren — die meisten Quellen liefern sie ohnehin nicht mit.
 - **Bilder** werden weggelassen. Nur Text wird konvertiert.
-- **Microsoft-Word-Inhalte** enthalten Office-Layout-Tabellen, die `md-clip` derzeit als HTML-Block im Output stehen lässt. Apples eingebaute Aktion ist hier momentan besser — sie flacht das Layout linear. Verbesserung steht auf der Roadmap.
+- **Microsoft-Word-Dokumente mit komplexer Bild-Einbettung**: Bilder werden nicht extrahiert (keine `![]()`-Referenzen). Der Text und Tabellen-Inhalt kommt sauber raus, Bildplätze aber leer.
 
 ## Tests
 
