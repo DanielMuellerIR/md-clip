@@ -47,7 +47,7 @@ export LANG=en_US.UTF-8
 
 # ---------- Konstanten ----------
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
