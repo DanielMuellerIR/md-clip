@@ -4,11 +4,14 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 18.05.2026)
+## Status (Stand: 19.05.2026)
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
-- **Stufe B — Signieren und notarisieren.** ⏳ Nächste Session.
-- **Stufe C — GitHub-Action für automatisierte Releases.** ⏳ Danach.
+- **Stufe B — Signieren und notarisieren.** ✅ Erledigt. v1.0.1 als
+  GitHub-Release veröffentlicht:
+  [github.com/DanielMuellerIR/md-clip/releases](https://github.com/DanielMuellerIR/md-clip/releases).
+- **Stufe C — GitHub Action für automatisierte Releases.** ⏳ Nächste
+  Session.
 
 ---
 
@@ -25,12 +28,15 @@ Terminal-Wissen läuft. Im Bundle liegen:
 - `Contents/Resources/bin/clipboard-html`, `clipboard-rtf` — kompilierte
   Swift-Helper
 - `Contents/Resources/Licenses/` — GPL-Volltext für pandoc, MIT-Hinweis
+- `Contents/Resources/md-clip.icns` — App-Icon
 - `Contents/Info.plist` — Bundle-Metadaten (Identifier
-  `io.github.danielmuellerir.md-clip`, `LSUIElement` true → keine Dock-Präsenz)
+  `io.github.danielmuellerir.md-clip`, `LSUIElement` true → keine Dock-Präsenz,
+  `CFBundleIconFile` referenziert das Icon)
 
-**Größe:** ca. 172 MB. Vollständig wegen pandoc (Haskell-Runtime + Lua + Daten).
-Intel-Support haben wir bewusst rausgenommen — neue Macs sind seit 2020 alle
-arm64, und Universal hätte 277 MB bedeutet.
+**Größe nach Komprimierung im DMG:** ca. 42 MB. Vollständig wegen pandoc
+(Haskell-Runtime + Lua + Daten). Intel-Support haben wir bewusst rausgenommen
+— neue Macs sind seit 2020 alle arm64, und Universal hätte das DMG auf
+~140 MB getrieben.
 
 `bin/md-clip` ist seit dieser Stufe **zweilayout-fähig**: es findet pandoc
 und die Helper sowohl im Projekt-Layout (`bin/` + `helpers/`) als auch im
@@ -59,192 +65,216 @@ Bundle-Layout (alles in `Resources/bin/`).
 ```bash
 bash wrappers/build-app-bundled.sh
 # Ergebnis: build/md-clip.app, unsigniert
-# Größe: ~172 MB
+# Größe: ~172 MB unkomprimiert, kommt auf ~42 MB im DMG
 ```
-
-Die unsignierte App **funktioniert auf deinem eigenen Rechner**, aber beim
-Verteilen meldet Gatekeeper bei jedem fremden Nutzer:
-
-> „md-clip kann nicht geöffnet werden, weil Apple Schadsoftware nicht prüfen
-> konnte."
-
-Workaround per Rechtsklick → Öffnen geht, aber ist genau die Reibung, die
-Terminal-Muffel abschrecken soll. Daher Stufe B.
 
 ---
 
-## Stufe B — Signieren und notarisieren (⏳ nächste Session)
+## Stufe B — Signieren und notarisieren (✅ erledigt)
 
-Ziel: ein DMG, das bei beliebigen macOS-Nutzern per Doppelklick öffnet,
-ohne Sicherheits-Warnung.
+Ziel war: ein DMG, das bei beliebigen macOS-Nutzern per Doppelklick öffnet,
+ohne Sicherheits-Warnung. Erfüllt mit v1.0.1.
 
-### Voraussetzungen — schon erledigt
+### Voraussetzungen — wurden erfüllt
 
 - **Apple Developer Account** aktiv
 - **Developer ID Application-Zertifikat** in der Login-Keychain installiert.
-  Verifizierbar mit:
+  Prüfen mit:
   ```bash
   security find-identity -v -p codesigning
   # Soll zeigen: Developer ID Application: Daniel Mueller (9QSWKSR4NQ)
   ```
 - **Team-ID:** `9QSWKSR4NQ`
 - **Apple-ID:** <apple-id>
+- **App-spezifisches Passwort** für `notarytool` als Schlüsselbund-Profil
+  `md-clip-notarytool` hinterlegt. Eingerichtet mit:
+  ```bash
+  xcrun notarytool store-credentials "md-clip-notarytool" \
+    --apple-id "<apple-id>" \
+    --team-id  "9QSWKSR4NQ"
+  # → fragt App-spezifisches Passwort INTERAKTIV ab; landet nicht in der History
+  ```
 
-### Voraussetzung — vom User noch zu beschaffen
+### Was im Build-Skript passiert
 
-- **App-spezifisches Passwort für `notarytool`.**
-  appleid.apple.com → Anmelden → „Anmelden & Sicherheit" → „App-spezifische
-  Passwörter" → „+" → Label `md-clip-notarytool`. Apple zeigt das Passwort
-  einmal an, am besten direkt in den nächsten Schritt einfügen, danach nicht
-  mehr abrufbar.
+[`wrappers/sign-and-release.sh`](../wrappers/sign-and-release.sh):
 
-### Vorgehen (für die nächste Claude-Session)
+1. Sanity-Checks: Identität + Profil vorhanden?
+2. Stufe A aufrufen → frisches Bundle bauen
+3. Innere Binaries (pandoc, clipboard-html, clipboard-rtf) einzeln signieren
+   mit `--options runtime --timestamp`
+4. App-Bundle signieren mit `--options runtime --timestamp --deep`
+5. DMG via `hdiutil create` erzeugen, DMG ebenfalls signieren
+6. `xcrun notarytool submit --keychain-profile md-clip-notarytool --wait`
+7. `xcrun stapler staple` heftet das Notarization-Ticket ans DMG
+8. `xcrun stapler validate` + `spctl --assess` verifizieren
 
-**Schritt 1: Schlüsselbund-Profil anlegen.** Einmalig, manuell durch User:
+Dauer: Build ~30 s, Notarization typisch 2–3 min. Insgesamt ~4 min.
 
-```bash
-xcrun notarytool store-credentials "md-clip-notarytool" \
-  --apple-id "<apple-id>" \
-  --team-id "9QSWKSR4NQ" \
-  --password "<app-spezifisches-passwort>"
-```
+### Erkenntnisse aus dem ersten Lauf
 
-Speichert die Credentials unter dem Schlüsselbund-Label
-`md-clip-notarytool`. Das Build-Skript referenziert nur dieses Label —
-das Passwort selbst landet nie in Source-Code, Logs oder Repo.
+- **Hardened Runtime + Bash-Launcher** war im Plan als Risiko notiert.
+  In der Praxis: läuft anstandslos. Keine Entitlements nötig.
+- **Pandoc-Signatur überschreiben**: pandoc-Binary von github.com/jgm/pandoc
+  kommt mit Apple-Entwickler-Signatur einer dritten Person. Mit `--force`
+  überschreiben wir das. Notarization akzeptiert das.
+- **DMG-Größe**: das fertige DMG ist 42 MB (UDZO-komprimiert).
+- **`stapler staple` erfolgreich**, daher öffnet das DMG offline ohne
+  Gatekeeper-Online-Check.
 
-**Schritt 2: Build-Skript erweitern.** Vorschlag: separates Skript
-`wrappers/sign-and-release.sh`, das `build-app-bundled.sh` aufruft, dann
-signiert, DMG erzeugt, notarisiert, stapelt, verifiziert. Vorlage der
-Befehle:
+### Ausgaben
 
-```bash
-IDENTITY="Developer ID Application: Daniel Mueller (9QSWKSR4NQ)"
-
-# Alle Binaries im Bundle einzeln signieren (innen nach außen).
-# --options runtime: Hardened Runtime — Voraussetzung für Notarization.
-# --timestamp: secure timestamp — Voraussetzung dass Notarization nicht
-#              nach Cert-Ablauf invalidiert.
-for binary in \
-    "$APP_BUNDLE/Contents/Resources/bin/pandoc" \
-    "$APP_BUNDLE/Contents/Resources/bin/clipboard-html" \
-    "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"; do
-  codesign --sign "$IDENTITY" --options runtime --timestamp \
-           --force "$binary"
-done
-
-# App-Bundle selbst signieren (mit --deep, damit alle bereits-signierten
-# inneren Binaries als "weiterhin signiert" erkannt werden).
-codesign --sign "$IDENTITY" --options runtime --timestamp \
-         --force --deep "$APP_BUNDLE"
-
-# Signatur prüfen.
-codesign --verify --strict --verbose=2 "$APP_BUNDLE"
-
-# DMG erzeugen.
-hdiutil create -volname "md-clip" -srcfolder "$APP_BUNDLE" \
-               -ov -format UDZO "build/md-clip.dmg"
-
-# DMG ebenfalls signieren.
-codesign --sign "$IDENTITY" --timestamp --force "build/md-clip.dmg"
-
-# Bei Apple zur Notarization einreichen, auf Ergebnis warten.
-xcrun notarytool submit "build/md-clip.dmg" \
-  --keychain-profile "md-clip-notarytool" \
-  --wait
-
-# Notarization-Ticket ans DMG heften (sonst muss Gatekeeper jedes Mal online).
-xcrun stapler staple "build/md-clip.dmg"
-
-# Final verifizieren.
-xcrun stapler validate "build/md-clip.dmg"
-spctl --assess --type open --context context:primary-signature \
-      -v "$APP_BUNDLE"
-```
-
-**Schritt 3: Erstmals laufen lassen** und Notarization-Output prüfen.
-
-Bei Fehlern hilft:
-```bash
-xcrun notarytool log <submission-id> \
-  --keychain-profile "md-clip-notarytool"
-```
-
-### Mögliche Stolpersteine
-
-- **Hardened Runtime und bash-Launcher.** Unser `Contents/MacOS/md-clip`
-  ist ein Bash-Skript. Apple lässt das zu, aber manche Entitlements machen
-  Probleme. Falls Notarization scheitert, müssen wir entweder
-  `entitlements.plist` mit `com.apple.security.cs.allow-unsigned-executable-memory`
-  hinzufügen — oder den Launcher in ein kompiliertes Swift-Binary
-  umschreiben. Ich tippe auf „läuft so, weil keine JIT-Allocs". Test
-  zeigt's.
-- **pandoc-Binary von github.com/jgm/pandoc** ist möglicherweise schon mit
-  einem ANDEREN Zertifikat signiert. Mit `--force` überschreiben wir; das
-  ist OK, weil wir es ja als Aggregat neu verteilen.
-- **Notarization-Dauer**: 1–10 Minuten, manchmal auch 30+. Geduld.
-
-### README anpassen
-
-Sobald Stufe B durch ist, gehört im README eine Sektion **„Installation
-ohne Terminal"** dazu:
-
-1. Auf den Releases-Tab vom Repo gehen
-2. Neueste `md-clip.dmg` herunterladen
-3. Doppelklick → ins „Programme"-Ordner-Symbol ziehen
-4. Fertig (kein Gatekeeper-Tanz)
+- `build/md-clip-1.0.1.dmg`: signiert + notarisiert + stapled
+- Hochgeladen als GitHub-Release-Asset:
+  https://github.com/DanielMuellerIR/md-clip/releases/tag/v1.0.1
 
 ---
 
-## Stufe C — GitHub Action für Tag-Releases (⏳ später)
+## Stufe C — GitHub Action für Tag-Releases (⏳ nächste Session)
 
-Sobald Stufe B lokal funktioniert: in CI heben.
+Sobald jemand `git tag v1.0.2 && git push --tags` macht, soll automatisch
+ein signiertes + notarisiertes DMG gebaut und als Release-Asset hochgeladen
+werden. Damit ist „Release rausgeben" ein einziger Tag-Push, keine lokale
+Maschine mehr nötig.
 
-### Skizze des Workflow
+### Workflow-Skizze
 
 `.github/workflows/release.yml`:
 
-- Trigger: `push: tags: ['v*']`
-- Runner: `macos-latest` (ist arm64 seit 2024)
-- Schritte:
-  1. Apple-Cert aus Secret `MACOS_CERTIFICATE_P12_BASE64` in Runner-Keychain
-     importieren (siehe Apple-Docs zu „importing a code-signing certificate
-     in CI")
-  2. Skript `wrappers/sign-and-release.sh` ausführen
-  3. Notarization mit `--apple-id` / `--team-id` / `--password` aus Secrets
-     statt aus Keychain (Keychain-Profile funktionieren in CI nicht
-     zuverlässig)
-  4. Stapler
-  5. DMG als Release-Asset hochladen via `softprops/action-gh-release` oder
-     `gh release create`
+```yaml
+name: Release
 
-### Secrets, die in GitHub gesetzt werden müssen
+on:
+  push:
+    tags:
+      - 'v*'
 
-| Secret | Inhalt |
+jobs:
+  build-and-release:
+    runs-on: macos-15  # Apple Silicon, neueste verfügbare Version
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Developer ID certificate
+        env:
+          P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$P12_BASE64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import /tmp/cert.p12 -k build.keychain \
+            -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm /tmp/cert.p12
+
+      - name: Setup notarytool credentials
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials "md-clip-notarytool" \
+            --apple-id "$APPLE_ID" \
+            --team-id  "$TEAM_ID" \
+            --password "$NOTARY_PASSWORD"
+
+      - name: Build, sign, notarize
+        run: bash wrappers/sign-and-release.sh
+
+      - name: Upload DMG as release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          gh release upload "v${VERSION}" \
+            "build/md-clip-${VERSION}.dmg" \
+            --clobber
+```
+
+### Repo-Secrets, die einmalig zu setzen sind
+
+In den GitHub-Settings unter Settings → Secrets and variables → Actions:
+
+| Secret-Name | Inhalt |
 |---|---|
-| `MACOS_CERTIFICATE_P12_BASE64` | `.p12`-Export des Developer-ID-Application-Zertifikats als base64 |
-| `MACOS_CERTIFICATE_P12_PASSWORD` | Passwort für den `.p12`-Export |
-| `MACOS_NOTARIZATION_APPLE_ID` | <apple-id> |
-| `MACOS_NOTARIZATION_TEAM_ID` | 9QSWKSR4NQ |
-| `MACOS_NOTARIZATION_PASSWORD` | das App-spezifische Passwort |
-| `MACOS_KEYCHAIN_PASSWORD` | Beliebiges starkes Passwort, schützt die temporäre Runner-Keychain während des Builds |
+| `MACOS_CERTIFICATE_P12_BASE64` | `.p12`-Export des Developer-ID-Application-Zertifikats, base64-encoded |
+| `MACOS_CERTIFICATE_P12_PASSWORD` | Passwort, mit dem das `.p12` beim Export gesichert wurde |
+| `MACOS_NOTARIZATION_APPLE_ID` | `<apple-id>` |
+| `MACOS_NOTARIZATION_TEAM_ID` | `9QSWKSR4NQ` |
+| `MACOS_NOTARIZATION_PASSWORD` | App-spezifisches Passwort für `notarytool` (dasselbe, das lokal im Schlüsselbund-Profil `md-clip-notarytool` liegt) |
+| `MACOS_KEYCHAIN_PASSWORD` | Beliebig wählbares starkes Passwort, schützt nur die temporäre Runner-Keychain während des Build-Laufs |
 
-`.p12` exportieren:
-- Schlüsselbundverwaltung öffnen
-- Zertifikat „Developer ID Application: Daniel Mueller …" auswählen
-- Rechtsklick → Exportieren → Format `.p12` → Passwort setzen
-- Datei mit `base64 -i cert.p12 | pbcopy` ins Secret kopieren
-  *(Vorsicht: pbcopy hier mit `LC_ALL=C` aufrufen, sonst Unicode-Bug)*
+### Wie der `.p12`-Export geht
+
+Schlüsselbundverwaltung öffnen (`open /Applications/Utilities/Keychain\ Access.app` oder via Spotlight):
+
+1. Anmeldung-Keychain auswählen
+2. Im Filter „Eigene Zertifikate" wählen
+3. Eintrag **„Developer ID Application: Daniel Mueller"** rechts-klicken → **„Exportieren …"**
+4. Dateiformat: **Personal Information Exchange (.p12)**
+5. Speicherort frei wählen (NICHT ins Repo!), z.B. `~/Desktop/md-clip-cert.p12`
+6. **Passwort vergeben** — das wird das `MACOS_CERTIFICATE_P12_PASSWORD`
+7. Dann in der Shell base64-encoden für `MACOS_CERTIFICATE_P12_BASE64`:
+   ```bash
+   base64 -i ~/Desktop/md-clip-cert.p12 | pbcopy
+   # → Inhalt liegt im Clipboard, im GitHub-Secret-Formular einfügen
+   # ACHTUNG: pbcopy hier braucht eine korrekte UTF-8-Locale, sonst Mojibake.
+   # Im laufenden Terminal sollte LANG bereits gesetzt sein. Falls Zweifel:
+   # LANG=en_US.UTF-8 base64 -i ~/Desktop/md-clip-cert.p12 | LANG=en_US.UTF-8 pbcopy
+   ```
+8. `.p12`-Datei lokal **sicher löschen** (z.B. `rm -P` für mehrfaches Überschreiben).
+
+### Stolpersteine, die wahrscheinlich auftreten
+
+- **`security set-key-partition-list`** ist nötig, sonst fragt jeder
+  codesign-Aufruf nach dem Schlüsselbund-Passwort interaktiv — im
+  Headless-CI ein tödlicher Hang.
+- **`security unlock-keychain`** muss innerhalb derselben Job-Step laufen
+  wie codesign — anderer Step = anderes Shell-Environment.
+- **Cache pandoc-Downloads** wäre nice, ist aber Stufe-D. Erstmal einfach
+  bei jedem Run neu herunterladen — sind ~60 MB pro Lauf.
+- **`gh` CLI ist auf macos-15-Runner vorinstalliert**, `GH_TOKEN` aus
+  `secrets.GITHUB_TOKEN` reicht für Release-Asset-Upload.
+- **macos-latest auf GitHub Actions** war historisch mal Intel, ist
+  inzwischen arm64 (seit 2024). Trotzdem in der workflow.yml explizit
+  `macos-15` o.ä. pinnen, damit es bei Major-Image-Updates nicht plötzlich
+  bricht.
+
+### Schritt-für-Schritt für die nächste Session
+
+1. **Cert als `.p12` exportieren** (siehe oben), base64-encoden, im Clipboard.
+2. **GitHub Repo-Secrets anlegen** (6 Stück, siehe Tabelle).
+3. **`.github/workflows/release.yml` schreiben** nach Skizze oben.
+4. **Lokal trockenlaufen lassen**, soweit möglich: jeden einzelnen Step
+   manuell durchgehen, prüfen, dass keine Surprises kommen.
+5. **Test-Tag pushen**, z.B. `git tag v1.0.2-rc1 && git push --tags`,
+   Workflow-Run beobachten, Logs debuggen.
+6. **Funktionierenden Workflow als regulär markieren**, Release löschen,
+   echte Version taggen.
+7. **README aktualisieren** mit Hinweis, dass neue Versionen per Tag-Push
+   gebaut werden (für künftige Mitwirkende relevant).
 
 ---
 
 ## Wenn du in einer neuen Claude-Session weitermachst
 
-Zum Onboarden reicht:
+Onboarding-Prompt:
 
-> „Lies `docs/DISTRIBUTION.md`, wir wollen mit **Stufe B** weitermachen.
-> Mein App-spezifisches Passwort habe ich/habe ich noch nicht im
-> Schlüsselbund als Profil `md-clip-notarytool` hinterlegt."
+> „Lies `docs/DISTRIBUTION.md`. Wir wollen mit **Stufe C** weitermachen —
+> eine GitHub Action, die bei Tag-Push das DMG automatisch baut, signiert,
+> notarisiert und als Release-Asset hochlädt. Mein Cert habe ich als `.p12`
+> exportiert, App-spezifisches Passwort ist verfügbar."
 
-Diese Datei ist self-contained — sie nennt alle Pfade, Team-ID, Befehle und
-Stolpersteine.
+Diese Datei nennt alle Pfade, Team-ID, Apple-ID, Geheim-Namen, vorhandene
+Skripte, dokumentierte Stolpersteine und ein konkretes Workflow-Skelett.
+Die nächste Session sollte ohne Rückfragen weitermachen können.
+
+Globaler Kontext, der außerdem relevant ist (steht in `~/.claude/CLAUDE.md`):
+
+- Knapp antworten, Code für Anfänger kommentieren
+- Bei Passwörter-im-Terminal: warnen + History-Cleanup-Anleitung anhängen
+- Bei Komponenten-Upgrades: Output-Diffs zeigen, nicht nur Tests-grün-melden
