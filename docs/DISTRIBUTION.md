@@ -4,11 +4,14 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 19.05.2026)
+## Status (Stand: 19.05.2026, abends)
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
-- **Stufe B — Signieren und notarisieren.** ✅ Erledigt. v1.0.1 als
-  GitHub-Release veröffentlicht:
+- **Stufe B — Signieren und notarisieren.** ✅ Erledigt.
+- **Erststart-Dialog für optionale CLI-Installation.** ✅ Erledigt
+  (Teil von v1.0.2).
+- Aktuelle veröffentlichte Version: **v1.0.2** als signiertes,
+  notarisiertes DMG unter
   [github.com/DanielMuellerIR/md-clip/releases](https://github.com/DanielMuellerIR/md-clip/releases).
 - **Stufe C — GitHub Action für automatisierte Releases.** ⏳ Nächste
   Session.
@@ -21,8 +24,10 @@ Das Skript [`wrappers/build-app-bundled.sh`](../wrappers/build-app-bundled.sh)
 baut eine `build/md-clip.app`, die ohne Homebrew, ohne pandoc-Install, ohne
 Terminal-Wissen läuft. Im Bundle liegen:
 
-- `Contents/MacOS/md-clip` — Bash-Launcher, ruft das eigentliche md-clip mit
-  `--replace --notify` auf
+- `Contents/MacOS/md-clip` — Bash-Launcher, kopiert aus
+  [`wrappers/launcher.sh`](../wrappers/launcher.sh). Macht zwei Dinge: erst
+  Erststart-Dialog (siehe unten), dann eigentlicher md-clip-Lauf mit
+  `--replace --notify`.
 - `Contents/Resources/bin/md-clip` — Kopie des Hauptskripts
 - `Contents/Resources/bin/pandoc` — pandoc 3.9.0.2, arm64-only
 - `Contents/Resources/bin/clipboard-html`, `clipboard-rtf` — kompilierte
@@ -65,8 +70,63 @@ Bundle-Layout (alles in `Resources/bin/`).
 ```bash
 bash wrappers/build-app-bundled.sh
 # Ergebnis: build/md-clip.app, unsigniert
-# Größe: ~172 MB unkomprimiert, kommt auf ~42 MB im DMG
+# Größe: ~172 MB unkomprimiert, kommt auf ~43 MB im DMG
 ```
+
+---
+
+## Erststart-Dialog (✅ erledigt, Teil von v1.0.2)
+
+[`wrappers/launcher.sh`](../wrappers/launcher.sh) wird beim Doppelklick auf
+md-clip.app ausgeführt. Bevor er die eigentliche Konvertierung startet,
+prüft er, ob in `/usr/local/bin/md-clip` bereits ein Verweis auf das
+aktuelle App-Bundle liegt. Falls nicht und der Nutzer nicht früher „Nicht
+mehr fragen" gewählt hat, erscheint ein AppleScript-Dialog mit drei
+Optionen.
+
+### Logik im Detail
+
+| Zustand von `/usr/local/bin/md-clip` | Dialog erscheint? |
+|---|---|
+| Symlink ins eigene Bundle | Nein — schon installiert |
+| Symlink woandershin (z.B. nach `git clone`) | Nein — Nutzer hat eigene Lösung |
+| Reguläre Datei | Nein — Nutzer hat anderweitig installiert |
+| Nichts da, `defaults read CliInstallDeclined` = 1 | Nein — Nutzer hat abgelehnt |
+| Nichts da, kein Decline-Flag | **Ja** — Dialog erscheint |
+
+### Drei Dialog-Buttons
+
+| Button | Aktion |
+|---|---|
+| Ja, einrichten | `osascript "do shell script ... with administrator privileges"` legt `/usr/local/bin/` an (falls nötig) und symlinkt darin md-clip ins Bundle. macOS-Passwort-Prompt einmalig. |
+| Später | Nichts speichern, beim nächsten Start wieder fragen. Auch ESC oder Cancel-Klick führen hierher. |
+| Nicht mehr fragen | `defaults write io.github.danielmuellerir.md-clip CliInstallDeclined -bool true` |
+
+### Reset
+
+Wer „Nicht mehr fragen" gewählt hat und es sich umentscheidet, löscht den
+Flag im Terminal:
+
+```bash
+defaults delete io.github.danielmuellerir.md-clip CliInstallDeclined
+```
+
+Beim nächsten App-Start erscheint der Dialog wieder. Steht so auch in der
+README.
+
+### Warum Symlink statt Kopie
+
+Der Symlink zeigt direkt auf das Skript im App-Bundle. Konsequenz:
+
+- Der CLI-Aufruf nutzt automatisch das **im Bundle eingebettete pandoc**
+  — keine zusätzliche Homebrew-Installation nötig.
+- Bei einem App-Update wird auch der CLI automatisch aktualisiert, weil
+  beide auf dasselbe Skript zeigen.
+- Konsistenz garantiert: CLI- und App-Version sind immer identisch.
+
+`bin/md-clip` löst den Symlink mit `realpath` auf, findet so sein
+`SCRIPT_DIR` im Bundle und nimmt die dort liegenden Helper und pandoc
+über die schon vorhandene Zwei-Layout-Logik.
 
 ---
 
@@ -251,30 +311,61 @@ Schlüsselbundverwaltung öffnen (`open /Applications/Utilities/Keychain\ Access
 3. **`.github/workflows/release.yml` schreiben** nach Skizze oben.
 4. **Lokal trockenlaufen lassen**, soweit möglich: jeden einzelnen Step
    manuell durchgehen, prüfen, dass keine Surprises kommen.
-5. **Test-Tag pushen**, z.B. `git tag v1.0.2-rc1 && git push --tags`,
+5. **Test-Tag pushen**, z.B. `git tag v1.0.3-rc1 && git push --tags`,
    Workflow-Run beobachten, Logs debuggen.
-6. **Funktionierenden Workflow als regulär markieren**, Release löschen,
-   echte Version taggen.
+6. **Funktionierenden Workflow als regulär markieren**, Test-Release
+   löschen, echte Version taggen.
 7. **README aktualisieren** mit Hinweis, dass neue Versionen per Tag-Push
    gebaut werden (für künftige Mitwirkende relevant).
 
 ---
 
-## Wenn du in einer neuen Claude-Session weitermachst
+## Onboarding für eine neue Claude-Session
 
-Onboarding-Prompt:
+Dieser Prompt allein reicht, um eine frische Session in den Stand zu
+versetzen, an dem wir gerade aufgehört haben:
 
-> „Lies `docs/DISTRIBUTION.md`. Wir wollen mit **Stufe C** weitermachen —
-> eine GitHub Action, die bei Tag-Push das DMG automatisch baut, signiert,
-> notarisiert und als Release-Asset hochlädt. Mein Cert habe ich als `.p12`
-> exportiert, App-spezifisches Passwort ist verfügbar."
+> Wir arbeiten am Projekt **md-clip** im Verzeichnis
+> `das Projektverzeichnis (GitHub:
+> `DanielMuellerIR/md-clip`).
+>
+> Das Tool konvertiert macOS-Clipboard-Inhalt (HTML / RTF aus Browsern,
+> Word, TextEdit usw.) zu Markdown. Es gibt ein Bash-Hauptskript
+> (`bin/md-clip`), zwei Swift-Helper für NSPasteboard-Zugriff
+> (`helpers/clipboard-html.swift`, `helpers/clipboard-rtf.swift`) und ein
+> macOS-App-Bundle mit eingebettetem pandoc, das per signiertem +
+> notarisiertem DMG ausgeliefert wird.
+>
+> Erst diese Dokumente lesen, damit du den Kontext kennst, bevor du was
+> tust:
+>
+> 1. `docs/DISTRIBUTION.md` — Status der drei Distribution-Stufen, Apple-
+>    Credentials (Team-ID `9QSWKSR4NQ`, Apple-ID `<apple-id>`, Schlüssel-
+>    bund-Profil `md-clip-notarytool`), kompletter Plan für **Stufe C**
+>    inkl. Workflow-Skelett und den sechs benötigten GitHub-Secrets.
+> 2. `docs/ENCODING.md` — Locale- und Encoding-Stolpersteine. Wichtigster
+>    Punkt: alle Bash-Skripte exportieren oben `LC_ALL=en_US.UTF-8`, NIE
+>    `LC_ALL=C` inline für pbcopy/pbpaste — das war ein Selbstbetrug, der
+>    den Clipboard-Inhalt für alle anderen Apps verfälscht hat.
+> 3. `README.md` — was Nutzer zu sehen bekommen.
+> 4. `~/.claude/CLAUDE.md` (privat) — globale Verhaltensregeln, u.a.:
+>    knapp antworten, Code für Anfänger kommentieren, bei Passwörter-im-
+>    Terminal warnen + History-Cleanup anleiten, bei Komponenten-Upgrades
+>    Output-Diffs zeigen statt nur „Tests grün" zu melden, in öffentlichen
+>    Dokumenten keine umgangssprachlichen oder wertenden Bezeichnungen
+>    für Nutzergruppen.
+>
+> Aktueller Stand:
+> - **v1.0.2** als signiertes + notarisiertes DMG auf GitHub veröffent-
+>   licht. Erststart-Dialog zur optionalen CLI-Installation funktioniert.
+> - **Stufe C** ist der nächste Schritt: GitHub Action, die bei Tag-Push
+>   automatisch baut, signiert, notarisiert, das DMG als Release-Asset
+>   hochlädt.
+> - Das Developer-ID-Zertifikat liegt in meinem Login-Keychain
+>   (`security find-identity -v -p codesigning` listet es).
+>
+> Schaue dir die genannten Docs an, dann sag mir, wie du Stufe C angehen
+> würdest und welche Infos / Geheimnisse du von mir brauchst.
 
-Diese Datei nennt alle Pfade, Team-ID, Apple-ID, Geheim-Namen, vorhandene
-Skripte, dokumentierte Stolpersteine und ein konkretes Workflow-Skelett.
-Die nächste Session sollte ohne Rückfragen weitermachen können.
-
-Globaler Kontext, der außerdem relevant ist (steht in `~/.claude/CLAUDE.md`):
-
-- Knapp antworten, Code für Anfänger kommentieren
-- Bei Passwörter-im-Terminal: warnen + History-Cleanup-Anleitung anhängen
-- Bei Komponenten-Upgrades: Output-Diffs zeigen, nicht nur Tests-grün-melden
+Die nächste Session sollte mit diesem Prompt ohne Rückfragen weitermachen
+können.
