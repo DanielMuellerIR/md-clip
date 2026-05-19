@@ -4,6 +4,19 @@
 
 Du kopierst Text aus einem Browser, aus Claude Desktop, aus Notion, aus Word. Beim Einfügen in einen Markdown-Editor willst du eigentlich Markdown, nicht den HTML-Müll, der mitkopiert wurde. `md-clip` macht genau diese eine Sache.
 
+## Installation ohne Terminal (für Klick-Nutzer)
+
+Lade die neueste fertige App von der **[Releases-Seite](https://github.com/DanielMuellerIR/md-clip/releases/latest)** als `.dmg` herunter:
+
+1. `md-clip-X.Y.Z.dmg` doppelklicken
+2. md-clip-Icon ins **Programme**-Ordner-Symbol ziehen
+3. Aus dem Programme-Ordner einmalig mit **Rechtsklick → Öffnen** starten
+4. Optional: ins Dock ziehen
+
+Ab jetzt: formatierten Text irgendwo markieren (`⌘C`), md-clip-Icon klicken, in einem Markdown-Editor `⌘V` — Markdown ist da.
+
+Voraussetzungen: macOS 11+ auf Apple Silicon (M1/M2/M3/...). Intel-Macs werden derzeit nicht unterstützt. Alles Nötige (pandoc, Helper) ist in der App schon drin — kein Homebrew nötig.
+
 ## Beispiel
 
 Du kopierst folgenden Absatz aus einem Browser:
@@ -29,7 +42,7 @@ Das ist **fetter** Text mit einem [Link](https://example.com) und einer Liste:
 
 Einfügen, fertig.
 
-## Installation
+## Installation mit Terminal (für Entwickler)
 
 Voraussetzungen: macOS, [Homebrew](https://brew.sh), Xcode Command Line Tools (`xcode-select --install`).
 
@@ -37,7 +50,7 @@ Voraussetzungen: macOS, [Homebrew](https://brew.sh), Xcode Command Line Tools (`
 git clone https://github.com/DanielMuellerIR/md-clip.git
 cd md-clip
 brew bundle           # installiert pandoc
-./install.sh          # kompiliert den Helper, legt /usr/local/bin/md-clip an
+./install.sh          # kompiliert die Helper, legt /usr/local/bin/md-clip an
 ```
 
 ## Benutzung
