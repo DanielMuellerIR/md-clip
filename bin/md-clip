@@ -317,15 +317,64 @@ strip_single_column_tables() {
     }{$1\n}gmx'
 }
 
-# convert_rtf: RTF-String von stdin lesen, via textutil zu HTML, dann
-# selber Weg wie HTML — plus Post-Processing, um Office-Layout-Reste
-# rauszuwerfen.
+# flatten_layout_tables: Wandelt verschachtelte HTML-Tabellen aus
+# textutil-Konversionen in flache Absatz-Sequenzen um.
+#
+# Hintergrund: Word, Pages, TextEdit & Co. nutzen Tabellen häufig als
+# reines Layout-Mittel (Spalten-Spacing, Header-Banner, etc.), nicht zur
+# Darstellung tabellarischer Daten. textutil reicht diese Strukturen
+# 1:1 ans HTML weiter. Pandoc kann sie weder in GFM-Tabellen abbilden
+# (zu komplex, verschachtelt) noch sinnvoll weglassen — seit Version
+# 3.7 ersetzt es sie durch nichtssagende `[TABLE]`-Platzhalter.
+#
+# Lösung: schon VOR pandoc alle Tabellen-Tags rausnehmen, Zellen werden
+# zu sequentiellen `<p>`-Absätzen. Das ist der gleiche Ansatz, den
+# Apple's NSAttributedString-Renderer fährt — Tabellen werden flach
+# durchgereicht, weil das interne Modell sie sowieso nicht repräsentiert.
+#
+# Wird nur im RTF-Pfad eingesetzt. Im HTML-Pfad (Browser-Copy) bleiben
+# echte Daten-Tabellen erhalten, weil dort der Input semantisch sauber
+# ist und Pandoc damit umgehen kann.
+flatten_layout_tables() {
+  perl -0pe '
+    # <colgroup>...</colgroup>-Blöcke komplett entfernen.
+    s{<colgroup[^>]*>.*?</colgroup>}{}gs;
+    # Selbstschließende <col>-Tags weg.
+    s{<col[^/]*/?>}{}g;
+    # <table> und </table>-Wrapper weg, Inhalt bleibt.
+    s{</?table[^>]*>}{}gs;
+    # <tbody>/<thead>/<tfoot> raus.
+    s{</?t(?:body|head|foot)[^>]*>}{}gs;
+    # <tr> und </tr> raus, Inhalt bleibt.
+    s{</?tr[^>]*>}{}gs;
+    # <td>/<th> → <p>: jede Zelle wird ein Absatz.
+    s{<t[dh][^>]*>}{<p>}gs;
+    s{</t[dh]>}{</p>}gs;
+  '
+}
+
+# tidy_rtf_artifacts: Kosmetische Säuberung nach RTF-Konversion.
+# Textutil-HTML aus Word/Pages-RTFs enthält viele leere <p>-Tags und
+# <br/>s, die Pandoc als Markdown-Hard-Linebreaks (einzelnes `\`)
+# ausgibt. Optisch verrauscht. Hier rauswerfen.
+tidy_rtf_artifacts() {
+  # 1. Zeilen, die nur aus `\` bestehen, werden zu Leerzeilen.
+  # 2. Mehr als zwei aufeinanderfolgende Leerzeilen kollabieren zu zwei.
+  perl -0pe '
+    s/^\\\s*$//gm;
+    s/\n{3,}/\n\n/g;
+  '
+}
+
+# convert_rtf: RTF-String von stdin lesen, via textutil zu HTML,
+# Layout-Tabellen plätten, dann normaler HTML-Pfad zu Markdown.
 convert_rtf() {
-  vlog "Pfad: RTF → textutil → HTML → pandoc"
+  vlog "Pfad: RTF → textutil → HTML → flatten → pandoc → tidy"
   textutil -convert html -format rtf -stdin -stdout \
+    | flatten_layout_tables \
     | clean_html \
     | pandoc "${PANDOC_OPTS[@]}" \
-    | strip_single_column_tables
+    | tidy_rtf_artifacts
 }
 
 # try_html: Versucht HTML aus dem Clipboard zu holen.
