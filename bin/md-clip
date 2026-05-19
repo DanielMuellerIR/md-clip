@@ -24,7 +24,13 @@ set -euo pipefail
 # (Apple Silicon) liegen. Wir hängen beide Pfade vorne dran. Wenn sie
 # nicht existieren, schadet das nicht — PATH darf nicht-existente Pfade
 # enthalten.
-export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+# /opt/homebrew/bin zuerst, damit auf Apple Silicon die aktuellen
+# brew-Binaries gewinnen. Bei manchen Usern liegt unter /usr/local/bin
+# ein uraltes pandoc-Binary aus einem .pkg-Installer von vor Jahren,
+# das brew nicht kennt und entsprechend nie aktualisiert hat. Erst die
+# falsche Reihenfolge ließ md-clip dieses uralte pandoc verwenden statt
+# das frisch installierte.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # Gleicher GUI-Stolperstein wie beim PATH: GUI-Prozesse haben oft entweder
 # kein Locale gesetzt oder das C/POSIX-Locale, das Bytes über 0x7F als
