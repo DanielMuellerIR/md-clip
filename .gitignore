@@ -5,8 +5,10 @@ helpers/clipboard-rtf
 # Spike-Binary (gleicher Source wie helpers/clipboard-html.swift).
 spike/clipboard-html
 
-# Kompilierter Test-Helper — wird von tests/compare-file.sh erzeugt.
+# Kompilierte Test-Helper — werden von tests/run-tests.sh / compare-file.sh
+# bei Bedarf gebaut.
 tests/load-clipboard
+tests/clipboard-string
 
 # Manuell gesammelte Clipboard-Aufnahmen — Test-Daten, keine Source.
 tests/captures/
