@@ -111,6 +111,79 @@ run_test "word-rtf (RTF via textutil)" \
   "$actual" \
   "$FIXTURES/word-rtf.expected.md"
 
+# --- Test 4: Encoding-Roundtrip über das echte Clipboard ---
+#
+# Dieser Test ist der wichtigste, weil er die einzige Stelle ist, an der
+# wir die EFFEKTIVE Nutzer-Erfahrung prüfen — nicht nur die Bytes auf
+# stdout, sondern was eine andere App tatsächlich beim Einfügen sieht.
+# Hintergrund: pbcopy/pbpaste interpretieren Bytes je nach LC_ALL
+# unterschiedlich. Ein Roundtrip-Test, der pbcopy zum Schreiben UND
+# pbpaste zum Lesen verwendet (beide in der gleichen falschen Locale),
+# kann den Encoding-Bug verstecken, weil sich die Fehler aufheben.
+# Daher lesen wir hier über NSPasteboard.string in Swift — das ist die
+# echte API, die jede Paste-Konsumenten-App verwendet.
+#
+# Siehe docs/ENCODING.md für die ausführliche Geschichte.
+
+echo
+echo "==> Encoding-Roundtrip-Test"
+
+# Helper bauen, falls nicht da.
+LOAD_CLIPBOARD_BIN="$TESTS_DIR/load-clipboard"
+LOAD_CLIPBOARD_SRC="$TESTS_DIR/load-clipboard.swift"
+if [ ! -x "$LOAD_CLIPBOARD_BIN" ] || [ "$LOAD_CLIPBOARD_SRC" -nt "$LOAD_CLIPBOARD_BIN" ]; then
+  swiftc "$LOAD_CLIPBOARD_SRC" -o "$LOAD_CLIPBOARD_BIN"
+fi
+
+CLIPBOARD_STRING_BIN="$TESTS_DIR/clipboard-string"
+CLIPBOARD_STRING_SRC="$TESTS_DIR/clipboard-string.swift"
+if [ ! -x "$CLIPBOARD_STRING_BIN" ] || [ "$CLIPBOARD_STRING_SRC" -nt "$CLIPBOARD_STRING_BIN" ]; then
+  swiftc "$CLIPBOARD_STRING_SRC" -o "$CLIPBOARD_STRING_BIN"
+fi
+
+# Bestehenden Clipboard-Inhalt als Plain-Text sichern, damit wir am
+# Ende restaurieren können. Rich-Flavors gehen verloren — bei einem
+# Test-Lauf akzeptabel.
+CLIPBOARD_BACKUP="$(mktemp)"
+pbpaste > "$CLIPBOARD_BACKUP" 2>/dev/null || true
+
+# Test-Eingabe: drei Kategorien Nicht-ASCII auf einmal — Latin-1-Umlaute
+# (ä, ö, ü, ß), 2-Byte-Sonderzeichen (—) und 3-Byte-BMP-Symbole (☤).
+# Wer EINE dieser Kategorien verliert, fällt durch.
+ENCODING_INPUT='<p>Café über Größen — ☤</p>'
+ENCODING_EXPECTED='Café über Größen — ☤'
+
+ENCODING_HTML="$(mktemp).html"
+printf '%s' "$ENCODING_INPUT" > "$ENCODING_HTML"
+
+# HTML aufs Clipboard laden (kein --replace nötig — wir setzen direkt).
+"$LOAD_CLIPBOARD_BIN" public.html "$ENCODING_HTML" >/dev/null
+
+# Vollständige Kette laufen lassen, --replace schreibt ergebnis ins Clipboard.
+"$PROJECT_ROOT/bin/md-clip" --replace --quiet
+
+# Clipboard-Inhalt so lesen, wie eine echte App ihn sieht.
+encoding_actual="$("$CLIPBOARD_STRING_BIN")"
+
+if [ "$encoding_actual" = "$ENCODING_EXPECTED" ]; then
+  echo "✓ encoding-roundtrip (UTF-8 durchs Clipboard heil geblieben)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ encoding-roundtrip"
+  echo "  Erwartet:  '$ENCODING_EXPECTED'"
+  echo "  Erhalten:  '$encoding_actual'"
+  echo "  Erwartete Bytes:"
+  printf '%s' "$ENCODING_EXPECTED" | xxd | sed 's/^/    /'
+  echo "  Erhaltene Bytes:"
+  printf '%s' "$encoding_actual" | xxd | sed 's/^/    /'
+  FAILED=$((FAILED + 1))
+fi
+TOTAL=$((TOTAL + 1))
+
+# Original-Clipboard wiederherstellen.
+cat "$CLIPBOARD_BACKUP" | pbcopy
+rm -f "$CLIPBOARD_BACKUP" "$ENCODING_HTML"
+
 # --- Zusammenfassung ---
 echo
 echo "==> $PASSED/$TOTAL Tests bestanden"
