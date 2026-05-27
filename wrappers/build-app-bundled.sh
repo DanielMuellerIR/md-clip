@@ -69,7 +69,11 @@ else
   echo "✓ pandoc-arm64 aus Cache: $PANDOC_ZIP"
 fi
 
-PANDOC_EXTRACT_DIR="$CACHE_DIR/pandoc-arm64"
+# WICHTIG: Extract-Dir MUSS die Version im Namen tragen. Sonst wird ein
+# Extract-Ordner aus einem früheren Build mit ANDERER pandoc-Version
+# wiederverwendet (das `[ ! -d ]` überspringt das Entpacken), und es landet
+# das falsche, alte pandoc im Bundle — trotz korrekt gepinnter Version.
+PANDOC_EXTRACT_DIR="$CACHE_DIR/pandoc-${PANDOC_VERSION}-arm64"
 if [ ! -d "$PANDOC_EXTRACT_DIR" ]; then
   mkdir -p "$PANDOC_EXTRACT_DIR"
   unzip -q "$PANDOC_ZIP" -d "$PANDOC_EXTRACT_DIR"
