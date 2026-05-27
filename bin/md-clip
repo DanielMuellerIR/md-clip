@@ -47,7 +47,7 @@ export LANG=en_US.UTF-8
 
 # ---------- Konstanten ----------
 
-VERSION="1.0.3"
+VERSION="1.0.4"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -290,6 +290,61 @@ preprocess_claude_desktop() {
   perl -0pe 's/\s+data-[a-z-]+="[^"]*"//g'
 }
 
+# preprocess_google_classroom: Räumt Link-Anhänge aus Google Classroom auf.
+#
+# Problem: Classroom legt jeden Link-Anhang als <a href="…"> ab, das mehrere
+# Block-<div>s umschließt: Titel, eine zweite Zeile mit der angezeigten URL
+# und ein Thumbnail-<img>. pandoc kann Block-Inhalt nicht in einen Inline-
+# Link packen — es hebt die Blöcke aus dem <a> heraus. Ergebnis: ein leerer
+# Link `[](url)`, darunter Titel + URL als lose Absätze, dazu ein nutzloses
+# Thumbnail. (Siehe tests/captures + docs für ein echtes Beispiel.)
+#
+# Lösung: Jeden Classroom-Anhang-Anker zu einem sauberen Listenpunkt
+# `<li><a href="…">Titel</a></li>` zusammenfassen:
+#   - Erkennung: das <a> enthält ein Thumbnail vom Dienst
+#     classroom.google.com/webthumbnail (sehr stabiler Marker).
+#   - Titel: Text des inneren `mvRF3b`-Divs. ACHTUNG: `mvRF3b` ist eine
+#     obfuskierte Google-Klasse, die sich ändern kann. Findet die Regel den
+#     Titel nicht, bleibt der Anker leer und fix_empty_links füllt ihn später
+#     mit der URL — kein Absturz, nur schlechteres Ergebnis.
+#   - URL: der `?authuser=…`-Tracking-Parameter wird entfernt.
+# Danach werden benachbarte <li> zu einem zusammenhängenden <ul>, damit
+# pandoc eine kompakte (tighte) Markdown-Liste ausgibt.
+preprocess_google_classroom() {
+  perl -0777 -pe '
+    # 1. Jeden <a href="…">…</a> betrachten. Anker verschachteln nicht,
+    #    daher ist .*? bis zum nächsten </a> sicher. /s = . matcht Newlines.
+    s{<a\b([^>]*)\bhref="([^"]*)"([^>]*)>(.*?)</a>}{
+      my ($pre, $href, $post, $inner) = ($1, $2, $3, $4);
+      if ($inner =~ m{classroom\.google\.com/webthumbnail}) {
+        # Titel aus dem mvRF3b-Div ziehen, restliche Tags strippen, trimmen.
+        my $title = ($inner =~ m{class="[^"]*\bmvRF3b\b[^"]*">(.*?)</div>}s) ? $1 : "";
+        $title =~ s/<[^>]+>//g;
+        $title =~ s/^\s+|\s+$//g;
+        # authuser-Tracking-Param raus, evtl. übrig bleibendes ?/& tilgen.
+        $href =~ s/[?&]authuser=[^&]*//;
+        $href =~ s/[?&]$//;
+        $title ne "" ? "<li><a href=\"$href\">$title</a></li>"
+                     : "<a href=\"$href\"></a>";
+      } else {
+        # Nicht-Classroom-Anker unverändert durchreichen.
+        $&;
+      }
+    }gse;
+    # 2. Sicherheitsnetz: verbliebene Classroom-Thumbnails (außerhalb eines
+    #    erkannten Ankers) ebenfalls entfernen.
+    s{<img[^>]*classroom\.google\.com/webthumbnail[^>]*>}{}gs;
+    # 3. Leere <div></div> entfernen (mehrfach, wegen Verschachtelung).
+    1 while s{<div\b[^>]*>\s*</div>}{}gs;
+    # 4. Div-Gerüst ZWISCHEN zwei <li> wegräumen, damit die Items direkt
+    #    aneinanderstoßen und in Schritt 5 in EIN <ul> wandern.
+    1 while s{</li>(?:\s*</?div[^>]*>\s*)+<li>}{</li><li>}gs;
+    # 5. Lauf benachbarter <li> in ein <ul> packen. Whitespace zwischen den
+    #    Tags raus (nicht im Titel-Text!) → pandoc gibt eine tighte Liste aus.
+    s{(?:<li>.*?</li>\s*)+}{my $r = $&; $r =~ s/>\s+</></g; "<ul>$r</ul>"}gse;
+  '
+}
+
 # clean_html: Löst <span>-Wrapper um reinen Text auf.
 # Wichtig: ([^<]*) matcht AUCH ein einzelnes Leerzeichen.
 # Claude Desktop nutzt <span> </span> als Whitespace zwischen Inline-Elementen —
@@ -308,8 +363,67 @@ clean_html() {
 convert_html() {
   vlog "Pfad: HTML → pandoc"
   preprocess_claude_desktop \
+    | preprocess_google_classroom \
     | clean_html \
-    | pandoc "${PANDOC_OPTS[@]}"
+    | pandoc "${PANDOC_OPTS[@]}" \
+    | fix_empty_links \
+    | tidy_hard_breaks
+}
+
+# fix_empty_links: Repariert Links mit leerem Anker-Text.
+#
+# Pandoc gibt für ein <a href="…"> ohne sichtbaren Inhalt `[](url)` aus —
+# z.B. wenn der Anker im Original nur ein (von uns nicht übernommenes)
+# Bild oder ein Icon umschloss. Der leere []-Teil ist gültiges Markdown,
+# aber manche Markdown-Renderer zeigen so einen Link gar nicht an: ohne
+# Anker-Text gibt es nichts zum Anklicken, der Link verschwindet optisch.
+#
+# Lösung: Ist der []-Teil leer (oder nur Whitespace), füllen wir ihn mit
+# der Ziel-URL. Aus `[](https://x.de)` wird `[https://x.de](https://x.de)`
+# — sichtbar und anklickbar. Ein optionaler Link-Titel (`(url "Titel")`)
+# bleibt erhalten, wandert aber nicht in den Anker-Text.
+#
+# Das `(?<!!)` ist ein Negative-Lookbehind: Es verhindert, dass wir den
+# `[](…)`-Teil eines Bildes `![](…)` anfassen — ein Bild OHNE Alt-Text
+# soll Bild bleiben, nicht zum sichtbaren Link werden.
+fix_empty_links() {
+  # $1 = Ziel-URL (erstes Nicht-Whitespace-Token in den Klammern)
+  # $2 = optionaler Titel inkl. führendem Whitespace (z.B. ` "Titel"`)
+  perl -0pe 's{(?<!!)\[\s*\]\(\s*(\S+?)(\s+[^)]*)?\)}{ "[$1]($1" . (defined $2 ? $2 : "") . ")" }gex'
+}
+
+# tidy_hard_breaks: Entfernt überflüssige Hard-Break-Backslashes.
+#
+# Hintergrund: pandoc gibt jedes <br> als Markdown-Hard-Break aus — ein `\`
+# am Zeilenende. Ein <br><br> (Absatztrennung beim Copy) wird sogar zu zwei
+# Hard-Breaks: `text\` plus eine Zeile, die nur aus `\` besteht. An
+# Absatzgrenzen und vor Listen ist dieser `\` reiner optischer Müll.
+#
+# WICHTIG: Hard-Breaks in echtem Fließtext (z.B. mehrzeilige Adressen)
+# MÜSSEN erhalten bleiben — ohne `\` würden diese Zeilen beim Rendern zu
+# einer einzigen verschmelzen (einfacher Newline = Leerzeichen in Markdown).
+# Darum entfernen wir nur `\` an klaren Absatz-/Listengrenzen, nie mitten
+# im Fließtext. Lookaheads `(?=…)` prüfen die Folgezeile, ohne sie zu
+# schlucken.
+tidy_hard_breaks() {
+  # Ein Hard-Break am Zeilenende kann zwei Schreibweisen haben, je nach
+  # pandoc-Version: ein `\` (pandoc ≥ ~3.6, auch unser System-pandoc) ODER
+  # zwei+ Leerzeichen (älteres pandoc, u.a. das in 1.0.3 gebündelte 3.5).
+  # Wir behandeln BEIDE, damit der Output unabhängig von der pandoc-Version
+  # identisch ist. Das Marker-Muster `(?:\\|[ ]{2,})` matcht beide Formen.
+  perl -0pe '
+    # 1. Hard-Break direkt vor einem Listenpunkt (- * + oder 1. / 1)) → weg.
+    #    Die "- "-Zeilen bilden ohnehin eine Liste; der Umbruch ist überflüssig.
+    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*(?:[-*+] |\d+[.)] ))/\n/g;
+    # 2. Zeilen, die NUR aus einem Hard-Break-Marker bestehen (aus <br><br>:
+    #    eine reine `\`- oder reine Whitespace-Zeile), zu echten Leerzeilen.
+    s/^[ \t]*\\?[ \t]*$//gm;
+    # 3. Hard-Break am Zeilenende UNMITTELBAR vor einer Leerzeile ist sinnlos
+    #    (Umbruch + Absatztrennung) → Marker weg, Absatztrennung bleibt.
+    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*\n)/\n/g;
+    # 4. Mehr als zwei aufeinanderfolgende Newlines auf zwei reduzieren.
+    s/\n{3,}/\n\n/g;
+  '
 }
 
 # strip_single_column_tables: Entfernt 1-Spalten-Tabellen mit leerem
@@ -388,7 +502,9 @@ convert_rtf() {
     | flatten_layout_tables \
     | clean_html \
     | pandoc "${PANDOC_OPTS[@]}" \
-    | tidy_rtf_artifacts
+    | tidy_rtf_artifacts \
+    | fix_empty_links \
+    | tidy_hard_breaks
 }
 
 # try_html: Versucht HTML aus dem Clipboard zu holen.

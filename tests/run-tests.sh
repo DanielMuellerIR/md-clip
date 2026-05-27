@@ -42,6 +42,50 @@ clean_html() {
     | sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g'
 }
 
+# Dupliziert aus bin/md-clip — füllt leeren Anker-Text `[](url)` mit der
+# Ziel-URL, damit der Link in allen Renderern sichtbar bleibt.
+fix_empty_links() {
+  perl -0pe 's{(?<!!)\[\s*\]\(\s*(\S+?)(\s+[^)]*)?\)}{ "[$1]($1" . (defined $2 ? $2 : "") . ")" }gex'
+}
+
+# Dupliziert aus bin/md-clip — entfernt überflüssige Hard-Break-Backslashes
+# an Absatz-/Listengrenzen (auch aus <br><br>). Hard-Breaks in Fließtext
+# (z.B. Adressen) bleiben. Siehe bin/md-clip für die ausführliche Doku.
+tidy_hard_breaks() {
+  perl -0pe '
+    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*(?:[-*+] |\d+[.)] ))/\n/g;
+    s/^[ \t]*\\?[ \t]*$//gm;
+    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*\n)/\n/g;
+    s/\n{3,}/\n\n/g;
+  '
+}
+
+# Dupliziert aus bin/md-clip — fasst Google-Classroom-Link-Anhänge zu
+# `<li><a href>Titel</a></li>` zusammen, strippt authuser-Tracking und
+# Thumbnails. Siehe bin/md-clip für die ausführliche Doku.
+preprocess_google_classroom() {
+  perl -0777 -pe '
+    s{<a\b([^>]*)\bhref="([^"]*)"([^>]*)>(.*?)</a>}{
+      my ($pre, $href, $post, $inner) = ($1, $2, $3, $4);
+      if ($inner =~ m{classroom\.google\.com/webthumbnail}) {
+        my $title = ($inner =~ m{class="[^"]*\bmvRF3b\b[^"]*">(.*?)</div>}s) ? $1 : "";
+        $title =~ s/<[^>]+>//g;
+        $title =~ s/^\s+|\s+$//g;
+        $href =~ s/[?&]authuser=[^&]*//;
+        $href =~ s/[?&]$//;
+        $title ne "" ? "<li><a href=\"$href\">$title</a></li>"
+                     : "<a href=\"$href\"></a>";
+      } else {
+        $&;
+      }
+    }gse;
+    s{<img[^>]*classroom\.google\.com/webthumbnail[^>]*>}{}gs;
+    1 while s{<div\b[^>]*>\s*</div>}{}gs;
+    1 while s{</li>(?:\s*</?div[^>]*>\s*)+<li>}{</li><li>}gs;
+    s{(?:<li>.*?</li>\s*)+}{my $r = $&; $r =~ s/>\s+</></g; "<ul>$r</ul>"}gse;
+  '
+}
+
 # Zähler für Statistik am Ende.
 TOTAL=0
 PASSED=0
@@ -111,7 +155,50 @@ run_test "word-rtf (RTF via textutil)" \
   "$actual" \
   "$FIXTURES/word-rtf.expected.md"
 
-# --- Test 4: Encoding-Roundtrip über das echte Clipboard ---
+# --- Test 4: Links mit leerem Anker-Text ---
+# <a href="…"></a> → pandoc liefert `[](url)`. fix_empty_links muss den
+# leeren []-Teil mit der URL füllen, Titel erhalten, echte Links unberührt.
+actual=$(cat "$FIXTURES/empty-link.html" \
+  | preprocess_claude_desktop \
+  | clean_html \
+  | pandoc "${PANDOC_OPTS[@]}" \
+  | fix_empty_links \
+  | tidy_hard_breaks)
+run_test "empty-link (leerer Anker-Text → URL als Text)" \
+  "$actual" \
+  "$FIXTURES/empty-link.expected.md"
+
+# --- Test 5: Google-Classroom-Link-Anhänge ---
+# Anhänge sind <a> die Block-Divs (Titel, URL, Thumbnail) umschließen.
+# Erwartung: kompakte Liste `- [Titel](href)`, authuser gestrippt,
+# Thumbnails weg, kein leerer `[](url)`.
+actual=$(cat "$FIXTURES/google-classroom-links.html" \
+  | preprocess_claude_desktop \
+  | preprocess_google_classroom \
+  | clean_html \
+  | pandoc "${PANDOC_OPTS[@]}" \
+  | fix_empty_links \
+  | tidy_hard_breaks)
+run_test "google-classroom-links (Anhänge → Titel-Liste)" \
+  "$actual" \
+  "$FIXTURES/google-classroom-links.expected.md"
+
+# --- Test 6: <br><br>-Absätze + Listen ---
+# <br><br> wird von pandoc zu Hard-Break-Backslash-Müll (`text\` + lone `\`).
+# tidy_hard_breaks muss daraus saubere Absätze + Listen machen, ohne
+# Hard-Breaks in echtem Fließtext zu zerstören.
+actual=$(cat "$FIXTURES/br-paragraphs.html" \
+  | preprocess_claude_desktop \
+  | clean_html \
+  | pandoc "${PANDOC_OPTS[@]}" \
+  | fix_empty_links \
+  | tidy_hard_breaks)
+run_test "br-paragraphs (<br><br> → Absätze ohne Backslash-Müll)" \
+  "$actual" \
+  "$FIXTURES/br-paragraphs.expected.md"
+
+echo
+echo "==> Encoding-Roundtrip-Test"
 #
 # Dieser Test ist der wichtigste, weil er die einzige Stelle ist, an der
 # wir die EFFEKTIVE Nutzer-Erfahrung prüfen — nicht nur die Bytes auf
@@ -124,9 +211,6 @@ run_test "word-rtf (RTF via textutil)" \
 # echte API, die jede Paste-Konsumenten-App verwendet.
 #
 # Siehe docs/ENCODING.md für die ausführliche Geschichte.
-
-echo
-echo "==> Encoding-Roundtrip-Test"
 
 # Helper bauen, falls nicht da.
 LOAD_CLIPBOARD_BIN="$TESTS_DIR/load-clipboard"

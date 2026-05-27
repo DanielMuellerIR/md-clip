@@ -24,7 +24,7 @@ set -euo pipefail
 # GitHub-Pages-Seite existiert, ist die Domain rechtlich uns.
 BUNDLE_ID="io.github.danielmuellerir.md-clip"
 APP_NAME="md-clip"
-APP_VERSION="1.0.3"
+APP_VERSION="1.0.4"
 
 # Mindest-macOS für das Bundle. 11.0 (Big Sur) ist die erste Version mit
 # nativer Apple-Silicon-Unterstützung und gleichzeitig der Cutoff, bis
