@@ -196,6 +196,10 @@ pandoc-COPYRIGHT.txt.
 
 Pandoc-Quellcode: https://github.com/jgm/pandoc/tree/${PANDOC_VERSION}
 
+Schriftliches Angebot (GPL): Der vollständige Quellcode dieser pandoc-
+Version wird auf Anfrage für mindestens drei Jahre bereitgestellt.
+Kontakt: <apple-id>
+
 md-clip selbst steht unter der MIT-Lizenz. MIT- und GPL-Komponenten
 werden hier als Aggregation distribuiert — nicht als abgeleitetes Werk.
 NOTE
