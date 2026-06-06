@@ -80,6 +80,47 @@ Alle Optionen im Überblick:
 | `--version` | `-v` | Versionsnummer |
 | `--help` | `-h` | Hilfetext |
 
+## Nutzung durch KI-Agenten und in Skripten (Headless)
+
+`md-clip` ist für die nicht-interaktive Nutzung ausgelegt — etwa durch KI-Agenten, in Shell-Skripten oder in CI-Schritten. Es stellt nie eine interaktive Rückfrage und verhält sich vollständig über Argumente, Exit-Codes und Standard-Streams steuerbar.
+
+**Ein- und Ausgabe**
+
+- **Eingabe ist immer das macOS-Clipboard** (NSPasteboard), nicht stdin. `md-clip` liest den Inhalt selbst aus dem Pasteboard; es nimmt keinen Text über die Standardeingabe entgegen. Ein Agent, der eigenen Text konvertieren will, legt ihn vorher per `pbcopy` ins Clipboard.
+- **Ausgabe geht per Default nach stdout** — reines Markdown, ohne Zusätze. Damit lässt sich das Ergebnis direkt in einer Variablen einfangen:
+  ```bash
+  markdown="$(md-clip --quiet)"
+  ```
+- **`--quiet` / `-q` hält stdout sauber:** Status- und Diagnosemeldungen laufen ausschließlich über stderr. Mit `--quiet` entfallen sie ganz, sodass stdout garantiert nur das konvertierte Markdown enthält — wichtig, wenn ein Agent die Ausgabe maschinell weiterverarbeitet.
+- **`--replace` / `-r` schreibt das Ergebnis zurück ins Clipboard** statt nach stdout. Für reine Pipelines ist die stdout-Variante (ohne `--replace`) meist die richtige.
+
+**Deterministisches Verhalten erzwingen**
+
+- **`--from FORMAT` / `-f`** umgeht die Auto-Erkennung und legt die Quelle fest: `html`, `rtf` oder `plain`. Nützlich, wenn ein Agent genau weiß, welches Format auf dem Clipboard liegt, und keine Heuristik will.
+- **`--to FORMAT` / `-t`** wählt den Markdown-Dialekt: `gfm` (Default), `markdown` oder `commonmark`.
+
+**Exit-Codes** (für Verzweigungen im aufrufenden Skript)
+
+| Code | Bedeutung |
+|---|---|
+| `0` | Erfolg |
+| `1` | Nichts Konvertierbares auf dem Clipboard (z.B. leer) |
+| `2` | Fehlende Abhängigkeit (pandoc, textutil, Swift-Helper) oder ungültiges Argument |
+| `3` | Konvertierungsfehler (pandoc o.ä. mit Non-Zero-Exit) |
+
+**Beispiel — Agent konvertiert eigenen HTML-Text:**
+
+```bash
+printf '%s' "$html" | pbcopy            # eigenen Inhalt ins Clipboard legen
+if markdown="$(md-clip --from html --quiet)"; then
+  printf '%s\n' "$markdown"             # nur sauberes Markdown auf stdout
+else
+  echo "md-clip fehlgeschlagen (Exit $?)" >&2
+fi
+```
+
+**Voraussetzung:** `md-clip` greift auf das GUI-Pasteboard zu. In einer angemeldeten macOS-Sitzung (auch im Terminal) funktioniert das. In einer reinen SSH- oder Hintergrund-Umgebung ohne Pasteboard-Zugriff steht kein Clipboard zur Verfügung.
+
 ## Dock-App
 
 Damit du nicht jedes Mal das Terminal öffnen musst, liegt im Ordner `wrappers/` ein Bauskript für eine Mini-App. Einmal ausführen:

@@ -49,14 +49,16 @@ fix_empty_links() {
 }
 
 # Dupliziert aus bin/md-clip — entfernt überflüssige Hard-Break-Backslashes
-# an Absatz-/Listengrenzen (auch aus <br><br>). Hard-Breaks in Fließtext
-# (z.B. Adressen) bleiben. Siehe bin/md-clip für die ausführliche Doku.
+# an Absatz-/Listengrenzen und am Dokument-Ende (auch aus <br><br>).
+# Hard-Breaks in Fließtext (z.B. Adressen) bleiben. Siehe bin/md-clip für
+# die ausführliche Doku.
 tidy_hard_breaks() {
   perl -0pe '
     s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*(?:[-*+] |\d+[.)] ))/\n/g;
     s/^[ \t]*\\?[ \t]*$//gm;
     s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*\n)/\n/g;
     s/\n{3,}/\n\n/g;
+    s/[ \t]*(?:\\|[ ]{2,})[ \t]*(\n*)\z/$1/;
   '
 }
 
@@ -196,6 +198,25 @@ actual=$(cat "$FIXTURES/br-paragraphs.html" \
 run_test "br-paragraphs (<br><br> → Absätze ohne Backslash-Müll)" \
   "$actual" \
   "$FIXTURES/br-paragraphs.expected.md"
+
+# --- Test 7: Trailing-Hard-Break am Dokument-Ende ---
+# Ein abschließendes <br> beim Copy erzeugt einen Hard-Break-Marker am
+# Dokument-Ende. Im `--to markdown`-Dialekt ist dieser Marker ein sichtbarer
+# `\` — die häufigste Quelle überzähliger Backslashes. tidy_hard_breaks muss
+# NUR den letzten (sinnlosen) Marker entfernen; die echten Hard-Breaks in den
+# Zeilen davor (mehrzeilige Adresse) MÜSSEN als `\` erhalten bleiben.
+# Bewusst mit `-t markdown` (statt Default gfm), weil nur dieser Dialekt den
+# Hard-Break als sichtbaren `\` schreibt — gfm/commonmark nutzen zwei
+# (unsichtbare) Leerzeichen, die ein Expected-File nicht stabil abbilden kann.
+PANDOC_OPTS_MD=(-f html -t markdown-raw_html --wrap=none)
+actual=$(cat "$FIXTURES/trailing-hardbreak.html" \
+  | clean_html \
+  | pandoc "${PANDOC_OPTS_MD[@]}" \
+  | fix_empty_links \
+  | tidy_hard_breaks)
+run_test "trailing-hardbreak (abschließendes <br> → kein End-Backslash)" \
+  "$actual" \
+  "$FIXTURES/trailing-hardbreak.expected.md"
 
 echo
 echo "==> Encoding-Roundtrip-Test"

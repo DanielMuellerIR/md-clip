@@ -47,7 +47,7 @@ export LANG=en_US.UTF-8
 
 # ---------- Konstanten ----------
 
-VERSION="1.0.4"
+VERSION="1.0.5"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -397,20 +397,21 @@ fix_empty_links() {
 # Hintergrund: pandoc gibt jedes <br> als Markdown-Hard-Break aus — ein `\`
 # am Zeilenende. Ein <br><br> (Absatztrennung beim Copy) wird sogar zu zwei
 # Hard-Breaks: `text\` plus eine Zeile, die nur aus `\` besteht. An
-# Absatzgrenzen und vor Listen ist dieser `\` reiner optischer Müll.
+# Absatzgrenzen, vor Listen und am Dokument-Ende ist dieser `\` reiner
+# optischer Müll.
 #
 # WICHTIG: Hard-Breaks in echtem Fließtext (z.B. mehrzeilige Adressen)
 # MÜSSEN erhalten bleiben — ohne `\` würden diese Zeilen beim Rendern zu
 # einer einzigen verschmelzen (einfacher Newline = Leerzeichen in Markdown).
-# Darum entfernen wir nur `\` an klaren Absatz-/Listengrenzen, nie mitten
-# im Fließtext. Lookaheads `(?=…)` prüfen die Folgezeile, ohne sie zu
-# schlucken.
+# Darum entfernen wir nur `\` an klaren Absatz-/Listengrenzen und am
+# Dokument-Ende, nie mitten im Fließtext. Lookaheads `(?=…)` prüfen die
+# Folgezeile, ohne sie zu schlucken.
 tidy_hard_breaks() {
   # Ein Hard-Break am Zeilenende kann zwei Schreibweisen haben, je nach
-  # pandoc-Version: ein `\` (pandoc ≥ ~3.6, auch unser System-pandoc) ODER
-  # zwei+ Leerzeichen (älteres pandoc, u.a. das in 1.0.3 gebündelte 3.5).
-  # Wir behandeln BEIDE, damit der Output unabhängig von der pandoc-Version
-  # identisch ist. Das Marker-Muster `(?:\\|[ ]{2,})` matcht beide Formen.
+  # pandoc-Ziel-Dialekt: zwei+ Leerzeichen (Default `--to gfm`/`commonmark`)
+  # ODER ein `\` (`--to markdown`, plus manche älteren pandoc-Versionen).
+  # Wir behandeln BEIDE, damit der Output unabhängig vom Dialekt identisch
+  # ist. Das Marker-Muster `(?:\\|[ ]{2,})` matcht beide Formen.
   perl -0pe '
     # 1. Hard-Break direkt vor einem Listenpunkt (- * + oder 1. / 1)) → weg.
     #    Die "- "-Zeilen bilden ohnehin eine Liste; der Umbruch ist überflüssig.
@@ -423,6 +424,13 @@ tidy_hard_breaks() {
     s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*\n)/\n/g;
     # 4. Mehr als zwei aufeinanderfolgende Newlines auf zwei reduzieren.
     s/\n{3,}/\n\n/g;
+    # 5. Hard-Break am DOKUMENT-ENDE → weg. Ein Umbruch, dem kein Inhalt
+    #    mehr folgt, ist immer sinnlos (häufigste Quelle überzähliger `\`:
+    #    ein abschließendes <br> beim Copy). `\z` ankert ans absolute
+    #    String-Ende, daher trifft es NUR den allerletzten Marker; echte
+    #    Hard-Breaks in den Zeilen davor bleiben unangetastet. Die
+    #    eingefangenen Trailing-Newlines ($1) bleiben erhalten.
+    s/[ \t]*(?:\\|[ ]{2,})[ \t]*(\n*)\z/$1/;
   '
 }
 
