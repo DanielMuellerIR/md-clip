@@ -195,4 +195,4 @@ md-clip steht unter der [MIT-Lizenz](LICENSE).
 
 Das im DMG mitgelieferte pandoc-Binary steht unter der **GPL v2 oder neuer**. Der vollständige Lizenztext und ein Verweis auf den pandoc-Quellcode liegen im App-Bundle unter `Contents/Resources/Licenses/`. MIT- und GPL-Komponenten werden hier als Aggregation distribuiert, nicht als abgeleitetes Werk — md-clip selbst ruft pandoc als externes Programm auf.
 
-Gemäß GPL stellen wir den vollständigen Quellcode der jeweils mitgelieferten pandoc-Version auf Anfrage für mindestens drei Jahre bereit (Kontakt: <apple-id>). Der Quellcode ist zusätzlich öffentlich unter [github.com/jgm/pandoc](https://github.com/jgm/pandoc) am jeweiligen Versions-Tag verfügbar.
+Gemäß GPL stellen wir den vollständigen Quellcode der jeweils mitgelieferten pandoc-Version auf Anfrage für mindestens drei Jahre bereit (Kontakt: GitHub-Issues oder Discussions unter [DanielMuellerIR/md-clip](https://github.com/DanielMuellerIR/md-clip)). Der Quellcode ist zusätzlich öffentlich unter [github.com/jgm/pandoc](https://github.com/jgm/pandoc) am jeweiligen Versions-Tag verfügbar.

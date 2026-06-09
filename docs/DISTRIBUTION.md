@@ -208,12 +208,13 @@ ohne Sicherheits-Warnung. Erfüllt mit v1.0.1.
   # Soll zeigen: Developer ID Application: Daniel Mueller (9QSWKSR4NQ)
   ```
 - **Team-ID:** `9QSWKSR4NQ`
-- **Apple-ID:** <apple-id>
+- **Apple-ID:** eigene Apple-ID (als Umgebungsvariable `APPLE_ID` setzen, nicht hardcoden)
 - **App-spezifisches Passwort** für `notarytool` als Schlüsselbund-Profil
   `md-clip-notarytool` hinterlegt. Eingerichtet mit:
   ```bash
+  export APPLE_ID="deine@apple-id.example"
   xcrun notarytool store-credentials "md-clip-notarytool" \
-    --apple-id "<apple-id>" \
+    --apple-id "$APPLE_ID" \
     --team-id  "9QSWKSR4NQ"
   # → fragt App-spezifisches Passwort INTERAKTIV ab; landet nicht in der History
   ```
@@ -326,7 +327,7 @@ In den GitHub-Settings unter Settings → Secrets and variables → Actions:
 |---|---|
 | `MACOS_CERTIFICATE_P12_BASE64` | `.p12`-Export des Developer-ID-Application-Zertifikats, base64-encoded |
 | `MACOS_CERTIFICATE_P12_PASSWORD` | Passwort, mit dem das `.p12` beim Export gesichert wurde |
-| `MACOS_NOTARIZATION_APPLE_ID` | `<apple-id>` |
+| `MACOS_NOTARIZATION_APPLE_ID` | deine Apple-ID (E-Mail-Adresse des Developer-Accounts) |
 | `MACOS_NOTARIZATION_TEAM_ID` | `9QSWKSR4NQ` |
 | `MACOS_NOTARIZATION_PASSWORD` | App-spezifisches Passwort für `notarytool` (dasselbe, das lokal im Schlüsselbund-Profil `md-clip-notarytool` liegt) |
 | `MACOS_KEYCHAIN_PASSWORD` | Beliebig wählbares starkes Passwort, schützt nur die temporäre Runner-Keychain während des Build-Laufs |
@@ -388,9 +389,8 @@ Schlüsselbundverwaltung öffnen (`open /Applications/Utilities/Keychain\ Access
 Dieser Prompt allein reicht, um eine frische Session in den Stand zu
 versetzen, an dem wir gerade aufgehört haben:
 
-> Wir arbeiten am Projekt **md-clip** im Verzeichnis
-> `das Projektverzeichnis (GitHub:
-> `DanielMuellerIR/md-clip`).
+> Wir arbeiten am Projekt **md-clip** (GitHub: `DanielMuellerIR/md-clip`,
+> Projektverzeichnis lokal klonen).
 >
 > Das Tool konvertiert macOS-Clipboard-Inhalt (HTML / RTF aus Browsern,
 > Word, TextEdit usw.) zu Markdown. Es gibt ein Bash-Hauptskript
@@ -403,8 +403,8 @@ versetzen, an dem wir gerade aufgehört haben:
 > tust:
 >
 > 1. `docs/DISTRIBUTION.md` — Status der drei Distribution-Stufen, Apple-
->    Credentials (Team-ID `9QSWKSR4NQ`, Apple-ID `<apple-id>`, Schlüssel-
->    bund-Profil `md-clip-notarytool`), kompletter Plan für **Stufe C**
+>    Credentials (Team-ID `9QSWKSR4NQ`, Apple-ID via `$APPLE_ID`-Env,
+>    Schlüsselbund-Profil `md-clip-notarytool`), kompletter Plan für **Stufe C**
 >    inkl. Workflow-Skelett und den sechs benötigten GitHub-Secrets.
 > 2. `docs/ENCODING.md` — Locale- und Encoding-Stolpersteine. Wichtigster
 >    Punkt: alle Bash-Skripte exportieren oben `LC_ALL=en_US.UTF-8`, NIE
