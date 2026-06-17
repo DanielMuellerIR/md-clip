@@ -22,9 +22,10 @@ set -euo pipefail
 # Beispiel: export APPLE_ID="deine@apple-id.example"
 APPLE_ID="${APPLE_ID:?Bitte APPLE_ID als Umgebungsvariable setzen (deine Apple-ID-E-Mail)}"
 
-IDENTITY="Developer ID Application: Daniel Mueller (9QSWKSR4NQ)"
+# Team-ID/Identitaet ueberschreibbar (CI/anderer Account); Default als Fallback.
+TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
+IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
 NOTARY_PROFILE="md-clip-notarytool"
-TEAM_ID="9QSWKSR4NQ"
 
 # DMG-Volume-Name = das, was im Finder über dem Fenster steht und in
 # /Volumes/<name> gemountet wird. Wird auch im AppleScript referenziert.
