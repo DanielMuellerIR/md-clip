@@ -1,2 +1,0 @@
-Einfacher Plain-Text.
-Mehrere Zeilen, keine Konvertierung nötig.

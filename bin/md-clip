@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # md-clip — Konvertiert Clipboard-Inhalt nach Markdown.
 #
-# Architektur (siehe BLUEPRINT.md für die Begründungen):
+# Architektur (siehe docs/archive/BLUEPRINT.md für die Begründungen):
 #   1. HTML direkt aus dem Clipboard via Swift-Helper (häufigster Fall:
 #      Browser, Claude Desktop, Notion).
 #   2. RTF via macOS-Bordmittel `textutil` zu HTML, dann selber Weg wie 1.
@@ -47,7 +47,7 @@ export LANG=en_US.UTF-8
 
 # ---------- Konstanten ----------
 
-VERSION="1.0.5"
+VERSION="1.0.6"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -75,14 +75,14 @@ if [ -x "$SCRIPT_DIR/pandoc" ]; then
   export PATH="$SCRIPT_DIR:$PATH"
 fi
 
-# Standard-Optionen für pandoc.
+# Standard-Optionen für pandoc — werden nach dem Argument-Parsing gesetzt
+# (PANDOC_OPTS Zeile nach dem `done`), weil das `-t`-Flag vom --to-Argument abhängt.
+# Dokumentation der Optionen:
 #   -f html         : HTML als Input-Format.
-#   -t gfm-raw_html : GitHub-Flavored Markdown ohne raw_html-Extension.
+#   -t <TO>-raw_html: Ziel-Markdown ohne raw_html-Extension (Standard: gfm-raw_html).
 #                     Nicht abbildbare HTML-Tags werden VERWORFEN statt
 #                     durchgereicht. Killt Tailwind-Müll im Output.
 #   --wrap=none     : Kein Auto-Wrap bei ~78 Zeichen.
-# Diese Optionen sind im Spike validiert (siehe BLUEPRINT.md).
-PANDOC_OPTS=(-f html -t gfm-raw_html --wrap=none)
 
 # ---------- Flag-Defaults ----------
 
@@ -123,9 +123,16 @@ err() {
 # osascript ist macOS-Bordmittel, kein extra Install nötig.
 notify() {
   if [ "$NOTIFY" -eq 1 ]; then
-    # Anführungszeichen im Text müssen escaped werden — wir bauen die
-    # AppleScript-Zeile als Heredoc-String, daher reicht einfaches Quoten.
-    osascript -e "display notification \"$1\" with title \"md-clip\"" || true
+    # Anführungszeichen und Backslashes im Meldungstext würden den AppleScript-
+    # Parser durcheinander bringen, wenn wir sie roh in den String interpolieren.
+    # Lösung: osascript als argv-Aufruf (-e mit getrennten Argumenten) — dann
+    # wird der Text als AppleScript-Literal übergeben, nicht als String-Konkatenation.
+    # Das umgeht die Injection vollständig, weil kein String-Building mehr nötig ist.
+    osascript \
+      -e 'on run argv' \
+      -e 'display notification (item 1 of argv) with title "md-clip"' \
+      -e 'end run' \
+      -- "$1" || true
   fi
 }
 
@@ -260,7 +267,7 @@ check_dependencies() {
 
 # preprocess_claude_desktop: Normalisiert HTML aus modernen Electron-Apps,
 # allen voran Claude Desktop. Vier Schritte hintereinander als Pipe.
-# Siehe BLUEPRINT.md "Was nicht funktioniert" für die Begründung jedes Schrittes.
+# Siehe docs/archive/BLUEPRINT.md "Was nicht funktioniert" für die Begründung jedes Schrittes.
 preprocess_claude_desktop() {
   # 1a. <div data-line="N">INHALT</div> → INHALT + echtes Newline.
   #     Claude Desktop kodiert Code-Zeilen als CSS-Subgrid-Divs OHNE \n im DOM.
@@ -434,25 +441,6 @@ tidy_hard_breaks() {
   '
 }
 
-# strip_single_column_tables: Entfernt 1-Spalten-Tabellen mit leerem
-# Header aus Markdown-Output. Diese entstehen, wenn textutil RTFs aus
-# Office-Dokumenten konvertiert, in denen Layout-Wrapper-Tabellen für
-# Zentrierung etc. missbraucht werden. Pandoc kann das nicht weglassen,
-# weil aus Pandoc-Sicht ist eine 1×1-Tabelle eine valide Tabelle.
-# Heuristik:
-#   - Drei aufeinanderfolgende Zeilen
-#   - 1. Zeile: nur `|` und Whitespace dazwischen (Header-Zeile, leer)
-#   - 2. Zeile: nur `|`, `-` und Whitespace (Separator)
-#   - 3. Zeile: `| inhalt |` (Datenzeile)
-#   → ersetze die drei Zeilen durch `inhalt` als normalen Absatz.
-strip_single_column_tables() {
-  perl -0pe 's{
-      ^ \| \s* \| \s*\n         # leere Header-Zeile
-      \| [-\s]+ \| \s*\n        # Separator-Zeile
-      \| \s* ([^\n|]+?) \s* \| \s*\n   # Datenzeile mit Inhalt in $1
-    }{$1\n}gmx'
-}
-
 # flatten_layout_tables: Wandelt verschachtelte HTML-Tabellen aus
 # textutil-Konversionen in flache Absatz-Sequenzen um.
 #
@@ -536,9 +524,12 @@ is_mso_html() {
   local html="$1"
 
   # Schneller, exakter Check: Office-XML-Namespace im <html>-Tag.
+  # Das dritte Pattern (*'Microsoft Word'*'Generator'*) wurde entfernt: Im echten
+  # Word-HTML steht "Generator" im Meta-Tag VOR "Microsoft Word" — die umgekehrte
+  # Reihenfolge trifft niemals zu. Das zweite Pattern (*'name=Generator content="Microsoft'*)
+  # deckt diesen Fall korrekt ab.
   case "$html" in
     *'microsoft-com:office'*)  return 0 ;;
-    *'Microsoft Word'*'Generator'*)  return 0 ;;
     *'name=Generator content="Microsoft'*)  return 0 ;;
   esac
 
@@ -598,11 +589,19 @@ else
       # voller MSO-Namespaces ist und Pandoc komplett überfordert. Wenn
       # wir das erkennen und RTF auch da ist, nehmen wir RTF.
       if html=$(try_html); then
-        if is_mso_html "$html" && rtf=$(try_rtf); then
+        # MSO-Erkennung nur einmal ausführen und Ergebnis im Flag cachen.
+        # Zwei Aufrufe von is_mso_html() auf demselben String (Bedingung + vlog)
+        # wären unnötig — beide durchlaufen denselben case-Block und ggf. grep.
+        # Hinweis: `local` ist hier nicht erlaubt, wir sind im Toplevel-Skript,
+        # nicht in einer Funktion.
+        mso_flag=0
+        is_mso_html "$html" && mso_flag=1
+
+        if [ "$mso_flag" -eq 1 ] && rtf=$(try_rtf); then
           vlog "HTML ist Microsoft-Word-Format — verwende stattdessen RTF"
           output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
         else
-          if is_mso_html "$html"; then
+          if [ "$mso_flag" -eq 1 ]; then
             vlog "HTML ist Microsoft-Word-Format, aber kein RTF da — versuche HTML trotzdem (Ergebnis vermutlich unsauber)"
           fi
           output=$(printf '%s' "$html" | convert_html) || die 3 "Pandoc-Konvertierung fehlgeschlagen."
