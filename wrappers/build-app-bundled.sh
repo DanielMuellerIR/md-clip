@@ -24,7 +24,10 @@ set -euo pipefail
 # GitHub-Pages-Seite existiert, ist die Domain rechtlich uns.
 BUNDLE_ID="io.github.danielmuellerir.md-clip"
 APP_NAME="md-clip"
-APP_VERSION="1.0.5"
+# APP_VERSION NICHT hardcoden — sonst driftet die Bundle-Version von der
+# echten Version in bin/md-clip weg. Sie wird weiter unten (nach dem Setzen
+# von PROJECT_ROOT) aus bin/md-clip abgeleitet — dieselbe Single-Source-of-
+# Truth wie in wrappers/sign-and-release.sh.
 
 # Mindest-macOS für das Bundle. 11.0 (Big Sur) ist die erste Version mit
 # nativer Apple-Silicon-Unterstützung und gleichzeitig der Cutoff, bis
@@ -39,6 +42,12 @@ PANDOC_VERSION="3.9.0.2"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth,
+# identisch zu wrappers/sign-and-release.sh. Landet unten im Info.plist als
+# CFBundleShortVersionString/CFBundleVersion.
+APP_VERSION=$(grep '^VERSION=' "$PROJECT_ROOT/bin/md-clip" | head -1 | cut -d'"' -f2)
+
 BUILD_DIR="$PROJECT_ROOT/build"
 CACHE_DIR="$BUILD_DIR/cache"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"

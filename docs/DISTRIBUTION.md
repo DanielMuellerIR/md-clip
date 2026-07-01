@@ -254,6 +254,7 @@ Dauer: Build ~30 s, Notarization typisch 2–3 min. Insgesamt ~4 min.
 
 ---
 
+<!-- codereview-ok: Abschnitt ist bereits als "⏳ nächste Session" + "Workflow-Skizze" gekennzeichnet, der geforderte Hinweis steht schon da (2026-07-01) -->
 ## Stufe C — GitHub Action für Tag-Releases (⏳ nächste Session)
 
 Sobald jemand `git tag v1.0.2 && git push --tags` macht, soll automatisch

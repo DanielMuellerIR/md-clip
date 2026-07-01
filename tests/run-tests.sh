@@ -113,6 +113,7 @@ run_test() {
 
   # Trailing-Newlines normalisieren: actual hat keinen Trailing-Newline,
   # expected-Files haben oft einen. Wir vergleichen ohne.
+  # codereview-ok: beide Seiten sind gequotet, in [ ] findet bei gequoteten Expansions kein Word-Splitting/Globbing statt (2026-07-01)
   if [ "$actual" = "$expected" ] || [ "${actual}" = "${expected%$'\n'}" ]; then
     echo "✓ $name"
     PASSED=$((PASSED + 1))
@@ -252,6 +253,14 @@ fi
 CLIPBOARD_BACKUP="$(mktemp)"
 pbpaste > "$CLIPBOARD_BACKUP" 2>/dev/null || true
 
+# EXIT-Trap: unter dem aktiven `set -euo pipefail` reicht ein Nicht-Null-Exit
+# von md-clip (unten) oder ein Ctrl-C, um das Skript sofort abzubrechen. Ohne
+# Trap bliebe dann das Test-HTML im Nutzer-Clipboard liegen und die Temp-
+# Dateien würden leaken. Der Trap restauriert das Clipboard und räumt auf —
+# egal, wie das Skript endet. `${ENCODING_HTML:-}` deckt den Fall ab, dass der
+# Abbruch passiert, bevor ENCODING_HTML weiter unten gesetzt wurde (set -u).
+trap 'cat "$CLIPBOARD_BACKUP" | pbcopy 2>/dev/null; rm -f "$CLIPBOARD_BACKUP" "${ENCODING_HTML:-}"' EXIT
+
 # Test-Eingabe: drei Kategorien Nicht-ASCII auf einmal — Latin-1-Umlaute
 # (ä, ö, ü, ß), 2-Byte-Sonderzeichen (—) und 3-Byte-BMP-Symbole (☤).
 # Wer EINE dieser Kategorien verliert, fällt durch.
@@ -285,9 +294,8 @@ else
 fi
 TOTAL=$((TOTAL + 1))
 
-# Original-Clipboard wiederherstellen.
-cat "$CLIPBOARD_BACKUP" | pbcopy
-rm -f "$CLIPBOARD_BACKUP" "$ENCODING_HTML"
+# Original-Clipboard wiederherstellen + Temp-Dateien aufräumen erledigt der
+# EXIT-Trap (siehe oben) — auch bei vorzeitigem Abbruch.
 
 # --- Zusammenfassung ---
 echo
