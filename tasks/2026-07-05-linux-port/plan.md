@@ -30,8 +30,8 @@ Backend (NICHT `$DISPLAY` — das ist unter Wayland via XWayland ebenfalls geset
 
 ## Verifikation (2026-07-16)
 
-Linux-Läufe im Ubuntu-24.04-Container auf popo (Docker; popos System blieb
-unangetastet, es fehlt dort passwortloses sudo).
+Linux-Läufe in einem lokalen Ubuntu-24.04-Container (Docker; das Hostsystem
+blieb unangetastet, dort ist kein passwortloses sudo eingerichtet).
 
 | Umgebung | Ergebnis |
 |---|---|
