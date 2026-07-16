@@ -2,10 +2,25 @@
 # md-clip — Konvertiert Clipboard-Inhalt nach Markdown.
 #
 # Architektur (siehe docs/archive/BLUEPRINT.md für die Begründungen):
-#   1. HTML direkt aus dem Clipboard via Swift-Helper (häufigster Fall:
-#      Browser, Claude Desktop, Notion).
-#   2. RTF via macOS-Bordmittel `textutil` zu HTML, dann selber Weg wie 1.
+#   1. HTML direkt aus dem Clipboard (häufigster Fall: Browser, Claude
+#      Desktop, Notion).
+#   2. RTF zu HTML konvertieren, dann selber Weg wie 1.
 #   3. Plain-Text durchreichen, kein Convert.
+#
+# Läuft auf macOS UND Linux (X11 und Wayland). Die Konvertierungs-Pipeline
+# (pandoc + Perl) ist auf beiden Plattformen identisch — nur die Ränder
+# unterscheiden sich, und die stecken alle im Abschnitt „Plattform-Weiche":
+#
+#   Aufgabe            macOS                Linux X11    Linux Wayland
+#   ------------------ -------------------- ------------ -------------
+#   Clipboard lesen    Swift-Helper/pbpaste xclip        wl-paste
+#   Clipboard schreiben pbcopy              xclip         wl-copy
+#   RTF → HTML         textutil             pandoc        pandoc
+#   Notification       osascript            notify-send   notify-send
+#
+# Der Rest des Skripts ruft nur noch die plattformneutralen Funktionen
+# clip_read_html / clip_read_rtf / clip_read_text / clip_write_text /
+# rtf_to_html / notify auf und weiß nicht, auf welchem System es läuft.
 #
 # Default: schreibt das Ergebnis nach stdout. Mit --replace landet es
 # stattdessen zurück im Clipboard (alle Rich-Flavors werden überschrieben).
@@ -16,6 +31,39 @@
 #   -o pipefail: Wenn ein Glied einer Pipe fehlschlägt, gilt die ganze Pipe als Fehler.
 # Das macht das Skript deutlich vorhersagbarer als Default-Bash.
 set -euo pipefail
+
+# ---------- Plattform-Erkennung ----------
+
+# Ganz früh, weil PATH, Locale und die Dependency-Checks weiter unten
+# schon davon abhängen. `uname -s` ist der klassische, überall verfügbare
+# Weg: "Darwin" = macOS, "Linux" = Linux.
+case "$(uname -s)" in
+  Darwin) PLATFORM="macos" ;;
+  Linux)  PLATFORM="linux" ;;
+  *)
+    # Kein `die` möglich — die Funktion ist hier noch nicht definiert.
+    printf 'md-clip: Nicht unterstützte Plattform: %s (unterstützt: macOS, Linux)\n' "$(uname -s)" >&2
+    exit 2
+    ;;
+esac
+
+# Auf Linux gibt es zwei konkurrierende Display-Server mit je eigenem
+# Clipboard-Werkzeug. Die Sitzung selbst sagt uns, welcher läuft:
+# WAYLAND_DISPLAY ist nur in einer Wayland-Sitzung gesetzt.
+#
+# Achtung, häufige Verwechslung: unter Wayland ist DISPLAY oft TROTZDEM
+# gesetzt (XWayland-Kompatibilitätsschicht für alte X11-Programme). Auf
+# DISPLAY zu prüfen würde Wayland-Sitzungen also fälschlich als X11
+# erkennen. Darum ist WAYLAND_DISPLAY das entscheidende Signal und wird
+# zuerst geprüft.
+CLIP_BACKEND=""
+if [ "$PLATFORM" = "linux" ]; then
+  if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    CLIP_BACKEND="wayland"
+  else
+    CLIP_BACKEND="x11"
+  fi
+fi
 
 # Wenn md-clip aus einer GUI-App gestartet wird (Dock-Icon, Kurzbefehle.app,
 # Automator), erbt der Prozess NICHT dein Shell-PATH. Er sieht nur den
@@ -37,17 +85,32 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 # „undefiniert" behandelt. Folge: pandoc, perl, sed interpretieren UTF-8-
 # Bytes falsch, Umlaute (ä = 0xc3 0xa4) werden zerlegt und kommen als
 # „Ã¤" oder „√§" o.ä. raus.
-# Wir setzen LC_ALL hart auf en_US.UTF-8 — Clipboard-Inhalte sind auf
-# macOS immer UTF-8, und sowohl pandoc/perl/sed ALS AUCH pbcopy/pbpaste
+# Auf macOS setzen wir LC_ALL hart auf en_US.UTF-8 — Clipboard-Inhalte sind
+# dort immer UTF-8, und sowohl pandoc/perl/sed ALS AUCH pbcopy/pbpaste
 # arbeiten nur dann korrekt mit UTF-8, wenn LC_ALL auf eine NAMED
 # UTF-8-Locale (lang.UTF-8) gesetzt ist. Mit LC_ALL=C/leer/bare UTF-8
 # interpretieren pbcopy/pbpaste die Bytes als MacRoman.
-export LC_ALL=en_US.UTF-8
-export LANG=en_US.UTF-8
+#
+# Auf Linux wäre en_US.UTF-8 die FALSCHE Wahl: Locales müssen dort erst
+# erzeugt werden (`locale-gen`), und auf einem deutschen System oder in
+# einem schlanken Container existiert en_US.UTF-8 schlicht nicht. Ein
+# nicht existierendes LC_ALL lässt perl mit „Falling back to the standard
+# locale" auf stderr meckern und kippt die Zeichenbehandlung zurück auf C
+# — genau der Umlaut-Salat, den wir vermeiden wollen. C.UTF-8 dagegen ist
+# in glibc fest eingebaut, braucht kein locale-gen und ist damit auf jedem
+# Linux verfügbar. pbcopy/pbpaste, der einzige Grund für eine benannte
+# Sprach-Locale, gibt es hier ohnehin nicht.
+if [ "$PLATFORM" = "macos" ]; then
+  export LC_ALL=en_US.UTF-8
+  export LANG=en_US.UTF-8
+else
+  export LC_ALL=C.UTF-8
+  export LANG=C.UTF-8
+fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.0.6"
+VERSION="1.1.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -61,6 +124,10 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 #   Projekt-Layout: bin/md-clip ruft helpers/clipboard-* (Schwester-Ordner).
 #   Bundle-Layout:  alle Binaries liegen NEBEN dem Skript (Contents/Resources/bin/).
 # Wir probieren erst Bundle (kürzerer Pfad), dann Projekt.
+#
+# Nur für macOS relevant: Die Swift-Helper lesen das NSPasteboard. Auf Linux
+# werden sie nie aufgerufen (dort macht xclip/wl-paste den Job) und auch nie
+# geprüft — die Variablen bleiben dann einfach unbenutzt stehen.
 if [ -x "$SCRIPT_DIR/clipboard-html" ]; then
   HTML_HELPER="$SCRIPT_DIR/clipboard-html"
   RTF_HELPER="$SCRIPT_DIR/clipboard-rtf"
@@ -92,7 +159,7 @@ PLAIN=0         # --plain: Plain-Text-Modus, kein Convert
 FROM="auto"     # --from: auto|html|rtf|plain
 TO="gfm"        # --to: pandoc-Ziel-Dialekt (gfm|markdown|commonmark)
 QUIET=0         # --quiet: keine Status-Logs auf stderr
-NOTIFY=0        # --notify: macOS-Notification bei Erfolg
+NOTIFY=0        # --notify: Desktop-Notification bei Erfolg
 VERBOSE=0       # --verbose: Diagnose-Output auf stderr
 
 # ---------- Hilfsfunktionen ----------
@@ -119,10 +186,14 @@ err() {
   printf 'md-clip: %s\n' "$*" >&2
 }
 
-# notify: macOS-Notification anzeigen, wenn --notify gesetzt ist.
-# osascript ist macOS-Bordmittel, kein extra Install nötig.
+# notify: Desktop-Notification anzeigen, wenn --notify gesetzt ist.
+# Auf macOS via osascript (Bordmittel), auf Linux via notify-send (libnotify).
 notify() {
-  if [ "$NOTIFY" -eq 1 ]; then
+  if [ "$NOTIFY" -eq 0 ]; then
+    return 0
+  fi
+
+  if [ "$PLATFORM" = "macos" ]; then
     # Anführungszeichen und Backslashes im Meldungstext würden den AppleScript-
     # Parser durcheinander bringen, wenn wir sie roh in den String interpolieren.
     # Lösung: osascript als argv-Aufruf (-e mit getrennten Argumenten) — dann
@@ -133,6 +204,17 @@ notify() {
       -e 'display notification (item 1 of argv) with title "md-clip"' \
       -e 'end run' \
       -- "$1" || true
+  else
+    # notify-send nimmt Titel und Text als zwei normale Argumente — kein
+    # String-Building, also auch hier keine Injection möglich. Das `--`
+    # trennt Optionen von Argumenten, damit eine Meldung, die mit „-"
+    # beginnt, nicht als Flag missverstanden wird.
+    #
+    # `|| true`, weil notify-send einen laufenden Notification-Daemon über
+    # D-Bus braucht: Über SSH, in einem Container oder in einer reinen
+    # Terminal-Sitzung gibt es keinen — die fehlende Notification darf den
+    # eigentlichen Job (Markdown konvertieren) niemals scheitern lassen.
+    notify-send -- "md-clip" "$1" || true
   fi
 }
 
@@ -166,7 +248,7 @@ OPTIONS
   -t, --to FORMAT      Pandoc-Ziel-Dialekt: gfm|markdown|commonmark
                        (default: gfm).
   -q, --quiet          Keine Status-Ausgaben auf stderr.
-  -n, --notify         macOS-Notification bei Erfolg (für Wrapper-Aufrufe).
+  -n, --notify         Desktop-Notification bei Erfolg (für Wrapper-Aufrufe).
   -V, --verbose        Diagnose-Output (welche Flavors, welcher Pfad).
   -v, --version        Versionsnummer ausgeben.
   -h, --help           Diese Hilfe anzeigen.
@@ -174,7 +256,7 @@ OPTIONS
 EXIT-CODES
   0  Erfolg
   1  Nichts Konvertierbares auf dem Clipboard
-  2  Dependency fehlt (pandoc, textutil, Swift-Helper)
+  2  Dependency fehlt (pandoc; macOS: Swift-Helper, Linux: xclip/wl-clipboard)
   3  Konvertierungsfehler (pandoc o.ä. mit non-zero exit)
 
 BEISPIELE
@@ -183,6 +265,191 @@ BEISPIELE
   md-clip -p -r               # Clipboard auf reines Plain-Text reduzieren
   md-clip --verbose           # Diagnose, welcher Pfad gewählt wird
 EOF
+}
+
+# ---------- Plattform-Weiche ----------
+#
+# Alles, was sich zwischen macOS und Linux unterscheidet, steckt in diesem
+# Abschnitt. Der Rest des Skripts ruft nur die neutralen Funktionen auf.
+
+# to_utf8: Gibt den Inhalt der Datei $1 als garantiert BOM-freies UTF-8 aus.
+#
+# Warum das nötig ist: Auf Linux legt Firefox seinen text/html-Flavor als
+# UTF-16 aufs Clipboard (Altlast der GTK-Clipboard-Anbindung), Chromium
+# dagegen als UTF-8. Wer das nicht behandelt, bekommt aus Firefox-Kopien
+# Text, in dem zwischen jedem Buchstaben ein NUL-Byte steht — pandoc sieht
+# darin kein HTML und liefert Müll. Weil man dem Clipboard nicht ansieht,
+# welcher Browser geschrieben hat, entscheiden wir anhand der BOM
+# (Byte Order Mark), der Signatur in den ersten zwei bis drei Bytes.
+#
+# Bewusst eine DATEI und kein stdin/Variable: Bash verwirft in `$(...)`
+# NUL-Bytes — genau die Bytes, die UTF-16 ausmachen. Über eine Variable
+# wäre der Text also schon kaputt, bevor wir ihn ansehen könnten.
+to_utf8() {
+  local file="$1"
+  local bom
+
+  # Erste 3 Bytes als Hex lesen. `od -An -tx1` gibt sie durch Leerzeichen
+  # getrennt aus, `tr -d` macht daraus eine durchgehende Hex-Kette.
+  bom="$(head -c 3 "$file" | od -An -tx1 | tr -d ' \n')"
+
+  case "$bom" in
+    fffe*|feff*)
+      # UTF-16, Little- oder Big-Endian. Wir übergeben iconv bewusst
+      # „UTF-16" OHNE LE/BE-Suffix: In dieser Form wertet iconv die BOM
+      # selbst aus, erkennt die Byte-Reihenfolge daran und entfernt sie
+      # aus der Ausgabe. Mit „UTF-16LE" müssten wir die Reihenfolge selbst
+      # bestimmen und die BOM bliebe als unsichtbares Zeichen im Text stehen.
+      iconv -f UTF-16 -t UTF-8 < "$file"
+      ;;
+    efbbbf*)
+      # UTF-8 mit BOM. Der Inhalt stimmt schon, nur die drei BOM-Bytes
+      # müssen weg — sonst landen sie als unsichtbarer Fleck am Anfang des
+      # Markdowns. `tail -c +4` gibt alles ab dem 4. Byte aus.
+      tail -c +4 "$file"
+      ;;
+    *)
+      # Kein BOM → schon reines UTF-8, unverändert durchreichen.
+      cat "$file"
+      ;;
+  esac
+}
+
+# linux_clip_read: Liest den ersten verfügbaren der übergebenen MIME-Typen
+# vom Clipboard und gibt ihn als UTF-8 auf stdout aus.
+# Exit 0 = etwas gefunden, Exit 1 = keiner der Typen liegt an.
+#
+# Mehrere Typen, weil sich die Programme nicht einig sind: RTF liegt je nach
+# Quelle als text/rtf oder als application/rtf an.
+linux_clip_read() {
+  local mime tmp
+  tmp="$(mktemp)"
+
+  for mime in "$@"; do
+    # `|| continue`: Fehlt der Typ auf dem Clipboard, melden xclip und
+    # wl-paste einen Fehler — das ist hier kein Problem, sondern die
+    # normale Antwort „hab ich nicht", also nächsten Typ probieren.
+    if [ "$CLIP_BACKEND" = "wayland" ]; then
+      wl-paste --no-newline --type "$mime" > "$tmp" 2>/dev/null || continue
+    else
+      xclip -selection clipboard -target "$mime" -out > "$tmp" 2>/dev/null || continue
+    fi
+
+    # `-s` = Datei existiert UND ist nicht leer. Der Test ist nötig, weil
+    # manche xclip-Versionen bei fehlendem Typ trotzdem Exit 0 melden und
+    # einfach nichts ausgeben.
+    if [ -s "$tmp" ]; then
+      # Das `|| { … }` ist die Aufräum-Garantie: Ohne den Zweig würde ein
+      # Fehler in to_utf8 (z.B. kaputtes UTF-16) die Temp-Datei liegen lassen.
+      to_utf8 "$tmp" || { rm -f "$tmp"; return 1; }
+      rm -f "$tmp"
+      return 0
+    fi
+  done
+
+  rm -f "$tmp"
+  return 1
+}
+
+# clip_read_html: HTML-Flavor vom Clipboard holen.
+# Exit 0 + HTML auf stdout, wenn vorhanden; sonst Exit 1 ohne Ausgabe.
+clip_read_html() {
+  if [ "$PLATFORM" = "macos" ]; then
+    "$HTML_HELPER" 2>/dev/null
+  else
+    linux_clip_read text/html
+  fi
+}
+
+# clip_read_rtf: RTF-Flavor vom Clipboard holen.
+#
+# Auf macOS nutzen wir den Swift-Helper statt `pbpaste -Prefer rtf`, weil
+# pbpaste auf Plain Text ausweicht, sobald zusätzlich zum RTF auch RTFD auf
+# dem Clipboard liegt (typisch für TextEdit-Inhalte mit Bildern). Der Helper
+# greift direkt auf den .rtf-Flavor in NSPasteboard zu — zuverlässig.
+clip_read_rtf() {
+  if [ "$PLATFORM" = "macos" ]; then
+    "$RTF_HELPER" 2>/dev/null
+  else
+    linux_clip_read text/rtf application/rtf
+  fi
+}
+
+# clip_read_text: Plain-Text vom Clipboard holen.
+clip_read_text() {
+  if [ "$PLATFORM" = "macos" ]; then
+    pbpaste
+  elif [ "$CLIP_BACKEND" = "wayland" ]; then
+    # --no-newline: wl-paste hängt sonst ein Newline an, das im Original
+    # nicht stand. pbpaste tut das nicht — so verhalten sich beide gleich.
+    wl-paste --no-newline 2>/dev/null
+  else
+    xclip -selection clipboard -out 2>/dev/null
+  fi
+}
+
+# clip_write_text: Plain-Text von stdin ins Clipboard schreiben.
+# Ersetzt den Inhalt komplett — alle Rich-Flavors (HTML, RTF) verschwinden.
+clip_write_text() {
+  if [ "$PLATFORM" = "macos" ]; then
+    pbcopy
+  elif [ "$CLIP_BACKEND" = "wayland" ]; then
+    wl-copy
+  else
+    # xclip forkt sich in den Hintergrund und hält die Auswahl, solange kein
+    # anderes Programm sie übernimmt — so verlangt es das X11-Clipboard-
+    # Protokoll: Es gibt keinen zentralen Speicher, der Besitzer liefert den
+    # Inhalt auf Anfrage aus. Stirbt der Prozess, ist das Clipboard leer.
+    #
+    # Ohne umgeleitete Standard-Kanäle würde dieser Hintergrund-Prozess die
+    # Pipe unserer Aufrufer offen halten: `md-clip --replace | cat` bliebe
+    # dann hängen, bis xclip irgendwann endet. Darum stdout/stderr nach
+    # /dev/null — md-clip kehrt sofort zurück, xclip lebt weiter.
+    xclip -selection clipboard -in >/dev/null 2>&1
+  fi
+}
+
+# rtf_fix_escaped_newlines: Gleicht eine Lücke in pandocs RTF-Reader aus.
+#
+# Die RTF-Spezifikation (1.9.1) sagt: Ein Backslash unmittelbar vor einem
+# Zeilenumbruch bedeutet dasselbe wie das Steuerwort \par, also ein
+# Absatzende. Apples TextEdit schreibt genau diese Kurzform. textutil kennt
+# sie, pandocs RTF-Reader nicht — der macht daraus nur einen Zeilenumbruch.
+# Folge ohne diese Funktion: Aus zwei Absätzen wird auf Linux einer mit
+# hartem Umbruch, dasselbe RTF ergäbe je nach Plattform anderes Markdown.
+#
+# Wir schreiben die Kurzform daher vor pandoc in die Langform \par um.
+#
+# Der Backslash ist in RTF auch das Escape-Zeichen: `\\` bedeutet „ein
+# literaler Backslash". Ein `\\` am Zeilenende ist also KEIN Absatzende,
+# und ein blindes Ersetzen würde dort einen Absatz erfinden. Das Muster
+# zählt darum, wie viele Backslashes davorstehen:
+#   (?<!\\)      — davor darf kein Backslash stehen (sonst zählen wir falsch),
+#   ((?:\\\\)*)  — beliebig viele VOLLSTÄNDIGE Escape-Paare, unverändert
+#                  übernommen (gerade Anzahl = alle sind Literale),
+#   \\(\r?\n)    — und erst der danach ÜBRIGE, einzelne Backslash vor dem
+#                  Zeilenende ist das echte Absatzende.
+# So trifft die Regel `Text.\` (Absatz), lässt `Text\\` (Literal) aber in Ruhe.
+rtf_fix_escaped_newlines() {
+  perl -0pe 's/(?<!\\)((?:\\\\)*)\\(\r?\n)/$1\\par$2/g'
+}
+
+# rtf_to_html: RTF von stdin nach HTML auf stdout.
+#
+# macOS: textutil (Bordmittel, nutzt Apples eigenen RTF-Parser).
+# Linux: pandocs RTF-Reader (seit pandoc 2.19), plus die Spec-Korrektur oben.
+#
+# Beide Wege liefern für tests/fixtures/word-rtf.rtf identisches Markdown —
+# das pinnt der word-rtf-Test auf beiden Plattformen gegen dieselbe Erwartung.
+rtf_to_html() {
+  if [ "$PLATFORM" = "macos" ]; then
+    # textutil setzt die \par-Kurzform von sich aus korrekt um — hier ist
+    # rtf_fix_escaped_newlines nicht nötig und bleibt bewusst weg, damit der
+    # macOS-Pfad exakt der bisherige bleibt.
+    textutil -convert html -format rtf -stdin -stdout
+  else
+    rtf_fix_escaped_newlines | pandoc -f rtf -t html
+  fi
 }
 
 # ---------- Flag-Parsing ----------
@@ -217,6 +484,13 @@ while [ "$#" -gt 0 ]; do
       # weil sich das pandoc-Verhalten zwischen Versionen merklich
       # unterscheiden kann.
       printf 'md-clip %s\n' "$VERSION"
+      # Plattform + Clipboard-Backend mit ausgeben: Beim Bug-Reporting ist
+      # „X11 statt Wayland erkannt" eine der ersten Fragen.
+      if [ "$PLATFORM" = "macos" ]; then
+        printf 'System  macOS\n'
+      else
+        printf 'System  Linux (%s)\n' "$CLIP_BACKEND"
+      fi
       if [ -x "$SCRIPT_DIR/pandoc" ]; then
         printf 'pandoc  %s (gebundelt)\n' "$("$SCRIPT_DIR/pandoc" --version 2>/dev/null | head -1 | awk '{print $2}')"
       elif command -v pandoc >/dev/null 2>&1; then
@@ -244,23 +518,57 @@ PANDOC_OPTS=(-f html -t "${TO}-raw_html" --wrap=none)
 # Wir prüfen hier alle Pflicht-Binaries — early-fail mit klarem Fehlertext.
 check_dependencies() {
   local missing=()
-  command -v pandoc   >/dev/null 2>&1 || missing+=("pandoc")
-  command -v textutil >/dev/null 2>&1 || missing+=("textutil")
-  command -v pbpaste  >/dev/null 2>&1 || missing+=("pbpaste")
-  command -v pbcopy   >/dev/null 2>&1 || missing+=("pbcopy")
-  command -v perl     >/dev/null 2>&1 || missing+=("perl")
+  local hint=""
+
+  # Auf beiden Plattformen nötig: die eigentliche Konvertierungs-Pipeline.
+  command -v pandoc >/dev/null 2>&1 || missing+=("pandoc")
+  command -v perl   >/dev/null 2>&1 || missing+=("perl")
+
+  if [ "$PLATFORM" = "macos" ]; then
+    command -v textutil >/dev/null 2>&1 || missing+=("textutil")
+    command -v pbpaste  >/dev/null 2>&1 || missing+=("pbpaste")
+    command -v pbcopy   >/dev/null 2>&1 || missing+=("pbcopy")
+    hint="Installation: brew install pandoc"
+  else
+    # iconv wandelt Firefox' UTF-16-HTML nach UTF-8 (siehe to_utf8).
+    # Teil von glibc, fehlt praktisch nie — geprüft wird es trotzdem,
+    # weil ein stiller Ausfall hier Mojibake statt Fehlermeldung bedeutet.
+    command -v iconv >/dev/null 2>&1 || missing+=("iconv")
+
+    # Nur das Werkzeug der tatsächlich laufenden Sitzung verlangen: Wer
+    # unter X11 arbeitet, braucht kein wl-clipboard und umgekehrt.
+    if [ "$CLIP_BACKEND" = "wayland" ]; then
+      command -v wl-paste >/dev/null 2>&1 || missing+=("wl-paste")
+      command -v wl-copy  >/dev/null 2>&1 || missing+=("wl-copy")
+      hint="Installation: sudo apt install pandoc wl-clipboard  (Wayland-Sitzung erkannt)"
+    else
+      command -v xclip >/dev/null 2>&1 || missing+=("xclip")
+      hint="Installation: sudo apt install pandoc xclip  (X11-Sitzung erkannt)"
+    fi
+
+    # notify-send nur verlangen, wenn --notify wirklich gesetzt ist —
+    # sonst müsste jeder CLI-Nutzer libnotify installieren, obwohl er nie
+    # eine Notification sehen will.
+    if [ "$NOTIFY" -eq 1 ]; then
+      command -v notify-send >/dev/null 2>&1 || missing+=("notify-send (Paket libnotify-bin)")
+    fi
+  fi
 
   if [ "${#missing[@]}" -gt 0 ]; then
-    die 2 "Fehlende Dependencies: ${missing[*]}. Installation: brew install pandoc"
+    die 2 "Fehlende Dependencies: ${missing[*]}. $hint"
   fi
 
   # Swift-Helper separat prüfen — die werden im Projekt mitgeliefert,
   # nicht im PATH. Wenn einer fehlt, deuten wir auf install.sh hin.
-  for helper in "$HTML_HELPER" "$RTF_HELPER"; do
-    if [ ! -x "$helper" ]; then
-      die 2 "Swift-Helper nicht gefunden oder nicht ausführbar: $helper (install.sh ausführen)"
-    fi
-  done
+  # Nur auf macOS: Auf Linux liest xclip/wl-paste das Clipboard, die
+  # Helper werden dort nie aufgerufen.
+  if [ "$PLATFORM" = "macos" ]; then
+    for helper in "$HTML_HELPER" "$RTF_HELPER"; do
+      if [ ! -x "$helper" ]; then
+        die 2 "Swift-Helper nicht gefunden oder nicht ausführbar: $helper (install.sh ausführen)"
+      fi
+    done
+  fi
 }
 
 # ---------- Preprocessor + Cleaner (aus dem Spike) ----------
@@ -490,12 +798,31 @@ tidy_rtf_artifacts() {
   '
 }
 
-# convert_rtf: RTF-String von stdin lesen, via textutil zu HTML,
-# Layout-Tabellen plätten, dann normaler HTML-Pfad zu Markdown.
+# unwrap_list_paragraphs: Macht aus <li><p>Text</p></li> ein <li>Text</li>.
+#
+# Hintergrund: pandocs RTF-Reader (Linux-Pfad) packt jeden Listenpunkt-Inhalt
+# in einen eigenen <p>-Absatz. Pandoc liest das als „lose" Liste und schreibt
+# dann Markdown mit einer Leerzeile zwischen JEDEM Punkt — optisch
+# auseinandergerissen, obwohl das Original eine kompakte Liste war.
+#
+# Wir entfernen den <p>-Wrapper nur, wenn er der EINZIGE Inhalt des <li> ist
+# ([^<] im Muster stellt sicher, dass wirklich nur Text drinsteht). Ein <li>
+# mit mehreren echten Absätzen bleibt unangetastet — dort ist die lose Liste
+# ja die richtige Darstellung.
+#
+# Auf macOS ein No-Op: textutil erzeugt <li> ohne inneres <p>, das Muster
+# greift dort schlicht nie.
+unwrap_list_paragraphs() {
+  perl -0pe 's{<li([^>]*)>\s*<p[^>]*>([^<]*)</p>\s*</li>}{<li$1>$2</li>}gs'
+}
+
+# convert_rtf: RTF-String von stdin lesen, zu HTML wandeln (plattformabhängig,
+# siehe rtf_to_html), Layout-Tabellen plätten, dann normaler HTML-Pfad zu Markdown.
 convert_rtf() {
-  vlog "Pfad: RTF → textutil → HTML → flatten → pandoc → tidy"
-  textutil -convert html -format rtf -stdin -stdout \
+  vlog "Pfad: RTF → HTML → flatten → pandoc → tidy"
+  rtf_to_html \
     | flatten_layout_tables \
+    | unwrap_list_paragraphs \
     | clean_html \
     | pandoc "${PANDOC_OPTS[@]}" \
     | tidy_rtf_artifacts \
@@ -506,7 +833,7 @@ convert_rtf() {
 # try_html: Versucht HTML aus dem Clipboard zu holen.
 # Liefert HTML auf stdout und Exit 0, wenn vorhanden; sonst Exit 1.
 try_html() {
-  "$HTML_HELPER" 2>/dev/null
+  clip_read_html
 }
 
 # is_mso_html: Prüft, ob ein HTML-Blob aus Microsoft Word stammt.
@@ -544,12 +871,9 @@ is_mso_html() {
 }
 
 # try_rtf: Versucht RTF aus dem Clipboard zu holen.
-# Wir nutzen den Swift-Helper statt `pbpaste -Prefer rtf`, weil pbpaste
-# auf Plain Text ausweicht, sobald zusätzlich zum RTF auch RTFD auf dem
-# Clipboard liegt (typisch für TextEdit-Inhalte mit Bildern). Der Helper
-# greift direkt auf den .rtf-Flavor in NSPasteboard zu — zuverlässig.
+# Liefert RTF auf stdout und Exit 0, wenn vorhanden; sonst Exit 1.
 try_rtf() {
-  "$RTF_HELPER" 2>/dev/null
+  clip_read_rtf
 }
 
 # ---------- Hauptlogik ----------
@@ -562,8 +886,8 @@ output=""
 
 # Sonderpfad: --plain überspringt jede Konvertierung.
 if [ "$PLAIN" -eq 1 ]; then
-  vlog "Plain-Modus: pbpaste durchreichen"
-  output=$(pbpaste || true)
+  vlog "Plain-Modus: Clipboard-Text durchreichen"
+  output=$(clip_read_text || true)
   if [ -z "$output" ]; then
     die 1 "Clipboard ist leer."
   fi
@@ -579,7 +903,7 @@ else
       output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
       ;;
     plain)
-      output=$(pbpaste || true)
+      output=$(clip_read_text || true)
       [ -z "$output" ] && die 1 "Clipboard ist leer (--from plain)."
       ;;
     auto)
@@ -611,7 +935,7 @@ else
         output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
       else
         # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
-        plain=$(pbpaste || true)
+        plain=$(clip_read_text || true)
         if [ -z "$plain" ]; then
           die 1 "Clipboard leer oder kein konvertierbares Format."
         fi
@@ -624,13 +948,13 @@ fi
 
 # Output ausliefern: entweder Clipboard ersetzen oder stdout.
 if [ "$REPLACE" -eq 1 ]; then
-  # pbcopy liest von stdin und ersetzt den Clipboard-Inhalt komplett —
-  # alle Rich-Flavors (HTML, RTF) verschwinden, nur Plain bleibt.
-  # Der globale Export LC_ALL=en_US.UTF-8 ist hier wichtig: pbcopy
+  # clip_write_text liest von stdin und ersetzt den Clipboard-Inhalt
+  # komplett — alle Rich-Flavors (HTML, RTF) verschwinden, nur Plain bleibt.
+  # Der globale Export LC_ALL weiter oben ist hier wichtig: pbcopy (macOS)
   # interpretiert Input-Bytes als MacRoman, wenn LC_ALL leer oder C ist,
   # und legt dann FALSCHE Zeichen aufs Clipboard, was beim Einfügen in
   # andere Apps Mojibake produziert.
-  printf '%s' "$output" | pbcopy
+  printf '%s' "$output" | clip_write_text
   log "md-clip: Clipboard ersetzt (${#output} Zeichen)."
   notify "Clipboard nach Markdown konvertiert."
 else

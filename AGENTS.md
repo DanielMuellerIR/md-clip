@@ -3,7 +3,26 @@
 ## Typ & Zweck
 - **Typ:** CLI/Terminal-Tool
 - **Zweck:** Wandelt formatierten Clipboard-Text in sauberes Markdown, per CLI, Dock-Klick oder Hotkey.
-- **Plattform:** macOS (CLI + Dock-Wrapper)
+- **Plattform:** macOS (CLI + Dock-Wrapper) und Linux (CLI, X11 + Wayland)
+
+## Arbeitsregeln
+
+- **Plattform-Weiche:** Alles Plattformabhängige gehört in den Abschnitt
+  „Plattform-Weiche" in `bin/md-clip` (`clip_read_*`, `clip_write_text`,
+  `rtf_to_html`, `notify`). Der Rest des Skripts bleibt plattformneutral.
+  Erkennung über `uname -s` und `$WAYLAND_DISPLAY` — **nicht** über `$DISPLAY`,
+  das ist unter Wayland (XWayland) ebenfalls gesetzt.
+- **`tests/run-tests.sh` dupliziert die Pipeline-Funktionen aus `bin/md-clip`**
+  (bewusster Trade-off, dort kommentiert). Wer eine dieser Funktionen ändert,
+  muss die Kopie mitziehen.
+- **Beide Plattformen laufen gegen dieselben Erwartungsdateien.** Wenn ein
+  Linux-Ergebnis abweicht, ist das ein Befund — nicht der Anlass, eine zweite
+  Erwartung einzuführen. Expected-Dateien nie still regenerieren.
+- **Vor Linux-Änderungen testen:** `./tests/run-tests.sh` (macOS) und ein
+  Linux-Lauf. Rezept für den Container-Lauf ohne fremde Systeme anzufassen:
+  `tasks/2026-07-05-linux-port/plan.md`.
+- **macOS-only und unangetastet lassen:** `wrappers/` (Dock-App, Automator),
+  `assets/` (Icons, DMG), `helpers/*.swift`.
 
 ## Verzeichnisstruktur
 

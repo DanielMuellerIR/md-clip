@@ -1,22 +1,28 @@
-# Encoding-Fallstricke auf macOS
+# Encoding-Fallstricke (macOS und Linux)
 
 Dieses Dokument hält die Fallen fest, in die wir während der Entwicklung
 getappt sind. Jede ist mit einem echten Symptom dokumentiert, das wir
 gesehen haben — wer das hier liest, soll dieselben Fehler nicht zweimal
 machen müssen.
 
+Fallen 1–4 stammen aus der macOS-Entwicklung, Fallen 5–6 kamen mit dem
+Linux-Port dazu (2026-07-16).
+
 ## TL;DR
 
 - **Setze in jedem Bash-Skript, das mit Clipboard und Pandoc arbeitet,
-  global `LC_ALL=en_US.UTF-8`** (oder eine andere `<lang>.UTF-8`). Das
-  funktioniert sowohl für `pandoc`/`perl`/`sed` als auch für
-  `pbcopy`/`pbpaste`.
+  global eine UTF-8-Locale.** Auf macOS `LC_ALL=en_US.UTF-8` (oder eine
+  andere `<lang>.UTF-8`) — das funktioniert für `pandoc`/`perl`/`sed`
+  ebenso wie für `pbcopy`/`pbpaste`. **Auf Linux dagegen `C.UTF-8`**,
+  siehe Falle 5.
 - **Verwende KEINEN Inline-Override** wie `LC_ALL=C pbcopy` oder
   `LC_ALL=C pbpaste`. Das *wirkt* in trivialen Roundtrip-Tests korrekt,
   korrumpiert aber das Clipboard für jede andere App.
 - **Teste den vollen Clipboard-Roundtrip mit einem ECHTEN App-View** —
   z.B. via `NSPasteboard.string(forType: .string)` in einem Swift-Helper.
   Niemals via `pbpaste`, das den Bug verstecken kann.
+- **Auf Linux ist das Clipboard nicht automatisch UTF-8:** Firefox legt
+  HTML als UTF-16 ab, Chromium als UTF-8. Siehe Falle 6.
 
 ## Falle 1: pbcopy/pbpaste haben einen bizarren Locale-Bug
 
@@ -220,9 +226,84 @@ verwenden.
 Falls wir mal Umlaut-Roundtrip in einer RTF-Fixture brauchen, kommt der
 Test-Input aus TextEdit (per Hand), nicht aus `textutil HTML→RTF`.
 
-## Der Test, der die Falle erwischt
+## Falle 5: `en_US.UTF-8` existiert auf Linux oft gar nicht
 
-Siehe `tests/run-tests.sh` → Block „Encoding-Roundtrip-Test". Kurz:
+### Symptom
+
+`perl: warning: Setting locale failed.` / `Falling back to the standard
+locale ("C")` auf stderr — und danach genau der Umlaut-Salat, den die
+LC_ALL-Zeile eigentlich verhindern sollte.
+
+### Ursache
+
+Auf macOS ist `en_US.UTF-8` immer vorhanden. Auf Linux sind Locales
+**erzeugte Artefakte** (`locale-gen`): Was nicht erzeugt wurde, existiert
+nicht. Auf einem deutschen System ist oft nur `de_DE.UTF-8` da, in einem
+schlanken Container (`ubuntu:24.04`) sogar **nur `C.UTF-8`** — verifiziert:
+
+```
+$ docker run --rm ubuntu:24.04 locale -a
+C
+C.utf8
+POSIX
+```
+
+Ein `export LC_ALL=en_US.UTF-8` auf eine nicht existierende Locale ist
+kein Fehler, der abbricht — die Programme fallen still auf `C` zurück.
+Damit ist die Zeile, die UTF-8 sicherstellen soll, ausgerechnet die
+Ursache des Byte-Salats.
+
+### Lösung
+
+`C.UTF-8` auf Linux. Die ist in glibc **fest eingebaut**, braucht kein
+`locale-gen` und ist damit überall verfügbar. Der einzige Grund für eine
+benannte Sprach-Locale war `pbcopy`/`pbpaste` (Falle 1) — die gibt es auf
+Linux ohnehin nicht.
+
+```bash
+if [ "$PLATFORM" = "macos" ]; then
+  export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+else
+  export LC_ALL=C.UTF-8 LANG=C.UTF-8
+fi
+```
+
+## Falle 6: Firefox legt HTML als UTF-16 aufs Linux-Clipboard
+
+### Symptom
+
+Aus einer Firefox-Kopie kommt Müll, aus derselben Seite in Chromium
+sauberes Markdown. Im rohen Clipboard-Inhalt steht zwischen jedem
+Buchstaben ein NUL-Byte.
+
+### Ursache
+
+Der `text/html`-Flavor hat auf X11/Wayland **keine vorgeschriebene
+Kodierung**. Firefox schreibt UTF-16 (mit BOM, Altlast der
+GTK-Clipboard-Anbindung), Chromium UTF-8. Anders als auf macOS, wo
+NSPasteboard immer UTF-8 liefert, muss man beides können — und man sieht
+dem Clipboard nicht an, welcher Browser geschrieben hat.
+
+### Lösung
+
+BOM lesen und ggf. per iconv wandeln (`to_utf8` in `bin/md-clip`):
+
+- `ff fe` / `fe ff` → `iconv -f UTF-16 -t UTF-8`. Bewusst **ohne**
+  `LE`/`BE`-Suffix: In dieser Form wertet iconv die BOM selbst aus und
+  entfernt sie; mit `UTF-16LE` bliebe die BOM als unsichtbares Zeichen stehen.
+- `ef bb bf` → UTF-8 mit BOM, die drei Bytes abschneiden.
+- sonst → schon UTF-8, durchreichen.
+
+### Die Falle in der Falle
+
+Das muss über eine **Temp-Datei** laufen, nicht über eine Variable:
+Bash verwirft in `$(...)` NUL-Bytes — also genau die Bytes, die UTF-16
+ausmachen. Wer das Clipboard erst in eine Variable liest und dann die
+Kodierung prüfen will, hat den Text bereits zerstört, bevor er ihn ansieht.
+
+## Die Tests, die die Fallen erwischen
+
+Siehe `tests/run-tests.sh` → Block „Clipboard-Roundtrip-Tests". Kurz:
 
 1. Setze HTML mit Umlaut + Emoji + EM-Dash auf das Clipboard
    (`tests/load-clipboard public.html …`).
@@ -236,3 +317,15 @@ Der Test schlägt rot fehl, sobald jemand wieder einen `LC_ALL=C
 pbcopy`-Inline-Override einbaut oder die globale LC_ALL-Locale
 versehentlich wegnimmt. Er rauscht nicht durch, weil die Lese-Seite
 explizit nicht `pbpaste` ist — der Symmetrie-Bias ist gebrochen.
+
+Auf Linux läuft derselbe Roundtrip über `xclip` bzw. `wl-copy`/`wl-paste`
+(auch hier bewusst die plattformeigenen Werkzeuge, nicht md-clips eigene
+Funktionen — sonst hübe sich ein Fehler auf beiden Seiten gegenseitig auf).
+Dazu kommt `utf16-html-clipboard` für Falle 6: Der Test erzeugt die
+UTF-16-Variante mit `iconv` selbst, statt einen echten Firefox zu starten
+— es geht um die **Bytes** auf dem Clipboard, und die sind so exakt
+reproduzierbar, headless und in CI.
+
+Ohne erreichbares Clipboard (Container, SSH-Sitzung) überspringen sich die
+Roundtrip-Tests **sichtbar** statt rot zu werden; mit `xvfb-run
+./tests/run-tests.sh` laufen sie auch dort mit.

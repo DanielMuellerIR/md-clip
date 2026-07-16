@@ -1,0 +1,66 @@
+# Linux-CI fuer md-clip.
+#
+# Warum nur Linux: Die macOS-Seite entsteht ohnehin auf einem Mac und faellt dort
+# sofort auf. Der Linux-Pfad dagegen wuerde still verrotten — genau dagegen laeuft
+# dieser Job. (Gleiche Begruendung wie in vicious_sidplayer/savage_modplayer.)
+#
+# Der Job faehrt die Tests ZWEIMAL, weil beide Laeufe etwas anderes beweisen:
+#   1. ohne Display  — die Fixture-Pipeline haengt an keinem X-Server, und der
+#                      Clipboard-Test ueberspringt sich sauber statt rot zu werden.
+#   2. mit xvfb-run  — das echte X11-Clipboard: xclip schreiben/lesen, und der
+#                      Firefox-Fall (UTF-16-HTML) durch die volle Kette.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Erlaubt einen Lauf von Hand ueber die Actions-Oberflaeche.
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pandoc + perl = die Konvertierungs-Pipeline, xclip = Clipboard unter X11,
+      # xvfb = X-Server ohne Bildschirm (der Runner hat keinen).
+      # Kein wl-clipboard: Ein Wayland-Compositor liesse sich im Runner nur mit
+      # deutlich mehr Aufwand hochziehen. Der Wayland-Pfad ist damit ehrlich
+      # NICHT CI-abgedeckt — geprueft wird er von Hand (siehe README, Testmatrix).
+      - name: Abhaengigkeiten installieren
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pandoc xclip xvfb
+
+      - name: Versionen protokollieren
+        run: |
+          pandoc --version | head -1
+          perl -e 'print "perl $]\n"'
+          ./bin/md-clip --version
+
+      # Erst ohne Display: beweist, dass die Fixture-Tests ohne Clipboard
+      # durchlaufen (der Fall im Container / auf einem Server).
+      - name: Tests ohne Display (Fixtures)
+        run: ./tests/run-tests.sh
+
+      # Dann mit virtuellem X-Server: beweist den echten Clipboard-Weg.
+      - name: Tests mit X11-Clipboard (Xvfb)
+        run: xvfb-run -a ./tests/run-tests.sh
+
+      # Rauchprobe fuer die Fehlerpfade: Ohne Clipboard-Inhalt muss md-clip mit
+      # Exit 1 und klarer Meldung abbrechen, nicht mit einem Bash-Fehler.
+      - name: Leeres Clipboard meldet Exit 1
+        run: |
+          set +e
+          xvfb-run -a ./bin/md-clip --quiet
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "Erwartet Exit 1 bei leerem Clipboard, bekam $code"
+            exit 1
+          fi
+          echo "OK: Exit 1 bei leerem Clipboard"

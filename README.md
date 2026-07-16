@@ -1,8 +1,10 @@
 # md-clip
 
-**Verwandelt formatierten Text aus dem macOS-Clipboard in sauberes Markdown — per Befehl, Dock-Klick oder Hotkey.**
+**Verwandelt formatierten Text aus dem Clipboard in sauberes Markdown — per Befehl, Dock-Klick oder Hotkey.**
 
 Beim Einfügen in einen Markdown-Editor möchte man Markdown — nicht den HTML-Code, der beim Kopieren mit übernommen wurde. `md-clip` macht genau diese eine Sache.
+
+Läuft auf **macOS** und **Linux** (X11 und Wayland). Die fertige App mit Dock-Icon gibt es für macOS; unter Linux ist md-clip ein CLI-Werkzeug — siehe [Linux](#linux).
 
 ## Installation der fertigen App
 
@@ -45,9 +47,9 @@ Das ist **fetter** Text mit einem [Link](https://example.com) und einer Liste:
 
 Einfügen, fertig.
 
-## Installation aus dem Quelltext
+## Installation aus dem Quelltext (macOS)
 
-Voraussetzungen: macOS, [Homebrew](https://brew.sh), Xcode Command Line Tools (`xcode-select --install`).
+Voraussetzungen: macOS, [Homebrew](https://brew.sh), Xcode Command Line Tools (`xcode-select --install`). Für Linux siehe [Linux](#linux).
 
 ```bash
 git clone https://github.com/DanielMuellerIR/md-clip.git
@@ -55,6 +57,44 @@ cd md-clip
 brew bundle           # installiert pandoc
 ./install.sh          # kompiliert die Helper, legt /usr/local/bin/md-clip an
 ```
+
+## Linux
+
+md-clip läuft unter Linux als CLI-Werkzeug — dieselbe Konvertierungs-Pipeline wie auf macOS, nur die Clipboard-Anbindung ist eine andere. **X11 und Wayland** werden beide unterstützt; md-clip erkennt beim Start selbst, welche Sitzung läuft (`md-clip --version` zeigt es an).
+
+### Installation
+
+```bash
+# Debian / Ubuntu / Mint
+sudo apt install pandoc xclip wl-clipboard libnotify-bin
+
+git clone https://github.com/DanielMuellerIR/md-clip.git
+cd md-clip
+./install.sh          # legt ~/.local/bin/md-clip an, kein sudo nötig
+```
+
+Für Fedora (`sudo dnf install pandoc xclip wl-clipboard libnotify`) und Arch (`sudo pacman -S pandoc xclip wl-clipboard libnotify`) gilt dasselbe, nur der Paketbefehl unterscheidet sich.
+
+Es reicht das Clipboard-Werkzeug der eigenen Sitzung — `xclip` für X11, `wl-clipboard` für Wayland. Beide zu installieren schadet nicht und überlebt einen Sitzungswechsel. `libnotify-bin` braucht nur, wer `--notify` nutzt.
+
+### Benutzung
+
+Identisch zu macOS — alle Optionen aus [Benutzung](#benutzung) gelten unverändert:
+
+```bash
+md-clip                 # Markdown nach stdout
+md-clip --replace       # Clipboard durch Markdown ersetzen
+```
+
+### Bekannte Grenzen unter Linux
+
+- **Keine Dock-App und kein System-Hotkey.** Beides sind unter Linux Sache der Desktop-Umgebung, nicht des Programms. Einen Hotkey legt man in den Tastatur-Einstellungen an (GNOME: *Einstellungen → Tastatur → Eigene Tastenkombinationen*, KDE: *Systemeinstellungen → Kurzbefehle*) und hinterlegt dort als Befehl:
+  ```
+  md-clip --replace --quiet --notify
+  ```
+- **Firefox und Chromium legen HTML unterschiedlich kodiert ab** (Firefox UTF-16, Chromium UTF-8). md-clip erkennt und behandelt beides — falls doch einmal Zeichensalat auftaucht, ist das ein Bug und ein Issue wert.
+- **RTF** wird von pandoc gelesen statt von Apples `textutil`. Für dieselbe Datei kommt auf beiden Plattformen dasselbe Markdown heraus (ein Test sichert das ab), pandocs RTF-Reader ist bei exotischen Dokumenten aber weniger erprobt.
+- **Wayland ist nicht durch die CI abgedeckt** (ein Compositor im CI-Runner wäre unverhältnismäßig aufwendig) — der Pfad wird von Hand geprüft. X11 läuft in der CI unter Xvfb mit.
 
 ## Benutzung
 
@@ -74,7 +114,7 @@ Alle Optionen im Überblick:
 | `--plain` | `-p` | Keine Konvertierung, nur Klartext durchreichen |
 | `--from FORMAT` | `-f` | Eingabe erzwingen: `auto`, `html`, `rtf`, `plain` |
 | `--to FORMAT` | `-t` | Markdown-Dialekt: `gfm`, `markdown`, `commonmark` |
-| `--notify` | `-n` | macOS-Benachrichtigung bei Erfolg anzeigen |
+| `--notify` | `-n` | Benachrichtigung bei Erfolg anzeigen (macOS: Mitteilungszentrale, Linux: `notify-send`) |
 | `--quiet` | `-q` | Keine Statusmeldungen |
 | `--verbose` | `-V` | Diagnose-Ausgabe, welcher Pfad gewählt wurde |
 | `--version` | `-v` | Versionsnummer |
@@ -86,7 +126,7 @@ Alle Optionen im Überblick:
 
 **Ein- und Ausgabe**
 
-- **Eingabe ist immer das macOS-Clipboard** (NSPasteboard), nicht stdin. `md-clip` liest den Inhalt selbst aus dem Pasteboard; es nimmt keinen Text über die Standardeingabe entgegen. Ein Agent, der eigenen Text konvertieren will, legt ihn vorher per `pbcopy` ins Clipboard.
+- **Eingabe ist immer das Clipboard** (macOS: NSPasteboard, Linux: X11-/Wayland-Auswahl), nicht stdin. `md-clip` liest den Inhalt selbst aus dem Clipboard; es nimmt keinen Text über die Standardeingabe entgegen. Ein Agent, der eigenen Text konvertieren will, legt ihn vorher dort ab — per `pbcopy` (macOS), `xclip -selection clipboard` (X11) oder `wl-copy` (Wayland).
 - **Ausgabe geht per Default nach stdout** — reines Markdown, ohne Zusätze. Damit lässt sich das Ergebnis direkt in einer Variablen einfangen:
   ```bash
   markdown="$(md-clip --quiet)"
@@ -105,13 +145,13 @@ Alle Optionen im Überblick:
 |---|---|
 | `0` | Erfolg |
 | `1` | Nichts Konvertierbares auf dem Clipboard (z.B. leer) |
-| `2` | Fehlende Abhängigkeit (pandoc, textutil, Swift-Helper) oder ungültiges Argument |
+| `2` | Fehlende Abhängigkeit (pandoc; macOS: textutil/Swift-Helper, Linux: xclip bzw. wl-clipboard) oder ungültiges Argument |
 | `3` | Konvertierungsfehler (pandoc o.ä. mit Non-Zero-Exit) |
 
 **Beispiel — Agent konvertiert eigenen HTML-Text:**
 
 ```bash
-printf '%s' "$html" | pbcopy            # eigenen Inhalt ins Clipboard legen
+printf '%s' "$html" | pbcopy            # macOS: eigenen Inhalt ins Clipboard legen
 if markdown="$(md-clip --from html --quiet)"; then
   printf '%s\n' "$markdown"             # nur sauberes Markdown auf stdout
 else
@@ -119,9 +159,16 @@ else
 fi
 ```
 
-**Voraussetzung:** `md-clip` greift auf das GUI-Pasteboard zu. In einer angemeldeten macOS-Sitzung (auch im Terminal) funktioniert das. In einer reinen SSH- oder Hintergrund-Umgebung ohne Pasteboard-Zugriff steht kein Clipboard zur Verfügung.
+Unter Linux tritt an die Stelle von `pbcopy` das Werkzeug der Sitzung, mit explizitem HTML-Flavor:
 
-## Dock-App
+```bash
+printf '%s' "$html" | xclip -selection clipboard -t text/html   # X11
+printf '%s' "$html" | wl-copy --type text/html                  # Wayland
+```
+
+**Voraussetzung:** `md-clip` greift auf das Clipboard der GUI-Sitzung zu. In einer angemeldeten macOS- oder Linux-Desktop-Sitzung (auch im Terminal) funktioniert das. In einer reinen SSH- oder Hintergrund-Umgebung ohne Clipboard-Zugriff steht keines zur Verfügung — unter Linux lässt sich das für Skripte und CI mit `xvfb-run md-clip …` umgehen, das startet einen unsichtbaren X-Server samt Clipboard.
+
+## Dock-App (macOS)
 
 Damit du nicht jedes Mal das Terminal öffnen musst, liegt im Ordner `wrappers/` ein Bauskript für eine Mini-App. Einmal ausführen:
 
@@ -133,7 +180,7 @@ Das erzeugt `wrappers/md-clip.app`. Diese App ziehst du ins Dock. Ein Klick dara
 
 Eigenes Icon zuweisen: Rechtsklick auf die App → **Informationen** → ein Bild auf das kleine App-Symbol oben links ziehen.
 
-## Globaler Hotkey
+## Globaler Hotkey (macOS)
 
 macOS-Bordmittel reichen für einen system-weiten Tastatur-Shortcut:
 
@@ -179,13 +226,22 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
 bash tests/run-tests.sh
 ```
 
+Die Fixture-Tests brauchen nur pandoc und perl und laufen überall. Die Clipboard-Roundtrip-Tests brauchen ein echtes Clipboard und überspringen sich sichtbar, wo keines erreichbar ist (etwa in einem Container). Unter Linux holt man sie mit einem unsichtbaren X-Server dazu:
+
+```bash
+sudo apt install xvfb
+xvfb-run ./tests/run-tests.sh
+```
+
+Der RTF-Test läuft auf beiden Plattformen gegen dieselbe Erwartungsdatei, obwohl dahinter zwei verschiedene RTF-Parser stecken (`textutil` auf macOS, pandoc auf Linux) — er ist damit die Absicherung, dass dieselbe Eingabe überall dasselbe Markdown ergibt.
+
 ## Mitwirken
 
 Bug-Reports und Pull-Requests sind willkommen. Bitte ein neues Issue eröffnen, bevor du an einer größeren Änderung arbeitest.
 
 ## Basiert auf pandoc
 
-Die eigentliche Konvertierung von HTML nach Markdown übernimmt [pandoc](https://pandoc.org) von John MacFarlane — ohne pandoc gäbe es md-clip nicht. md-clip ist im Wesentlichen ein macOS-spezifischer Vorverarbeiter, der Clipboard-Eigenheiten und HTML-Müll von Webseiten und Editoren glättet, bevor pandoc die schwere Arbeit erledigt.
+Die eigentliche Konvertierung von HTML nach Markdown übernimmt [pandoc](https://pandoc.org) von John MacFarlane — ohne pandoc gäbe es md-clip nicht. md-clip ist im Wesentlichen ein Vorverarbeiter, der Clipboard-Eigenheiten und HTML-Müll von Webseiten und Editoren glättet, bevor pandoc die schwere Arbeit erledigt.
 
 Das DMG enthält ein unverändertes pandoc-Binary (Version siehe `md-clip --version`). Quellcode und Lizenz: [github.com/jgm/pandoc](https://github.com/jgm/pandoc).
 
