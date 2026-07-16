@@ -862,7 +862,8 @@ is_mso_html() {
 
   # Langsamer Fallback: zähle mso-Marker. grep -c liefert die Anzahl,
   # `|| true` verhindert Exit 1 bei 0 Treffern (set -e würde uns sonst killen).
-  # codereview-ok: Word-Clipboard-HTML ist mehrzeilig (clipboard-html.swift gibt html roh mit Newlines aus), grep -c zählt korrekt (echte Capture: 248 mso-Zeilen >> 10) (2026-07-01)
+  # Word-Clipboard-HTML ist mehrzeilig: clipboard-html.swift gibt HTML roh mit
+  # Newlines aus. grep -c zählt die mso-Zeilen deshalb wie beabsichtigt.
   local count
   count=$(printf '%s' "$html" | grep -c 'mso-' 2>/dev/null || true)
   [ "${count:-0}" -ge 10 ] && return 0

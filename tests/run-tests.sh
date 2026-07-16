@@ -202,7 +202,8 @@ run_test() {
 
   # Trailing-Newlines normalisieren: actual hat keinen Trailing-Newline,
   # expected-Files haben oft einen. Wir vergleichen ohne.
-  # codereview-ok: beide Seiten sind gequotet, in [ ] findet bei gequoteten Expansions kein Word-Splitting/Globbing statt (2026-07-01)
+  # Beide Seiten sind gequotet; in [ ] gibt es dadurch weder Word-Splitting
+  # noch Globbing.
   if [ "$actual" = "$expected" ] || [ "${actual}" = "${expected%$'\n'}" ]; then
     echo "✓ $name"
     PASSED=$((PASSED + 1))
