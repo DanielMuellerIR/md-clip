@@ -27,8 +27,9 @@ TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
 IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
 NOTARY_PROFILE="md-clip-notarytool"
 
-# DMG-Volume-Name = das, was im Finder über dem Fenster steht und in
-# /Volumes/<name> gemountet wird. Wird auch im AppleScript referenziert.
+# DMG-Volume-Name = das, was im Finder über dem Fenster steht. Der reale
+# Mountpoint ist absichtlich ein privates Build-Verzeichnis; fremde Volumes
+# gleichen Namens dürfen niemals angefasst werden.
 DMG_VOLNAME="md-clip"
 
 # ---------- Pfade ----------
@@ -138,13 +139,44 @@ echo "==> Erzeuge DMG-Layout"
 # Aufräumen von vorigen Läufen.
 rm -f "$DMG_PATH" "$RW_DMG_PATH"
 
-# Vorhandene Mounts mit gleichem Volume-Namen vorsichtig auswerfen.
-# Wenn ein voriger Lauf abgebrochen ist, bleibt das DMG manchmal
-# gemountet liegen und blockiert hdiutil create.
-if [ -d "/Volumes/$DMG_VOLNAME" ]; then
-  echo "   (vorhandenes Volume /Volumes/$DMG_VOLNAME wird ausgehängt)"
-  hdiutil detach "/Volumes/$DMG_VOLNAME" -force >/dev/null 2>&1 || true
-fi
+# Nur das von DIESEM Lauf eingehängte Device darf die Aufräumroutine lösen.
+# `hdiutil attach -plist` liefert den eindeutigen Device-Pfad; ein gleichnamiges
+# fremdes Volume unter /Volumes bleibt damit vollständig unberührt.
+MOUNT_DIR=""
+MOUNT_DEVICE=""
+ATTACH_PLIST=""
+cleanup_release_mount() {
+  if [ -n "$MOUNT_DEVICE" ]; then
+    hdiutil detach "$MOUNT_DEVICE" >/dev/null 2>&1 || true
+    MOUNT_DEVICE=""
+  fi
+  if [ -n "$ATTACH_PLIST" ] && [ -f "$ATTACH_PLIST" ]; then
+    rm -f "$ATTACH_PLIST"
+  fi
+  if [ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ]; then
+    rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_release_mount EXIT INT TERM
+
+device_for_mountpoint() {
+  local plist_path="$1"
+  local expected_mount="$2"
+  local index=0
+  local device=""
+  local mountpoint=""
+
+  while device=$(/usr/libexec/PlistBuddy -c "Print :system-entities:$index:dev-entry" "$plist_path" 2>/dev/null); do
+    mountpoint=$(/usr/libexec/PlistBuddy -c "Print :system-entities:$index:mount-point" "$plist_path" 2>/dev/null || true)
+    if [ "$mountpoint" = "$expected_mount" ]; then
+      printf '%s\n' "$device"
+      return 0
+    fi
+    index=$((index + 1))
+  done
+
+  return 1
+}
 
 # Größenbedarf grob abschätzen: Bundle + 20 MB Puffer für Hintergrund,
 # DS_Store, Filesystem-Overhead. hdiutil reserviert das beim Erzeugen
@@ -167,9 +199,17 @@ hdiutil create \
   "$RW_DMG_PATH"
 
 # Mounten. -nobrowse verhindert, dass das DMG im Finder als Fenster
-# aufspringt während wir noch am Layout arbeiten.
-MOUNT_DIR="/Volumes/$DMG_VOLNAME"
-hdiutil attach "$RW_DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -noverify -noautoopen
+# aufspringt während wir noch am Layout arbeiten. Plist und Mountpoint
+# gehören ausschließlich diesem Lauf.
+MOUNT_DIR=$(mktemp -d "$BUILD_DIR/.md-clip-mount.XXXXXX")
+ATTACH_PLIST=$(mktemp "$BUILD_DIR/.md-clip-attach.XXXXXX.plist")
+hdiutil attach "$RW_DMG_PATH" \
+  -mountpoint "$MOUNT_DIR" \
+  -nobrowse -noverify -noautoopen -plist > "$ATTACH_PLIST"
+MOUNT_DEVICE=$(device_for_mountpoint "$ATTACH_PLIST" "$MOUNT_DIR") || {
+  echo "FEHLER: Device des privaten DMG-Mounts nicht in hdiutil-Plist gefunden." >&2
+  exit 1
+}
 
 # Applications-Shortcut (Symlink) reinlegen. Der Finder zeigt den
 # automatisch mit Ordner-Icon „Applications" und Pfeil-Overlay an.
@@ -189,9 +229,11 @@ chflags hidden "$MOUNT_DIR/.background"
 # Icon-Positionen) müssen mit dem Hintergrundbild zusammenpassen,
 # das von assets/generate-dmg-background.swift erzeugt wird.
 echo "==> Konfiguriere Finder-Ansicht"
-osascript <<APPLESCRIPT
+MOUNT_DIR="$MOUNT_DIR" osascript <<'APPLESCRIPT'
+set mountPath to system attribute "MOUNT_DIR"
 tell application "Finder"
-  tell disk "$DMG_VOLNAME"
+  set targetDisk to disk of (POSIX file mountPath as alias)
+  tell targetDisk
     open
     set current view of container window to icon view
     set toolbar visible of container window to false
@@ -215,8 +257,8 @@ tell application "Finder"
     -- anzeigen" aktiviert hat (Cmd+Shift+.); chflags hidden allein
     -- reicht in dem Fall nicht. try-Block, weil .background je nach
     -- Finder-Setting evtl. gar nicht als Item auftaucht.
-    -- (Keine Backticks im Heredoc — sonst will Bash sie als Command-
-    -- Substitution ausführen, weil der Heredoc nicht gequotet ist.)
+    -- Der Heredoc ist gequotet; Pfade kommen ausschließlich über die
+    -- Umgebung und werden nicht als AppleScript-Quelle interpretiert.
     try
       set position of item ".background" of container window to {900, 900}
     end try
@@ -234,7 +276,12 @@ sleep 2
 
 # Aushängen.
 echo "==> Hänge RW-DMG aus"
-hdiutil detach "$MOUNT_DIR" -force
+hdiutil detach "$MOUNT_DEVICE"
+MOUNT_DEVICE=""
+rmdir "$MOUNT_DIR"
+MOUNT_DIR=""
+rm -f "$ATTACH_PLIST"
+ATTACH_PLIST=""
 
 # In komprimiertes Read-only-DMG konvertieren.
 echo "==> Konvertiere zu UDZO (komprimiert, read-only)"

@@ -17,6 +17,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Derselbe Fähigkeitscheck wie im Produkt, ohne Versionsstrings zu raten.
+# shellcheck source=lib/pipeline.sh
+source "$SCRIPT_DIR/lib/pipeline.sh"
+
 # Pfade im Projekt.
 MAIN_SCRIPT="bin/md-clip"
 
@@ -90,6 +94,13 @@ if [ "${#missing[@]}" -gt 0 ]; then
   fi
   exit 2
 fi
+
+if [ "$PLATFORM" = "linux" ] && ! pandoc_supports_rtf; then
+  echo "FEHLER: Das installierte pandoc unterstützt das Eingabeformat RTF nicht."
+  echo "        Bitte pandoc >= 2.14.2 installieren; die Paketversion von"
+  echo "        Ubuntu 22.04 ist dafür zu alt."
+  exit 2
+fi
 echo "✓ pandoc gefunden: $(pandoc --version | head -1)"
 
 # --- 2. Swift-Helper kompilieren (nur macOS) ---
@@ -124,7 +135,7 @@ fi
 # --- 3. Hauptskript ausführbar machen ---
 chmod +x "$MAIN_SCRIPT"
 
-# --- 4. Symlink anlegen ---
+# --- 4. Symlink sicher anlegen ---
 if [ ! -d "$INSTALL_PREFIX" ]; then
   # Ein fehlendes Verzeichnis IM EIGENEN HOME legen wir einfach an: Das ist
   # der Normalfall auf Linux (~/.local/bin existiert auf einem frischen
@@ -147,6 +158,24 @@ fi
 # Absoluten Pfad zum Hauptskript bilden — der Symlink soll auch funktionieren,
 # wenn das Verzeichnis später aus einem anderen Pfad heraus aufgerufen wird.
 ABS_MAIN="$SCRIPT_DIR/$MAIN_SCRIPT"
+
+# Reguläre Dateien, Verzeichnisse und lebende fremde Symlinks gehören dem
+# Nutzer. Ersetzen dürfen wir nur unseren eigenen Symlink oder einen
+# nachweislich toten Symlink.
+if [ -L "$INSTALL_TARGET" ]; then
+  CURRENT_TARGET=$(readlink "$INSTALL_TARGET")
+  if [ "$CURRENT_TARGET" != "$ABS_MAIN" ] && [ -e "$INSTALL_TARGET" ]; then
+    echo "FEHLER: Bestehender Symlink zeigt auf eine fremde Installation:"
+    echo "        $INSTALL_TARGET → $CURRENT_TARGET"
+    echo "        Ziel bleibt unverändert."
+    exit 2
+  fi
+elif [ -e "$INSTALL_TARGET" ]; then
+  echo "FEHLER: Installationsziel ist bereits eine Datei oder ein Verzeichnis:"
+  echo "        $INSTALL_TARGET"
+  echo "        Ziel bleibt unverändert."
+  exit 2
+fi
 
 # Prüfen, ob wir Schreibrechte auf das Ziel-Verzeichnis haben.
 # `-w` testet auf Schreibbarkeit aus Sicht des aktuellen Prozesses.

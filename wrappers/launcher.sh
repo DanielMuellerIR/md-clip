@@ -102,13 +102,17 @@ decide_cli_action() {
   echo "install-ok"
 }
 
-# Erstellt /usr/local/bin/md-clip als Symlink ins Bundle.
-# `ln -sf` überschreibt einen vorhandenen (toten) Symlink atomar mit.
-# Erfordert Admin-Rechte (mkdir + ln im Systempfad), daher
-# `with administrator privileges` für die Passwort-Abfrage.
+# Erstellt /usr/local/bin/md-clip als Symlink ins Bundle. Die Pfade werden
+# als Umgebungsvariablen an AppleScript übergeben und dort mit `quoted form
+# of` für die Shell maskiert. Dadurch bleibt auch ein App-Pfad mit Apostroph
+# reiner Dateninhalt und kann keinen Shell-Befehl einschleusen.
 install_cli() {
-  osascript -e "do shell script \"mkdir -p /usr/local/bin && ln -sf '$BUNDLE_CLI' '$SYSTEM_CLI'\" with administrator privileges" \
-    >/dev/null 2>&1 || true
+  BUNDLE_CLI="$BUNDLE_CLI" SYSTEM_CLI="$SYSTEM_CLI" osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+set bundleCli to system attribute "BUNDLE_CLI"
+set systemCli to system attribute "SYSTEM_CLI"
+set commandText to "/bin/mkdir -p /usr/local/bin && /bin/ln -sfn " & quoted form of bundleCli & " " & quoted form of systemCli
+do shell script commandText with administrator privileges
+APPLESCRIPT
 }
 
 # Zeigt den Erststart-Dialog (CLI installieren?) und gibt die Wahl des
@@ -152,37 +156,45 @@ APPLESCRIPT
 
 # ---------- Hauptlogik ----------
 
-action="$(decide_cli_action)"
+launcher_main() {
+  local action answer
+  action="$(decide_cli_action)"
 
-case "$action" in
-  install-ok)
-    answer="$(ask_install)"
-    case "$answer" in
-      "Ja, einrichten")
-        install_cli
-        ;;
-      "Nicht mehr fragen")
-        defaults write "$BUNDLE_ID" CliInstallDeclined -bool true
-        ;;
-      *)
-        # „Später", ESC, oder Dialog-Fehler → nichts speichern.
-        :
-        ;;
-    esac
-    ;;
-  move-first)
-    answer="$(ask_move_first)"
-    if [ "$answer" = "Im Finder zeigen" ]; then
-      # Bundle im Finder selektieren, damit der Nutzer es direkt
-      # rüberziehen kann.
-      open -R "$BUNDLE_DIR" >/dev/null 2>&1 || true
-    fi
-    ;;
-  none|*)
-    : # nichts tun
-    ;;
-esac
+  case "$action" in
+    install-ok)
+      answer="$(ask_install)"
+      case "$answer" in
+        "Ja, einrichten")
+          install_cli
+          ;;
+        "Nicht mehr fragen")
+          defaults write "$BUNDLE_ID" CliInstallDeclined -bool true
+          ;;
+        *)
+          # „Später", ESC, oder Dialog-Fehler → nichts speichern.
+          :
+          ;;
+      esac
+      ;;
+    move-first)
+      answer="$(ask_move_first)"
+      if [ "$answer" = "Im Finder zeigen" ]; then
+        # Bundle im Finder selektieren, damit der Nutzer es direkt
+        # rüberziehen kann.
+        open -R "$BUNDLE_DIR" >/dev/null 2>&1 || true
+      fi
+      ;;
+    none|*)
+      : # nichts tun
+      ;;
+  esac
 
-# Jetzt der eigentliche md-clip-Lauf. --replace ersetzt das Clipboard,
-# --notify zeigt eine macOS-Benachrichtigung bei Erfolg.
-"$BUNDLE_CLI" --replace --notify
+  # Jetzt der eigentliche md-clip-Lauf. --replace ersetzt das Clipboard,
+  # --notify zeigt eine macOS-Benachrichtigung bei Erfolg.
+  "$BUNDLE_CLI" --replace --notify
+}
+
+# Tests dürfen die Funktionen laden, ohne Dialoge oder das Bundle zu starten.
+if [ "${MD_CLIP_LAUNCHER_SOURCE_ONLY:-0}" != "1" ]; then
+  launcher_main
+fi

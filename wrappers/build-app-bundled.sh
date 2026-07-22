@@ -37,11 +37,15 @@ MIN_MACOS="11.0"
 # Pandoc-Version. Pinning macht den Build reproduzierbar. Bei Updates
 # diese Zahl bumpen und neu bauen.
 PANDOC_VERSION="3.9.0.2"
+PANDOC_ZIP_SHA256="6e9eca844076bcbb599bbeebbba78a70f93b5307782b85c2c272872812c88875"
+PANDOC_COPYRIGHT_SHA256="842e33ef01625e93f85bebb8bac83aa570186b7aa77a09971257cc29f8f60740"
 
 # ---------- Pfade ----------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=verified-cache.sh
+source "$SCRIPT_DIR/verified-cache.sh"
 
 # Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth,
 # identisch zu wrappers/sign-and-release.sh. Landet unten im Info.plist als
@@ -70,33 +74,38 @@ echo "==> Build-Verzeichnis: $BUILD_DIR"
 # zum Mergen.
 
 PANDOC_ZIP="$CACHE_DIR/pandoc-${PANDOC_VERSION}-arm64.zip"
-if [ ! -f "$PANDOC_ZIP" ]; then
-  PANDOC_URL="https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-arm64-macOS.zip"
-  echo "==> Lade $PANDOC_URL"
-  curl -fsSL --output "$PANDOC_ZIP" "$PANDOC_URL"
+PANDOC_URL="https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-arm64-macOS.zip"
+if sha256_matches "$PANDOC_ZIP" "$PANDOC_ZIP_SHA256"; then
+  echo "✓ Verifiziertes pandoc-arm64 aus Cache: $PANDOC_ZIP"
 else
-  echo "✓ pandoc-arm64 aus Cache: $PANDOC_ZIP"
+  echo "==> Lade und verifiziere $PANDOC_URL"
+  download_verified "$PANDOC_URL" "$PANDOC_ZIP_SHA256" "$PANDOC_ZIP" || exit 1
 fi
 
-# WICHTIG: Extract-Dir MUSS die Version im Namen tragen. Sonst wird ein
-# Extract-Ordner aus einem früheren Build mit ANDERER pandoc-Version
-# wiederverwendet (das `[ ! -d ]` überspringt das Entpacken), und es landet
-# das falsche, alte pandoc im Bundle — trotz korrekt gepinnter Version.
-PANDOC_EXTRACT_DIR="$CACHE_DIR/pandoc-${PANDOC_VERSION}-arm64"
-if [ ! -d "$PANDOC_EXTRACT_DIR" ]; then
-  mkdir -p "$PANDOC_EXTRACT_DIR"
-  unzip -q "$PANDOC_ZIP" -d "$PANDOC_EXTRACT_DIR"
-fi
+# Immer aus dem verifizierten Archiv in ein privates Staging-Verzeichnis
+# entpacken. Nur der dokumentierte Archivpfad ist zulässig; ein zusätzlich
+# eingeschleustes ausführbares `pandoc` kann nicht ausgewählt werden.
+PANDOC_ARCHIVE_ROOT="pandoc-${PANDOC_VERSION}-arm64"
+PANDOC_ARCHIVE_BIN="$PANDOC_ARCHIVE_ROOT/bin/pandoc"
+PANDOC_STAGE=$(mktemp -d "$BUILD_DIR/.pandoc-extract.XXXXXX")
+PANDOC_BUILD_TMP=$(mktemp "$BUILD_DIR/.pandoc-binary.XXXXXX")
+cleanup_pandoc_stage() {
+  rm -rf "$PANDOC_STAGE"
+  rm -f "$PANDOC_BUILD_TMP"
+}
+trap cleanup_pandoc_stage EXIT INT TERM
 
-# Binary aus dem entpackten Tree finden (Zip enthält pandoc-VERSION-arm64-macOS/bin/pandoc).
-PANDOC_BIN=$(find "$PANDOC_EXTRACT_DIR" -name pandoc -type f -perm -u+x | head -1)
-if [ -z "$PANDOC_BIN" ]; then
-  echo "FEHLER: pandoc-Binary nach Entpacken nicht gefunden." >&2
+unzip -q "$PANDOC_ZIP" "$PANDOC_ARCHIVE_BIN" -d "$PANDOC_STAGE"
+PANDOC_BIN="$PANDOC_STAGE/$PANDOC_ARCHIVE_BIN"
+chmod +x "$PANDOC_BIN"
+if ! verify_pandoc_version "$PANDOC_BIN" "$PANDOC_VERSION"; then
+  echo "FEHLER: Entpacktes pandoc meldet nicht Version $PANDOC_VERSION." >&2
   exit 1
 fi
 
-# Kopie ins Build-Verzeichnis ablegen, von dort wandert sie ins Bundle.
-cp "$PANDOC_BIN" "$BUILD_DIR/pandoc"
+cp "$PANDOC_BIN" "$PANDOC_BUILD_TMP"
+chmod +x "$PANDOC_BUILD_TMP"
+mv -f "$PANDOC_BUILD_TMP" "$BUILD_DIR/pandoc"
 echo "✓ pandoc bereit ($(du -h "$BUILD_DIR/pandoc" | cut -f1))"
 
 # ---------- 2. Swift-Helper kompilieren ----------
@@ -118,6 +127,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources/Licenses"
 
 # md-clip-Skript und Helper kopieren
 cp "$PROJECT_ROOT/bin/md-clip"     "$APP_BUNDLE/Contents/Resources/bin/md-clip"
+cp "$PROJECT_ROOT/lib/pipeline.sh" "$APP_BUNDLE/Contents/Resources/bin/pipeline.sh"
 cp "$BUILD_DIR/clipboard-html"     "$APP_BUNDLE/Contents/Resources/bin/clipboard-html"
 cp "$BUILD_DIR/clipboard-rtf"      "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"
 cp "$BUILD_DIR/pandoc"             "$APP_BUNDLE/Contents/Resources/bin/pandoc"
@@ -191,11 +201,16 @@ PLIST
 echo "==> Lade pandoc-Lizenz und COPYRIGHT-Hinweis"
 LIC_DIR="$APP_BUNDLE/Contents/Resources/Licenses"
 
-# GPL-Volltext von pandocs Repo holen (gleicher Tag wie die Binary).
-curl -fsSL \
-  "https://raw.githubusercontent.com/jgm/pandoc/${PANDOC_VERSION}/COPYRIGHT" \
-  > "$LIC_DIR/pandoc-COPYRIGHT.txt" \
-  || echo "WARNUNG: pandoc-COPYRIGHT konnte nicht geladen werden (Offline-Build?)"
+# COPYRIGHT wird wie das Binary gepinnt und im Cache verifiziert. Ein
+# Offline-Build darf niemals still ein leeres Lizenzdokument ausliefern.
+PANDOC_COPYRIGHT_URL="https://raw.githubusercontent.com/jgm/pandoc/${PANDOC_VERSION}/COPYRIGHT"
+PANDOC_COPYRIGHT_CACHE="$CACHE_DIR/pandoc-${PANDOC_VERSION}-COPYRIGHT"
+download_verified \
+  "$PANDOC_COPYRIGHT_URL" \
+  "$PANDOC_COPYRIGHT_SHA256" \
+  "$PANDOC_COPYRIGHT_CACHE" || exit 1
+test -s "$PANDOC_COPYRIGHT_CACHE"
+cp "$PANDOC_COPYRIGHT_CACHE" "$LIC_DIR/pandoc-COPYRIGHT.txt"
 
 cat > "$LIC_DIR/README.txt" <<NOTE
 md-clip enthält ein unverändert weiterverteiltes pandoc-Binary
