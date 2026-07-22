@@ -23,6 +23,26 @@ FIXTURES="$TESTS_DIR/fixtures"
 
 cd "$PROJECT_ROOT"
 
+# Ein Bundle-ähnliches Laufzeitlayout nur aus getrackten Quellen. Dadurch
+# beweisen die Produkt-Roundtrips, dass ein sauberer Checkout keine bereits
+# kompilierten, ignorierten Helper aus dem Arbeitsverzeichnis benötigt.
+TEST_RUNTIME=$(mktemp -d)
+mkdir -p "$TEST_RUNTIME/bin"
+cp "$PROJECT_ROOT/bin/md-clip" "$TEST_RUNTIME/bin/md-clip"
+cp "$PROJECT_ROOT/lib/pipeline.sh" "$TEST_RUNTIME/bin/pipeline.sh"
+PRODUCT_CLI="$TEST_RUNTIME/bin/md-clip"
+CLIPBOARD_BACKUP=""
+ENCODING_HTML=""
+UTF16_HTML=""
+
+cleanup_tests() {
+  if [ -n "$CLIPBOARD_BACKUP" ] && [ -f "$CLIPBOARD_BACKUP" ] && declare -F clip_put_text_file >/dev/null 2>&1; then
+    clip_put_text_file "$CLIPBOARD_BACKUP" 2>/dev/null || true
+  fi
+  rm -rf "$TEST_RUNTIME"
+}
+trap cleanup_tests EXIT INT TERM
+
 # ---------- Plattform-Weiche ----------
 # Spiegelt bin/md-clip. Siehe dort für die ausführliche Begründung jeder Zeile.
 
@@ -48,133 +68,18 @@ else
   export LC_ALL=C.UTF-8 LANG=C.UTF-8
 fi
 
-# Wir laden die Funktionen aus bin/md-clip, indem wir das Skript sourcen —
-# aber das würde die Hauptlogik mit ausführen. Sauberer: die Funktionen
-# hier dupliziert ablegen. Wenn sich die Funktionen in bin/md-clip ändern,
-# muss diese Datei mitgepflegt werden. Trade-off bewusst akzeptiert.
-
+# Die produktive Pipeline wird direkt geladen; nur der plattformspezifische
+# RTF-Adapter bleibt im Test-Runner.
 PANDOC_OPTS=(-f html -t gfm-raw_html --wrap=none)
+# shellcheck source=../lib/pipeline.sh
+source "$PROJECT_ROOT/lib/pipeline.sh"
 
-preprocess_claude_desktop() {
-  perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs' \
-    | perl -0pe '
-        s{(<pre[^>]*>.*?</pre>)}{
-          my $block = $1;
-          $block =~ s{</?div[^>]*>}{}g;
-          $block;
-        }gse' \
-    | perl -0pe 's/\s+style="[^"]*"//g' \
-    | perl -0pe 's/\s+data-[a-z-]+="[^"]*"//g'
-}
-
-clean_html() {
-  sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g' \
-    | sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g'
-}
-
-# Dupliziert aus bin/md-clip — schreibt die RTF-Kurzform „Backslash am
-# Zeilenende" in das Steuerwort \par um, das pandocs RTF-Reader versteht.
-# Siehe bin/md-clip für die ausführliche Doku.
-rtf_fix_escaped_newlines() {
-  perl -0pe 's/(?<!\\)((?:\\\\)*)\\(\r?\n)/$1\\par$2/g'
-}
-
-# Dupliziert aus bin/md-clip — RTF nach HTML, plattformabhängig.
-# macOS: textutil (Bordmittel). Linux: pandocs RTF-Reader + Spec-Korrektur.
 rtf_to_html() {
   if [ "$PLATFORM" = "macos" ]; then
     textutil -convert html -format rtf -stdin -stdout
   else
     rtf_fix_escaped_newlines | pandoc -f rtf -t html
   fi
-}
-
-# Dupliziert aus bin/md-clip — entfernt Tabellen-Tags aus textutil-/pandoc-HTML,
-# Zellen werden zu Absätzen. Siehe bin/md-clip für die ausführliche Doku.
-flatten_layout_tables() {
-  perl -0pe '
-    s{<colgroup[^>]*>.*?</colgroup>}{}gs;
-    s{<col[^/]*/?>}{}g;
-    s{</?table[^>]*>}{}gs;
-    s{</?t(?:body|head|foot)[^>]*>}{}gs;
-    s{</?tr[^>]*>}{}gs;
-    s{<t[dh][^>]*>}{<p>}gs;
-    s{</t[dh]>}{</p>}gs;
-  '
-}
-
-# Dupliziert aus bin/md-clip — <li><p>Text</p></li> → <li>Text</li>, damit
-# pandocs RTF-Reader keine lose Liste erzeugt. Siehe bin/md-clip für die Doku.
-unwrap_list_paragraphs() {
-  perl -0pe 's{<li([^>]*)>\s*<p[^>]*>([^<]*)</p>\s*</li>}{<li$1>$2</li>}gs'
-}
-
-# Dupliziert aus bin/md-clip — kosmetische Säuberung nach RTF-Konversion.
-tidy_rtf_artifacts() {
-  perl -0pe '
-    s/^\\\s*$//gm;
-    s/\n{3,}/\n\n/g;
-  '
-}
-
-# Dupliziert aus bin/md-clip — der vollständige RTF-Pfad. Bewusst als ganze
-# Kette (nicht nur rtf_to_html + pandoc), damit der Test wirklich das prüft,
-# was im echten Lauf passiert.
-convert_rtf() {
-  rtf_to_html \
-    | flatten_layout_tables \
-    | unwrap_list_paragraphs \
-    | clean_html \
-    | pandoc "${PANDOC_OPTS[@]}" \
-    | tidy_rtf_artifacts \
-    | fix_empty_links \
-    | tidy_hard_breaks
-}
-
-# Dupliziert aus bin/md-clip — füllt leeren Anker-Text `[](url)` mit der
-# Ziel-URL, damit der Link in allen Renderern sichtbar bleibt.
-fix_empty_links() {
-  perl -0pe 's{(?<!!)\[\s*\]\(\s*(\S+?)(\s+[^)]*)?\)}{ "[$1]($1" . (defined $2 ? $2 : "") . ")" }gex'
-}
-
-# Dupliziert aus bin/md-clip — entfernt überflüssige Hard-Break-Backslashes
-# an Absatz-/Listengrenzen und am Dokument-Ende (auch aus <br><br>).
-# Hard-Breaks in Fließtext (z.B. Adressen) bleiben. Siehe bin/md-clip für
-# die ausführliche Doku.
-tidy_hard_breaks() {
-  perl -0pe '
-    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*(?:[-*+] |\d+[.)] ))/\n/g;
-    s/^[ \t]*\\?[ \t]*$//gm;
-    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*\n)/\n/g;
-    s/\n{3,}/\n\n/g;
-    s/[ \t]*(?:\\|[ ]{2,})[ \t]*(\n*)\z/$1/;
-  '
-}
-
-# Dupliziert aus bin/md-clip — fasst Google-Classroom-Link-Anhänge zu
-# `<li><a href>Titel</a></li>` zusammen, strippt authuser-Tracking und
-# Thumbnails. Siehe bin/md-clip für die ausführliche Doku.
-preprocess_google_classroom() {
-  perl -0777 -pe '
-    s{<a\b([^>]*)\bhref="([^"]*)"([^>]*)>(.*?)</a>}{
-      my ($pre, $href, $post, $inner) = ($1, $2, $3, $4);
-      if ($inner =~ m{classroom\.google\.com/webthumbnail}) {
-        my $title = ($inner =~ m{class="[^"]*\bmvRF3b\b[^"]*">(.*?)</div>}s) ? $1 : "";
-        $title =~ s/<[^>]+>//g;
-        $title =~ s/^\s+|\s+$//g;
-        $href =~ s/[?&]authuser=[^&]*//;
-        $href =~ s/[?&]$//;
-        $title ne "" ? "<li><a href=\"$href\">$title</a></li>"
-                     : "<a href=\"$href\"></a>";
-      } else {
-        $&;
-      }
-    }gse;
-    s{<img[^>]*classroom\.google\.com/webthumbnail[^>]*>}{}gs;
-    1 while s{<div\b[^>]*>\s*</div>}{}gs;
-    1 while s{</li>(?:\s*</?div[^>]*>\s*)+<li>}{</li><li>}gs;
-    s{(?:<li>.*?</li>\s*)+}{my $r = $&; $r =~ s/>\s+</></g; "<ul>$r</ul>"}gse;
-  '
 }
 
 # Zähler für Statistik am Ende.
@@ -220,20 +125,14 @@ echo
 
 # --- Test 1: Claude-Desktop-Code-Block ---
 # HTML mit Subgrid-Divs → muss Code-Zeilen mit Newlines + Markdown-Restformat liefern.
-actual=$(cat "$FIXTURES/claude-desktop-codeblock.html" \
-  | preprocess_claude_desktop \
-  | clean_html \
-  | pandoc "${PANDOC_OPTS[@]}")
+actual=$(convert_html < "$FIXTURES/claude-desktop-codeblock.html")
 run_test "claude-desktop-codeblock (HTML mit Subgrid-Divs)" \
   "$actual" \
   "$FIXTURES/claude-desktop-codeblock.expected.md"
 
 # --- Test 2: Einfacher HTML-Artikel ---
 # Repräsentativ für Browser-Copy (Safari, Chrome).
-actual=$(cat "$FIXTURES/safari-article.html" \
-  | preprocess_claude_desktop \
-  | clean_html \
-  | pandoc "${PANDOC_OPTS[@]}")
+actual=$(convert_html < "$FIXTURES/safari-article.html")
 run_test "safari-article (Browser-Copy)" \
   "$actual" \
   "$FIXTURES/safari-article.expected.md"
@@ -248,20 +147,15 @@ run_test "safari-article (Browser-Copy)" \
 # Markdown ergibt. Er ist damit der eigentliche Wächter über
 # rtf_fix_escaped_newlines und unwrap_list_paragraphs: Fällt eine der beiden
 # Korrekturen weg, wird dieser Test auf Linux rot.
-actual=$(cat "$FIXTURES/word-rtf.rtf" | convert_rtf)
+actual=$(convert_rtf < "$FIXTURES/word-rtf.rtf")
 run_test "word-rtf (RTF-Pfad, $PLATFORM)" \
   "$actual" \
   "$FIXTURES/word-rtf.expected.md"
 
 # --- Test 4: Links mit leerem Anker-Text ---
-# <a href="…"></a> → pandoc liefert `[](url)`. fix_empty_links muss den
-# leeren []-Teil mit der URL füllen, Titel erhalten, echte Links unberührt.
-actual=$(cat "$FIXTURES/empty-link.html" \
-  | preprocess_claude_desktop \
-  | clean_html \
-  | pandoc "${PANDOC_OPTS[@]}" \
-  | fix_empty_links \
-  | tidy_hard_breaks)
+# Leere HTML-Anker werden vor pandoc gefüllt. So bleiben auch URLs mit
+# Klammern, Titel-Attributen und Escapes vollständig erhalten.
+actual=$(convert_html < "$FIXTURES/empty-link.html")
 run_test "empty-link (leerer Anker-Text → URL als Text)" \
   "$actual" \
   "$FIXTURES/empty-link.expected.md"
@@ -270,32 +164,28 @@ run_test "empty-link (leerer Anker-Text → URL als Text)" \
 # Anhänge sind <a> die Block-Divs (Titel, URL, Thumbnail) umschließen.
 # Erwartung: kompakte Liste `- [Titel](href)`, authuser gestrippt,
 # Thumbnails weg, kein leerer `[](url)`.
-actual=$(cat "$FIXTURES/google-classroom-links.html" \
-  | preprocess_claude_desktop \
-  | preprocess_google_classroom \
-  | clean_html \
-  | pandoc "${PANDOC_OPTS[@]}" \
-  | fix_empty_links \
-  | tidy_hard_breaks)
+actual=$(convert_html < "$FIXTURES/google-classroom-links.html")
 run_test "google-classroom-links (Anhänge → Titel-Liste)" \
   "$actual" \
   "$FIXTURES/google-classroom-links.expected.md"
 
-# --- Test 6: <br><br>-Absätze + Listen ---
+# --- Test 6: Normale geordnete und ungeordnete Listen ---
+# Classroom-Vorverarbeitung darf vorhandene <ol>/<ul> nicht umschreiben.
+actual=$(convert_html < "$FIXTURES/ordinary-lists.html")
+run_test "ordinary-lists (Listentypen bleiben erhalten)" \
+  "$actual" \
+  "$FIXTURES/ordinary-lists.expected.md"
+
+# --- Test 7: <br><br>-Absätze + Listen ---
 # <br><br> wird von pandoc zu Hard-Break-Backslash-Müll (`text\` + lone `\`).
 # tidy_hard_breaks muss daraus saubere Absätze + Listen machen, ohne
 # Hard-Breaks in echtem Fließtext zu zerstören.
-actual=$(cat "$FIXTURES/br-paragraphs.html" \
-  | preprocess_claude_desktop \
-  | clean_html \
-  | pandoc "${PANDOC_OPTS[@]}" \
-  | fix_empty_links \
-  | tidy_hard_breaks)
+actual=$(convert_html < "$FIXTURES/br-paragraphs.html")
 run_test "br-paragraphs (<br><br> → Absätze ohne Backslash-Müll)" \
   "$actual" \
   "$FIXTURES/br-paragraphs.expected.md"
 
-# --- Test 7: Trailing-Hard-Break am Dokument-Ende ---
+# --- Test 8: Trailing-Hard-Break am Dokument-Ende ---
 # Ein abschließendes <br> beim Copy erzeugt einen Hard-Break-Marker am
 # Dokument-Ende. Im `--to markdown`-Dialekt ist dieser Marker ein sichtbarer
 # `\` — die häufigste Quelle überzähliger Backslashes. tidy_hard_breaks muss
@@ -304,12 +194,9 @@ run_test "br-paragraphs (<br><br> → Absätze ohne Backslash-Müll)" \
 # Bewusst mit `-t markdown` (statt Default gfm), weil nur dieser Dialekt den
 # Hard-Break als sichtbaren `\` schreibt — gfm/commonmark nutzen zwei
 # (unsichtbare) Leerzeichen, die ein Expected-File nicht stabil abbilden kann.
-PANDOC_OPTS_MD=(-f html -t markdown-raw_html --wrap=none)
-actual=$(cat "$FIXTURES/trailing-hardbreak.html" \
-  | clean_html \
-  | pandoc "${PANDOC_OPTS_MD[@]}" \
-  | fix_empty_links \
-  | tidy_hard_breaks)
+PANDOC_OPTS=(-f html -t markdown-raw_html --wrap=none)
+actual=$(convert_html < "$FIXTURES/trailing-hardbreak.html")
+PANDOC_OPTS=(-f html -t gfm-raw_html --wrap=none)
 run_test "trailing-hardbreak (abschließendes <br> → kein End-Backslash)" \
   "$actual" \
   "$FIXTURES/trailing-hardbreak.expected.md"
@@ -326,8 +213,14 @@ echo "==> Clipboard-Roundtrip-Tests"
 # macOS: immer. Linux: nur mit Display-Server UND passendem Werkzeug —
 # in einem nackten Container/CI-Runner fehlt beides, dort hilft `xvfb-run`.
 clipboard_available() {
+  if [ "${MD_CLIP_SKIP_CLIPBOARD:-0}" = "1" ]; then
+    return 1
+  fi
   if [ "$PLATFORM" = "macos" ]; then
-    return 0
+    command -v swiftc >/dev/null 2>&1 \
+      && command -v pbcopy >/dev/null 2>&1 \
+      && command -v pbpaste >/dev/null 2>&1
+    return
   fi
   if [ "$CLIP_BACKEND" = "wayland" ]; then
     command -v wl-copy >/dev/null 2>&1 && command -v wl-paste >/dev/null 2>&1
@@ -357,7 +250,7 @@ else
   # Bestehenden Clipboard-Inhalt als Plain-Text sichern, damit wir am
   # Ende restaurieren können. Rich-Flavors gehen verloren — bei einem
   # Test-Lauf akzeptabel.
-  CLIPBOARD_BACKUP="$(mktemp)"
+  CLIPBOARD_BACKUP="$TEST_RUNTIME/clipboard-backup"
 
   # clip_put_html / clip_get_text: die Gegenstücke zu dem, was bin/md-clip
   # tut — bewusst über die PLATTFORM-EIGENEN Werkzeuge, damit der Test die
@@ -370,17 +263,16 @@ else
   # pbcopy+pbpaste (beide in derselben falschen Locale) würde den
   # Encoding-Bug verstecken, weil sich die Fehler aufheben.
   if [ "$PLATFORM" = "macos" ]; then
-    # Swift-Helper bauen, falls nicht da.
-    LOAD_CLIPBOARD_BIN="$TESTS_DIR/load-clipboard"
+    # Alle Test- und Produkt-Helper ausschließlich im privaten Temp-Layout
+    # bauen; der Checkout bleibt sauber und reproduzierbar.
+    LOAD_CLIPBOARD_BIN="$TEST_RUNTIME/load-clipboard"
     LOAD_CLIPBOARD_SRC="$TESTS_DIR/load-clipboard.swift"
-    if [ ! -x "$LOAD_CLIPBOARD_BIN" ] || [ "$LOAD_CLIPBOARD_SRC" -nt "$LOAD_CLIPBOARD_BIN" ]; then
-      swiftc "$LOAD_CLIPBOARD_SRC" -o "$LOAD_CLIPBOARD_BIN"
-    fi
-    CLIPBOARD_STRING_BIN="$TESTS_DIR/clipboard-string"
+    swiftc "$LOAD_CLIPBOARD_SRC" -o "$LOAD_CLIPBOARD_BIN"
+    CLIPBOARD_STRING_BIN="$TEST_RUNTIME/clipboard-string"
     CLIPBOARD_STRING_SRC="$TESTS_DIR/clipboard-string.swift"
-    if [ ! -x "$CLIPBOARD_STRING_BIN" ] || [ "$CLIPBOARD_STRING_SRC" -nt "$CLIPBOARD_STRING_BIN" ]; then
-      swiftc "$CLIPBOARD_STRING_SRC" -o "$CLIPBOARD_STRING_BIN"
-    fi
+    swiftc "$CLIPBOARD_STRING_SRC" -o "$CLIPBOARD_STRING_BIN"
+    swiftc "$PROJECT_ROOT/helpers/clipboard-html.swift" -o "$TEST_RUNTIME/bin/clipboard-html"
+    swiftc "$PROJECT_ROOT/helpers/clipboard-rtf.swift" -o "$TEST_RUNTIME/bin/clipboard-rtf"
 
     clip_put_html() { "$LOAD_CLIPBOARD_BIN" public.html "$1" >/dev/null; }
     clip_get_text() { "$CLIPBOARD_STRING_BIN"; }
@@ -406,22 +298,14 @@ else
     xclip -selection clipboard -out > "$CLIPBOARD_BACKUP" 2>/dev/null || true
   fi
 
-  # EXIT-Trap: unter dem aktiven `set -euo pipefail` reicht ein Nicht-Null-Exit
-  # von md-clip (unten) oder ein Ctrl-C, um das Skript sofort abzubrechen. Ohne
-  # Trap bliebe dann das Test-HTML im Nutzer-Clipboard liegen und die Temp-
-  # Dateien würden leaken. Der Trap restauriert das Clipboard und räumt auf —
-  # egal, wie das Skript endet. Die `${...:-}` decken den Fall ab, dass der
-  # Abbruch passiert, bevor die Variablen gesetzt wurden (set -u).
-  trap 'clip_put_text_file "$CLIPBOARD_BACKUP" 2>/dev/null || true; rm -f "$CLIPBOARD_BACKUP" "${ENCODING_HTML:-}" "${UTF16_HTML:-}"' EXIT
-
   # --- Roundtrip 1: UTF-8-HTML durch die volle Kette ---
-  ENCODING_HTML="$(mktemp).html"
+  ENCODING_HTML="$TEST_RUNTIME/encoding.html"
   printf '%s' "$ENCODING_INPUT" > "$ENCODING_HTML"
 
   clip_put_html "$ENCODING_HTML"
 
   # Vollständige Kette laufen lassen, --replace schreibt Ergebnis ins Clipboard.
-  "$PROJECT_ROOT/bin/md-clip" --replace --quiet
+  "$PRODUCT_CLI" --replace --quiet
 
   encoding_actual="$(clip_get_text)"
 
@@ -448,11 +332,11 @@ else
   # und die sind so exakt reproduzierbar — headless, ohne Browser, in CI.
   # Auf macOS gibt es diesen Fall nicht (NSPasteboard liefert immer UTF-8).
   if [ "$PLATFORM" = "linux" ]; then
-    UTF16_HTML="$(mktemp).html"
+    UTF16_HTML="$TEST_RUNTIME/utf16.html"
     printf '%s' "$ENCODING_INPUT" | iconv -f UTF-8 -t UTF-16 > "$UTF16_HTML"
 
     clip_put_html "$UTF16_HTML"
-    utf16_actual="$("$PROJECT_ROOT/bin/md-clip" --quiet)"
+    utf16_actual="$("$PRODUCT_CLI" --quiet)"
 
     if [ "$utf16_actual" = "$ENCODING_EXPECTED" ]; then
       echo "✓ utf16-html-clipboard (Firefox-Fall: UTF-16-HTML korrekt gelesen)"

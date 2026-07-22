@@ -114,9 +114,27 @@ VERSION="1.1.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
-# realpath löst Symlinks auf — wichtig, damit der Helper-Pfad stimmt, wenn
-# md-clip per Symlink in /usr/local/bin/ liegt.
-SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+# macOS 11/12 besitzen noch kein `realpath`. Darum lösen wir Symlinks nur
+# mit den seit jeher vorhandenen Bordmitteln readlink, dirname und pwd -P.
+resolve_script_path() {
+  local source="$1"
+  local directory=""
+  local target=""
+
+  while [ -L "$source" ]; do
+    directory="$(cd -P "$(dirname "$source")" >/dev/null 2>&1 && pwd)" || return 1
+    target="$(readlink "$source")" || return 1
+    case "$target" in
+      /*) source="$target" ;;
+      *)  source="$directory/$target" ;;
+    esac
+  done
+
+  directory="$(cd -P "$(dirname "$source")" >/dev/null 2>&1 && pwd)" || return 1
+  printf '%s/%s\n' "$directory" "$(basename "$source")"
+}
+
+SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
@@ -409,30 +427,8 @@ clip_write_text() {
   fi
 }
 
-# rtf_fix_escaped_newlines: Gleicht eine Lücke in pandocs RTF-Reader aus.
-#
-# Die RTF-Spezifikation (1.9.1) sagt: Ein Backslash unmittelbar vor einem
-# Zeilenumbruch bedeutet dasselbe wie das Steuerwort \par, also ein
-# Absatzende. Apples TextEdit schreibt genau diese Kurzform. textutil kennt
-# sie, pandocs RTF-Reader nicht — der macht daraus nur einen Zeilenumbruch.
-# Folge ohne diese Funktion: Aus zwei Absätzen wird auf Linux einer mit
-# hartem Umbruch, dasselbe RTF ergäbe je nach Plattform anderes Markdown.
-#
-# Wir schreiben die Kurzform daher vor pandoc in die Langform \par um.
-#
-# Der Backslash ist in RTF auch das Escape-Zeichen: `\\` bedeutet „ein
-# literaler Backslash". Ein `\\` am Zeilenende ist also KEIN Absatzende,
-# und ein blindes Ersetzen würde dort einen Absatz erfinden. Das Muster
-# zählt darum, wie viele Backslashes davorstehen:
-#   (?<!\\)      — davor darf kein Backslash stehen (sonst zählen wir falsch),
-#   ((?:\\\\)*)  — beliebig viele VOLLSTÄNDIGE Escape-Paare, unverändert
-#                  übernommen (gerade Anzahl = alle sind Literale),
-#   \\(\r?\n)    — und erst der danach ÜBRIGE, einzelne Backslash vor dem
-#                  Zeilenende ist das echte Absatzende.
-# So trifft die Regel `Text.\` (Absatz), lässt `Text\\` (Literal) aber in Ruhe.
-rtf_fix_escaped_newlines() {
-  perl -0pe 's/(?<!\\)((?:\\\\)*)\\(\r?\n)/$1\\par$2/g'
-}
+# rtf_fix_escaped_newlines liegt in lib/pipeline.sh und wird dort von
+# Produkt und Tests gemeinsam verwendet.
 
 # rtf_to_html: RTF von stdin nach HTML auf stdout.
 #
@@ -558,6 +554,12 @@ check_dependencies() {
     die 2 "Fehlende Dependencies: ${missing[*]}. $hint"
   fi
 
+  # Der Linux-Pfad benötigt pandocs RTF-Reader. Ältere Distributionen
+  # liefern zwar ein `pandoc`-Binary, aber noch kein Eingabeformat `rtf`.
+  if [ "$PLATFORM" = "linux" ] && ! pandoc_supports_rtf; then
+    die 2 "Pandoc unterstützt das Eingabeformat RTF nicht. Bitte pandoc >= 2.14.2 installieren (die Ubuntu-22.04-Paketversion ist zu alt)."
+  fi
+
   # Swift-Helper separat prüfen — die werden im Projekt mitgeliefert,
   # nicht im PATH. Wenn einer fehlt, deuten wir auf install.sh hin.
   # Nur auf macOS: Auf Linux liest xclip/wl-paste das Clipboard, die
@@ -571,264 +573,19 @@ check_dependencies() {
   fi
 }
 
-# ---------- Preprocessor + Cleaner (aus dem Spike) ----------
+# ---------- Gemeinsame Konvertierungs-Pipeline ----------
 
-# preprocess_claude_desktop: Normalisiert HTML aus modernen Electron-Apps,
-# allen voran Claude Desktop. Vier Schritte hintereinander als Pipe.
-# Siehe docs/archive/BLUEPRINT.md "Was nicht funktioniert" für die Begründung jedes Schrittes.
-preprocess_claude_desktop() {
-  # 1a. <div data-line="N">INHALT</div> → INHALT + echtes Newline.
-  #     Claude Desktop kodiert Code-Zeilen als CSS-Subgrid-Divs OHNE \n im DOM.
-  #     Diese Regel macht aus dem visuellen CSS-Layout echte Plain-Text-Zeilen.
-  #     perl -0pe: `-0` slurpt die ganze Eingabe (Multiline-Match möglich),
-  #     `-p` druckt nach jeder Iteration, `-e` führt den Ausdruck aus.
-  #     /s = `.` matcht auch Newlines. /g = global ersetzen.
-  perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs' \
-    | \
-  # 1b. ALLE übrigen <div>/</div> innerhalb <pre>...</pre> entfernen.
-  #     Vor allem das umschließende <div data-content>. Damit sieht pandoc
-  #     einen sauberen <pre><code>...</code></pre>-Block ohne illegale Verschachtelung.
-  #     /e = Replacement-Teil ist Perl-Code (kein einfacher String).
-  perl -0pe '
-    s{(<pre[^>]*>.*?</pre>)}{
-      my $block = $1;
-      $block =~ s{</?div[^>]*>}{}g;
-      $block;
-    }gse' \
-    | \
-  # 1c. style="..."-Attribute komplett entfernen.
-  #     Tailwind packt 1-2 KB Inline-CSS an JEDES Element. Reines Rauschen.
-  perl -0pe 's/\s+style="[^"]*"//g' \
-    | \
-  # 1d. data-*-Attribute entfernen.
-  #     data-file, data-line-type, data-tw-* etc. — alles ohne semantischen Wert.
-  perl -0pe 's/\s+data-[a-z-]+="[^"]*"//g'
-}
-
-# preprocess_google_classroom: Räumt Link-Anhänge aus Google Classroom auf.
-#
-# Problem: Classroom legt jeden Link-Anhang als <a href="…"> ab, das mehrere
-# Block-<div>s umschließt: Titel, eine zweite Zeile mit der angezeigten URL
-# und ein Thumbnail-<img>. pandoc kann Block-Inhalt nicht in einen Inline-
-# Link packen — es hebt die Blöcke aus dem <a> heraus. Ergebnis: ein leerer
-# Link `[](url)`, darunter Titel + URL als lose Absätze, dazu ein nutzloses
-# Thumbnail. (Siehe tests/captures + docs für ein echtes Beispiel.)
-#
-# Lösung: Jeden Classroom-Anhang-Anker zu einem sauberen Listenpunkt
-# `<li><a href="…">Titel</a></li>` zusammenfassen:
-#   - Erkennung: das <a> enthält ein Thumbnail vom Dienst
-#     classroom.google.com/webthumbnail (sehr stabiler Marker).
-#   - Titel: Text des inneren `mvRF3b`-Divs. ACHTUNG: `mvRF3b` ist eine
-#     obfuskierte Google-Klasse, die sich ändern kann. Findet die Regel den
-#     Titel nicht, bleibt der Anker leer und fix_empty_links füllt ihn später
-#     mit der URL — kein Absturz, nur schlechteres Ergebnis.
-#   - URL: der `?authuser=…`-Tracking-Parameter wird entfernt.
-# Danach werden benachbarte <li> zu einem zusammenhängenden <ul>, damit
-# pandoc eine kompakte (tighte) Markdown-Liste ausgibt.
-preprocess_google_classroom() {
-  perl -0777 -pe '
-    # 1. Jeden <a href="…">…</a> betrachten. Anker verschachteln nicht,
-    #    daher ist .*? bis zum nächsten </a> sicher. /s = . matcht Newlines.
-    s{<a\b([^>]*)\bhref="([^"]*)"([^>]*)>(.*?)</a>}{
-      my ($pre, $href, $post, $inner) = ($1, $2, $3, $4);
-      if ($inner =~ m{classroom\.google\.com/webthumbnail}) {
-        # Titel aus dem mvRF3b-Div ziehen, restliche Tags strippen, trimmen.
-        my $title = ($inner =~ m{class="[^"]*\bmvRF3b\b[^"]*">(.*?)</div>}s) ? $1 : "";
-        $title =~ s/<[^>]+>//g;
-        $title =~ s/^\s+|\s+$//g;
-        # authuser-Tracking-Param raus, evtl. übrig bleibendes ?/& tilgen.
-        $href =~ s/[?&]authuser=[^&]*//;
-        $href =~ s/[?&]$//;
-        $title ne "" ? "<li><a href=\"$href\">$title</a></li>"
-                     : "<a href=\"$href\"></a>";
-      } else {
-        # Nicht-Classroom-Anker unverändert durchreichen.
-        $&;
-      }
-    }gse;
-    # 2. Sicherheitsnetz: verbliebene Classroom-Thumbnails (außerhalb eines
-    #    erkannten Ankers) ebenfalls entfernen.
-    s{<img[^>]*classroom\.google\.com/webthumbnail[^>]*>}{}gs;
-    # 3. Leere <div></div> entfernen (mehrfach, wegen Verschachtelung).
-    1 while s{<div\b[^>]*>\s*</div>}{}gs;
-    # 4. Div-Gerüst ZWISCHEN zwei <li> wegräumen, damit die Items direkt
-    #    aneinanderstoßen und in Schritt 5 in EIN <ul> wandern.
-    1 while s{</li>(?:\s*</?div[^>]*>\s*)+<li>}{</li><li>}gs;
-    # 5. Lauf benachbarter <li> in ein <ul> packen. Whitespace zwischen den
-    #    Tags raus (nicht im Titel-Text!) → pandoc gibt eine tighte Liste aus.
-    s{(?:<li>.*?</li>\s*)+}{my $r = $&; $r =~ s/>\s+</></g; "<ul>$r</ul>"}gse;
-  '
-}
-
-# clean_html: Löst <span>-Wrapper um reinen Text auf.
-# Wichtig: ([^<]*) matcht AUCH ein einzelnes Leerzeichen.
-# Claude Desktop nutzt <span> </span> als Whitespace zwischen Inline-Elementen —
-# der Inhalt (incl. Leerzeichen) muss erhalten bleiben.
-# Zweimal laufen lassen, weil sed nicht greedy-nicht-überlappend matcht
-# und damit einfache Verschachtelung in zwei Durchläufen auflöst.
-clean_html() {
-  sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g' \
-    | sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g'
-}
-
-# ---------- Konvertierungs-Pfade ----------
-
-# convert_html: HTML-String von stdin lesen, durch Preprocessor + Cleaner +
-# pandoc schicken, Markdown auf stdout ausgeben.
-convert_html() {
-  vlog "Pfad: HTML → pandoc"
-  preprocess_claude_desktop \
-    | preprocess_google_classroom \
-    | clean_html \
-    | pandoc "${PANDOC_OPTS[@]}" \
-    | fix_empty_links \
-    | tidy_hard_breaks
-}
-
-# fix_empty_links: Repariert Links mit leerem Anker-Text.
-#
-# Pandoc gibt für ein <a href="…"> ohne sichtbaren Inhalt `[](url)` aus —
-# z.B. wenn der Anker im Original nur ein (von uns nicht übernommenes)
-# Bild oder ein Icon umschloss. Der leere []-Teil ist gültiges Markdown,
-# aber manche Markdown-Renderer zeigen so einen Link gar nicht an: ohne
-# Anker-Text gibt es nichts zum Anklicken, der Link verschwindet optisch.
-#
-# Lösung: Ist der []-Teil leer (oder nur Whitespace), füllen wir ihn mit
-# der Ziel-URL. Aus `[](https://x.de)` wird `[https://x.de](https://x.de)`
-# — sichtbar und anklickbar. Ein optionaler Link-Titel (`(url "Titel")`)
-# bleibt erhalten, wandert aber nicht in den Anker-Text.
-#
-# Das `(?<!!)` ist ein Negative-Lookbehind: Es verhindert, dass wir den
-# `[](…)`-Teil eines Bildes `![](…)` anfassen — ein Bild OHNE Alt-Text
-# soll Bild bleiben, nicht zum sichtbaren Link werden.
-fix_empty_links() {
-  # $1 = Ziel-URL (erstes Nicht-Whitespace-Token in den Klammern)
-  # $2 = optionaler Titel inkl. führendem Whitespace (z.B. ` "Titel"`)
-  perl -0pe 's{(?<!!)\[\s*\]\(\s*(\S+?)(\s+[^)]*)?\)}{ "[$1]($1" . (defined $2 ? $2 : "") . ")" }gex'
-}
-
-# tidy_hard_breaks: Entfernt überflüssige Hard-Break-Backslashes.
-#
-# Hintergrund: pandoc gibt jedes <br> als Markdown-Hard-Break aus — ein `\`
-# am Zeilenende. Ein <br><br> (Absatztrennung beim Copy) wird sogar zu zwei
-# Hard-Breaks: `text\` plus eine Zeile, die nur aus `\` besteht. An
-# Absatzgrenzen, vor Listen und am Dokument-Ende ist dieser `\` reiner
-# optischer Müll.
-#
-# WICHTIG: Hard-Breaks in echtem Fließtext (z.B. mehrzeilige Adressen)
-# MÜSSEN erhalten bleiben — ohne `\` würden diese Zeilen beim Rendern zu
-# einer einzigen verschmelzen (einfacher Newline = Leerzeichen in Markdown).
-# Darum entfernen wir nur `\` an klaren Absatz-/Listengrenzen und am
-# Dokument-Ende, nie mitten im Fließtext. Lookaheads `(?=…)` prüfen die
-# Folgezeile, ohne sie zu schlucken.
-tidy_hard_breaks() {
-  # Ein Hard-Break am Zeilenende kann zwei Schreibweisen haben, je nach
-  # pandoc-Ziel-Dialekt: zwei+ Leerzeichen (Default `--to gfm`/`commonmark`)
-  # ODER ein `\` (`--to markdown`, plus manche älteren pandoc-Versionen).
-  # Wir behandeln BEIDE, damit der Output unabhängig vom Dialekt identisch
-  # ist. Das Marker-Muster `(?:\\|[ ]{2,})` matcht beide Formen.
-  perl -0pe '
-    # 1. Hard-Break direkt vor einem Listenpunkt (- * + oder 1. / 1)) → weg.
-    #    Die "- "-Zeilen bilden ohnehin eine Liste; der Umbruch ist überflüssig.
-    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*(?:[-*+] |\d+[.)] ))/\n/g;
-    # 2. Zeilen, die NUR aus einem Hard-Break-Marker bestehen (aus <br><br>:
-    #    eine reine `\`- oder reine Whitespace-Zeile), zu echten Leerzeilen.
-    s/^[ \t]*\\?[ \t]*$//gm;
-    # 3. Hard-Break am Zeilenende UNMITTELBAR vor einer Leerzeile ist sinnlos
-    #    (Umbruch + Absatztrennung) → Marker weg, Absatztrennung bleibt.
-    s/[ \t]*(?:\\|[ ]{2,})\n(?=[ \t]*\n)/\n/g;
-    # 4. Mehr als zwei aufeinanderfolgende Newlines auf zwei reduzieren.
-    s/\n{3,}/\n\n/g;
-    # 5. Hard-Break am DOKUMENT-ENDE → weg. Ein Umbruch, dem kein Inhalt
-    #    mehr folgt, ist immer sinnlos (häufigste Quelle überzähliger `\`:
-    #    ein abschließendes <br> beim Copy). `\z` ankert ans absolute
-    #    String-Ende, daher trifft es NUR den allerletzten Marker; echte
-    #    Hard-Breaks in den Zeilen davor bleiben unangetastet. Die
-    #    eingefangenen Trailing-Newlines ($1) bleiben erhalten.
-    s/[ \t]*(?:\\|[ ]{2,})[ \t]*(\n*)\z/$1/;
-  '
-}
-
-# flatten_layout_tables: Wandelt verschachtelte HTML-Tabellen aus
-# textutil-Konversionen in flache Absatz-Sequenzen um.
-#
-# Hintergrund: Word, Pages, TextEdit & Co. nutzen Tabellen häufig als
-# reines Layout-Mittel (Spalten-Spacing, Header-Banner, etc.), nicht zur
-# Darstellung tabellarischer Daten. textutil reicht diese Strukturen
-# 1:1 ans HTML weiter. Pandoc kann sie weder in GFM-Tabellen abbilden
-# (zu komplex, verschachtelt) noch sinnvoll weglassen — seit Version
-# 3.7 ersetzt es sie durch nichtssagende `[TABLE]`-Platzhalter.
-#
-# Lösung: schon VOR pandoc alle Tabellen-Tags rausnehmen, Zellen werden
-# zu sequentiellen `<p>`-Absätzen. Das ist der gleiche Ansatz, den
-# Apple's NSAttributedString-Renderer fährt — Tabellen werden flach
-# durchgereicht, weil das interne Modell sie sowieso nicht repräsentiert.
-#
-# Wird nur im RTF-Pfad eingesetzt. Im HTML-Pfad (Browser-Copy) bleiben
-# echte Daten-Tabellen erhalten, weil dort der Input semantisch sauber
-# ist und Pandoc damit umgehen kann.
-flatten_layout_tables() {
-  perl -0pe '
-    # <colgroup>...</colgroup>-Blöcke komplett entfernen.
-    s{<colgroup[^>]*>.*?</colgroup>}{}gs;
-    # Selbstschließende <col>-Tags weg.
-    s{<col[^/]*/?>}{}g;
-    # <table> und </table>-Wrapper weg, Inhalt bleibt.
-    s{</?table[^>]*>}{}gs;
-    # <tbody>/<thead>/<tfoot> raus.
-    s{</?t(?:body|head|foot)[^>]*>}{}gs;
-    # <tr> und </tr> raus, Inhalt bleibt.
-    s{</?tr[^>]*>}{}gs;
-    # <td>/<th> → <p>: jede Zelle wird ein Absatz.
-    s{<t[dh][^>]*>}{<p>}gs;
-    s{</t[dh]>}{</p>}gs;
-  '
-}
-
-# tidy_rtf_artifacts: Kosmetische Säuberung nach RTF-Konversion.
-# Textutil-HTML aus Word/Pages-RTFs enthält viele leere <p>-Tags und
-# <br/>s, die Pandoc als Markdown-Hard-Linebreaks (einzelnes `\`)
-# ausgibt. Optisch verrauscht. Hier rauswerfen.
-tidy_rtf_artifacts() {
-  # 1. Zeilen, die nur aus `\` bestehen, werden zu Leerzeilen.
-  # 2. Mehr als zwei aufeinanderfolgende Leerzeilen kollabieren zu zwei.
-  perl -0pe '
-    s/^\\\s*$//gm;
-    s/\n{3,}/\n\n/g;
-  '
-}
-
-# unwrap_list_paragraphs: Macht aus <li><p>Text</p></li> ein <li>Text</li>.
-#
-# Hintergrund: pandocs RTF-Reader (Linux-Pfad) packt jeden Listenpunkt-Inhalt
-# in einen eigenen <p>-Absatz. Pandoc liest das als „lose" Liste und schreibt
-# dann Markdown mit einer Leerzeile zwischen JEDEM Punkt — optisch
-# auseinandergerissen, obwohl das Original eine kompakte Liste war.
-#
-# Wir entfernen den <p>-Wrapper nur, wenn er der EINZIGE Inhalt des <li> ist
-# ([^<] im Muster stellt sicher, dass wirklich nur Text drinsteht). Ein <li>
-# mit mehreren echten Absätzen bleibt unangetastet — dort ist die lose Liste
-# ja die richtige Darstellung.
-#
-# Auf macOS ein No-Op: textutil erzeugt <li> ohne inneres <p>, das Muster
-# greift dort schlicht nie.
-unwrap_list_paragraphs() {
-  perl -0pe 's{<li([^>]*)>\s*<p[^>]*>([^<]*)</p>\s*</li>}{<li$1>$2</li>}gs'
-}
-
-# convert_rtf: RTF-String von stdin lesen, zu HTML wandeln (plattformabhängig,
-# siehe rtf_to_html), Layout-Tabellen plätten, dann normaler HTML-Pfad zu Markdown.
-convert_rtf() {
-  vlog "Pfad: RTF → HTML → flatten → pandoc → tidy"
-  rtf_to_html \
-    | flatten_layout_tables \
-    | unwrap_list_paragraphs \
-    | clean_html \
-    | pandoc "${PANDOC_OPTS[@]}" \
-    | tidy_rtf_artifacts \
-    | fix_empty_links \
-    | tidy_hard_breaks
-}
+# Bundle-Layout: pipeline.sh liegt neben md-clip. Projekt-Layout: lib/pipeline.sh.
+if [ -f "$SCRIPT_DIR/pipeline.sh" ]; then
+  PIPELINE_LIB="$SCRIPT_DIR/pipeline.sh"
+else
+  PIPELINE_LIB="$PROJECT_ROOT/lib/pipeline.sh"
+fi
+if [ ! -f "$PIPELINE_LIB" ]; then
+  die 2 "Pipeline-Bibliothek fehlt: $PIPELINE_LIB"
+fi
+# shellcheck source=../lib/pipeline.sh
+source "$PIPELINE_LIB"
 
 # try_html: Versucht HTML aus dem Clipboard zu holen.
 # Liefert HTML auf stdout und Exit 0, wenn vorhanden; sonst Exit 1.
@@ -881,15 +638,20 @@ try_rtf() {
 
 check_dependencies
 
-# Output-Variable: hier sammeln wir das fertige Markdown,
-# bevor wir es entweder nach stdout oder ins Clipboard schicken.
-output=""
+# Datei statt Shell-Variable: Command-Substitution entfernt alle abschließenden
+# Newlines. Besonders im Plain-Modus müssen die Clipboard-Bytes jedoch exakt
+# erhalten bleiben (kein, ein oder mehrere Newlines).
+OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/md-clip-output.XXXXXX")
+cleanup_output() {
+  rm -f "$OUTPUT_FILE"
+}
+trap cleanup_output EXIT INT TERM
 
 # Sonderpfad: --plain überspringt jede Konvertierung.
 if [ "$PLAIN" -eq 1 ]; then
   vlog "Plain-Modus: Clipboard-Text durchreichen"
-  output=$(clip_read_text || true)
-  if [ -z "$output" ]; then
+  clip_read_text > "$OUTPUT_FILE" || true
+  if [ ! -s "$OUTPUT_FILE" ]; then
     die 1 "Clipboard ist leer."
   fi
 else
@@ -897,15 +659,15 @@ else
   case "$FROM" in
     html)
       html=$(try_html) || die 1 "Kein HTML auf dem Clipboard (--from html)."
-      output=$(printf '%s' "$html" | convert_html) || die 3 "Pandoc-Konvertierung fehlgeschlagen."
+      printf '%s' "$html" | convert_html > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
       ;;
     rtf)
       rtf=$(try_rtf) || die 1 "Kein RTF auf dem Clipboard (--from rtf)."
-      output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
+      printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
       ;;
     plain)
-      output=$(clip_read_text || true)
-      [ -z "$output" ] && die 1 "Clipboard ist leer (--from plain)."
+      clip_read_text > "$OUTPUT_FILE" || true
+      [ ! -s "$OUTPUT_FILE" ] && die 1 "Clipboard ist leer (--from plain)."
       ;;
     auto)
       # Reihenfolge per Blueprint: HTML zuerst (häufigster Fall),
@@ -925,23 +687,22 @@ else
 
         if [ "$mso_flag" -eq 1 ] && rtf=$(try_rtf); then
           vlog "HTML ist Microsoft-Word-Format — verwende stattdessen RTF"
-          output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
+          printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
         else
           if [ "$mso_flag" -eq 1 ]; then
             vlog "HTML ist Microsoft-Word-Format, aber kein RTF da — versuche HTML trotzdem (Ergebnis vermutlich unsauber)"
           fi
-          output=$(printf '%s' "$html" | convert_html) || die 3 "Pandoc-Konvertierung fehlgeschlagen."
+          printf '%s' "$html" | convert_html > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
         fi
       elif rtf=$(try_rtf); then
-        output=$(printf '%s' "$rtf" | convert_rtf) || die 3 "RTF-Konvertierung fehlgeschlagen."
+        printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
       else
         # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
-        plain=$(clip_read_text || true)
-        if [ -z "$plain" ]; then
+        clip_read_text > "$OUTPUT_FILE" || true
+        if [ ! -s "$OUTPUT_FILE" ]; then
           die 1 "Clipboard leer oder kein konvertierbares Format."
         fi
         vlog "Pfad: Plain-Text durchgereicht"
-        output="$plain"
       fi
       ;;
   esac
@@ -955,11 +716,12 @@ if [ "$REPLACE" -eq 1 ]; then
   # interpretiert Input-Bytes als MacRoman, wenn LC_ALL leer oder C ist,
   # und legt dann FALSCHE Zeichen aufs Clipboard, was beim Einfügen in
   # andere Apps Mojibake produziert.
-  printf '%s' "$output" | clip_write_text
-  log "md-clip: Clipboard ersetzt (${#output} Zeichen)."
+  clip_write_text < "$OUTPUT_FILE"
+  OUTPUT_CHARS=$(wc -m < "$OUTPUT_FILE" | tr -d '[:space:]')
+  log "md-clip: Clipboard ersetzt (${OUTPUT_CHARS} Zeichen)."
   notify "Clipboard nach Markdown konvertiert."
 else
-  printf '%s\n' "$output"
+  cat "$OUTPUT_FILE"
   notify "Markdown auf stdout geschrieben."
 fi
 

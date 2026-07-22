@@ -19,6 +19,9 @@ wrappers/md-clip.app
 # Build-Ordner für das self-contained .app-Bundle (inkl. pandoc-Cache).
 build/
 
+# Lokale Sperre des Safe-Commit-Workflows.
+.commit-lock
+
 # Python-Bytecode — entsteht beim Lauf von assets/generate-icon-v2.py.
 __pycache__/
 

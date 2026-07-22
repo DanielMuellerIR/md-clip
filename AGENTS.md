@@ -12,17 +12,18 @@
   `rtf_to_html`, `notify`). Der Rest des Skripts bleibt plattformneutral.
   Erkennung über `uname -s` und `$WAYLAND_DISPLAY` — **nicht** über `$DISPLAY`,
   das ist unter Wayland (XWayland) ebenfalls gesetzt.
-- **`tests/run-tests.sh` dupliziert die Pipeline-Funktionen aus `bin/md-clip`**
-  (bewusster Trade-off, dort kommentiert). Wer eine dieser Funktionen ändert,
-  muss die Kopie mitziehen.
+- **Eine Pipeline-Quelle:** Produkt und Fixture-Tests sourcen gemeinsam
+  `lib/pipeline.sh`. Nur die plattformspezifische Funktion `rtf_to_html`
+  bleibt an den jeweiligen Rändern. Keine Pipeline-Kopie in Tests anlegen.
 - **Beide Plattformen laufen gegen dieselben Erwartungsdateien.** Wenn ein
   Linux-Ergebnis abweicht, ist das ein Befund — nicht der Anlass, eine zweite
   Erwartung einzuführen. Expected-Dateien nie still regenerieren.
 - **Vor Linux-Änderungen testen:** `./tests/run-tests.sh` (macOS) und ein
   Linux-Lauf. Rezept für den Container-Lauf ohne fremde Systeme anzufassen:
   `tasks/2026-07-05-linux-port/plan.md`.
-- **macOS-only und unangetastet lassen:** `wrappers/` (Dock-App, Automator),
-  `assets/` (Icons, DMG), `helpers/*.swift`.
+- **macOS-only bewusst prüfen:** Änderungen unter `wrappers/`, `assets/` oder
+  `helpers/*.swift` brauchen zusätzlich isolierte Wrapper-/Bundle-Tests; reale
+  Signing-, Notary- und Mount-Läufe nur bei einem ausdrücklich beauftragten Release.
 
 ## Verzeichnisstruktur
 
@@ -36,6 +37,7 @@
 - `bin/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `docs/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `helpers/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
+- `lib/` — gemeinsame, seiteneffektfreie Konvertierungs-Pipeline.
 - `spike/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `tasks/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `tests/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
