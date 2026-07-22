@@ -4,7 +4,10 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 19.05.2026, später am Abend)
+## Status (Stand: 2026-07-22)
+
+- Quellstand: **v1.1.1**. Zuletzt dokumentierte veröffentlichte App-Version:
+  **v1.0.3**; dieses Dokument behauptet keine Veröffentlichung von v1.1.1.
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
 - **Stufe B — Signieren und notarisieren.** ✅ Erledigt.
@@ -14,7 +17,7 @@ einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
   Drag-Anleitung). ✅ Erledigt in v1.0.3.
 - **pandoc-Würdigung + Lizenz-Klarstellung in README, pandoc-Version
   in `--version`-Output.** ✅ Erledigt in v1.0.3.
-- Aktuelle veröffentlichte Version: **v1.0.3** als signiertes,
+- Zuletzt dokumentierte veröffentlichte Version: **v1.0.3** als signiertes,
   notarisiertes DMG unter
   [github.com/DanielMuellerIR/md-clip/releases](https://github.com/DanielMuellerIR/md-clip/releases).
 - **Stufe C — GitHub Action für automatisierte Releases.** ⏳ Nächste
@@ -69,15 +72,10 @@ einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
   zusätzlich per AppleScript `set position of item ".background" of
   container window to {900, 900}` — also weit außerhalb der 600×400-
   Fensterfläche parken. Greift in beiden Modi.
-- **Heredoc-Backticks-Falle.** Der osascript-Aufruf nutzt einen
-  un-quotierten Heredoc, damit `$DMG_VOLNAME` interpoliert wird. Bash
-  interpretiert in un-quotierten Heredocs auch Backticks als
-  Command-Substitution. In v1.0.3 hat ein AppleScript-Kommentar
-  versehentlich Backticks um das Wort `try` gehabt, was Bash dazu
-  brachte, `try` als Shell-Befehl aufzurufen (`command not found`).
-  Lief unkritisch durch, weil set -e den Fehler bei Substitution
-  nicht propagiert — aber als Warnung dokumentiert: keine Backticks
-  in un-quotierten Heredocs verwenden, auch nicht in Kommentaren.
+- **AppleScript-Pfade nicht interpolieren.** Launcher und DMG-Layout nutzen
+  gequotete Heredocs. Pfade werden über Umgebungsvariablen eingelesen und bei
+  Shell-Aufrufen mit AppleScripts `quoted form of` maskiert; Apostrophe oder
+  Shell-Metazeichen bleiben dadurch reine Daten.
 
 ---
 
@@ -92,6 +90,7 @@ Terminal-Wissen läuft. Im Bundle liegen:
   Erststart-Dialog (siehe unten), dann eigentlicher md-clip-Lauf mit
   `--replace --notify`.
 - `Contents/Resources/bin/md-clip` — Kopie des Hauptskripts
+- `Contents/Resources/bin/pipeline.sh` — gemeinsame Produkt-/Test-Pipeline
 - `Contents/Resources/bin/pandoc` — pandoc 3.9.0.2, arm64-only
 - `Contents/Resources/bin/clipboard-html`, `clipboard-rtf` — kompilierte
   Swift-Helper
@@ -109,6 +108,13 @@ Terminal-Wissen läuft. Im Bundle liegen:
 `bin/md-clip` ist seit dieser Stufe **zweilayout-fähig**: es findet pandoc
 und die Helper sowohl im Projekt-Layout (`bin/` + `helpers/`) als auch im
 Bundle-Layout (alles in `Resources/bin/`).
+
+Der Bundle-Build prüft den gepinnten pandoc-Zip und das COPYRIGHT-Dokument
+vor jeder Wiederverwendung per SHA-256, entpackt nur den exakten Archivpfad
+und verifiziert `pandoc --version`. Downloads und Binary-Staging werden erst
+nach erfolgreicher Prüfung atomar übernommen. Das Release-DMG wird in einen
+privaten Mountpoint unter `build/` eingehängt; die Aufräumroutine löst nur das
+von `hdiutil attach -plist` für diesen Lauf gemeldete Device.
 
 ### Bekannte Stolpersteine, schon gelöst
 
@@ -187,7 +193,7 @@ Der Symlink zeigt direkt auf das Skript im App-Bundle. Konsequenz:
   beide auf dasselbe Skript zeigen.
 - Konsistenz garantiert: CLI- und App-Version sind immer identisch.
 
-`bin/md-clip` löst den Symlink mit `realpath` auf, findet so sein
+`bin/md-clip` löst den Symlink portabel mit `readlink` und `pwd -P` auf, findet so sein
 `SCRIPT_DIR` im Bundle und nimmt die dort liegenden Helper und pandoc
 über die schon vorhandene Zwei-Layout-Logik.
 

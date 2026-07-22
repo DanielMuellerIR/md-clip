@@ -65,8 +65,9 @@ md-clip läuft unter Linux als CLI-Werkzeug — dieselbe Konvertierungs-Pipeline
 ### Installation
 
 ```bash
-# Debian / Ubuntu / Mint
-sudo apt install pandoc xclip wl-clipboard libnotify-bin
+# Debian / Ubuntu / Mint (pandoc muss den RTF-Reader enthalten)
+sudo apt install xclip wl-clipboard libnotify-bin
+# pandoc >= 2.14.2 aus den Distributions-Backports oder dem offiziellen Release
 
 git clone https://github.com/DanielMuellerIR/md-clip.git
 cd md-clip
@@ -74,6 +75,11 @@ cd md-clip
 ```
 
 Für Fedora (`sudo dnf install pandoc xclip wl-clipboard libnotify`) und Arch (`sudo pacman -S pandoc xclip wl-clipboard libnotify`) gilt dasselbe, nur der Paketbefehl unterscheidet sich.
+
+md-clip prüft nicht nur, ob `pandoc` vorhanden ist, sondern ob es das
+Eingabeformat `rtf` wirklich unterstützt. Die Standardversion aus Ubuntu 22.04
+ist zu alt; dort bitte ein aktuelles Paket von der
+[offiziellen pandoc-Release-Seite](https://github.com/jgm/pandoc/releases) verwenden.
 
 Es reicht das Clipboard-Werkzeug der eigenen Sitzung — `xclip` für X11, `wl-clipboard` für Wayland. Beide zu installieren schadet nicht und überlebt einen Sitzungswechsel. `libnotify-bin` braucht nur, wer `--notify` nutzt.
 
@@ -133,6 +139,8 @@ Alle Optionen im Überblick:
   ```
 - **`--quiet` / `-q` hält stdout sauber:** Status- und Diagnosemeldungen laufen ausschließlich über stderr. Mit `--quiet` entfallen sie ganz, sodass stdout garantiert nur das konvertierte Markdown enthält — wichtig, wenn ein Agent die Ausgabe maschinell weiterverarbeitet.
 - **`--replace` / `-r` schreibt das Ergebnis zurück ins Clipboard** statt nach stdout. Für reine Pipelines ist die stdout-Variante (ohne `--replace`) meist die richtige.
+- **Plain-Text ist bytegenau:** `--plain` und `--from plain` erhalten auch
+  kein, ein oder mehrere abschließende Newlines; stdout fügt keinen hinzu.
 
 **Deterministisches Verhalten erzwingen**
 
@@ -224,6 +232,10 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
 
 ```bash
 bash tests/run-tests.sh
+bash tests/test-plain-newlines.sh
+bash tests/test-install-safety.sh
+bash tests/test-dependencies.sh
+bash tests/test-wrapper-safety.sh
 ```
 
 Die Fixture-Tests brauchen nur pandoc und perl und laufen überall. Die Clipboard-Roundtrip-Tests brauchen ein echtes Clipboard und überspringen sich sichtbar, wo keines erreichbar ist (etwa in einem Container). Unter Linux holt man sie mit einem unsichtbaren X-Server dazu:
@@ -233,7 +245,12 @@ sudo apt install xvfb
 xvfb-run ./tests/run-tests.sh
 ```
 
-Der RTF-Test läuft auf beiden Plattformen gegen dieselbe Erwartungsdatei, obwohl dahinter zwei verschiedene RTF-Parser stecken (`textutil` auf macOS, pandoc auf Linux) — er ist damit die Absicherung, dass dieselbe Eingabe überall dasselbe Markdown ergibt.
+Die Fixture-Tests sourcen exakt dieselbe Pipeline wie das Produkt. Auf macOS
+kompilieren sie Produkt- und Test-Helper in ein privates temporäres
+Bundle-Layout; ein sauberer Checkout braucht keine ignorierten Alt-Binaries.
+Der RTF-Test läuft auf beiden Plattformen gegen dieselbe Erwartungsdatei,
+obwohl dahinter zwei verschiedene RTF-Parser stecken (`textutil` auf macOS,
+pandoc auf Linux).
 
 ## Mitwirken
 

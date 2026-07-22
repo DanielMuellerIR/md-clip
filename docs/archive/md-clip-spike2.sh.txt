@@ -1,3 +1,7 @@
+# Historischer Prototyp (2026-07-22 archiviert).
+# Nicht ausführbar und nicht Teil des Produktpfads; die gepflegte Pipeline
+# liegt in lib/pipeline.sh.
+
 #!/usr/bin/env bash
 # md-clip-spike2.sh — Phase 0.5 mit Claude-Desktop-Preprocessor v2.
 # Neu in v2: <div>-Wrapper innerhalb von <pre>-Blöcken werden gestrippt,
