@@ -201,7 +201,12 @@ Im Repo-Root liegen die drei Einstiegspunkte für die App — bewusst getrennt v
 
 `install-app.sh` und `release.sh` notarisieren zuerst die **App selbst** und heften ihr das Ticket an. Das ist der Punkt: Eine App, die nur im notarisierten Disk-Image steckt, verliert ihre Garantie, sobald jemand sie herauszieht.
 
-Dafür braucht es ein „Developer ID Application"-Zertifikat und ein notarytool-Keychain-Profil. Der Profilname kommt aus `NOTARY_PROFILE`, aus `git config mdClip.notaryProfile` oder — als Default — `theplan-notary`; Keychain-Profile sind pro Mac lokal und werden nie synchronisiert.
+Dafür braucht es ein „Developer ID Application"-Zertifikat und ein notarytool-Keychain-Profil. Keychain-Profile sind pro Mac lokal und werden nie synchronisiert, deshalb steht im Repo kein Name: Er kommt aus `NOTARY_PROFILE` oder aus der Konfiguration dieses Clones.
+
+```bash
+git config --local mdClip.notaryProfile <profil>
+xcrun notarytool store-credentials <profil> --apple-id <apple-id> --team-id <team-id>
+```
 
 ## Globaler Hotkey (macOS)
 

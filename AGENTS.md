@@ -29,8 +29,8 @@
   App. Der macOS-App-Weg liegt daneben: `build.sh` baut nur, `install-app.sh` baut,
   notarisiert und installiert nach `/Applications`, `release.sh` packt das DMG und
   installiert nie. Beide notarisieren zuerst die App selbst, dann erst das Image.
-  Profilname aus `NOTARY_PROFILE`, `git config mdClip.notaryProfile` oder dem
-  Default `theplan-notary`.
+  Profilname aus `NOTARY_PROFILE` oder `git config mdClip.notaryProfile` — kein
+  Default im Repo, das ist ein öffentliches Repository.
 - **Profil-Vorabcheck immer mit Wiederholung.** `xcrun notarytool history` meldet
   gelegentlich fälschlich „No Keychain password item found", obwohl das Profil da
   ist (2026-07-26 belegt). Ein einzelner Fehlversuch würde einen kompletten

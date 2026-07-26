@@ -35,7 +35,12 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 if [ -z "$NOTARY_PROFILE" ]; then
   NOTARY_PROFILE="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." config --local --get mdClip.notaryProfile 2>/dev/null || true)"
 fi
-: "${NOTARY_PROFILE:=theplan-notary}"
+if [ -z "$NOTARY_PROFILE" ]; then
+  echo "FEHLER: Kein Notary-Profil bekannt." >&2
+  echo "Entweder NOTARY_PROFILE setzen oder einmalig fuer diesen Clone:" >&2
+  echo "  git config --local mdClip.notaryProfile <profil>" >&2
+  exit 2
+fi
 
 # --no-finder-layout überspringt den AppleScript-Schritt: Er öffnet ein echtes
 # Finder-Fenster und reißt den Fokus an sich, was headless-Läufe (und Läufe neben

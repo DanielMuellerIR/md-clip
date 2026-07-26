@@ -18,8 +18,7 @@
 #
 # Voraussetzungen:
 #   - "Developer ID Application"-Zertifikat im Schlüsselbund
-#   - notarytool-Profil: NOTARY_PROFILE, `git config mdClip.notaryProfile`
-#     oder der flottenweite Default theplan-notary
+#   - notarytool-Profil: NOTARY_PROFILE oder `git config mdClip.notaryProfile`
 #
 # Aufruf:  ./install-app.sh
 # Letzte Zeile bei Erfolg: INSTALL OK: /Applications/md-clip.app (<version>)
@@ -34,7 +33,12 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 if [ -z "$NOTARY_PROFILE" ]; then
   NOTARY_PROFILE="$(git config --local --get mdClip.notaryProfile 2>/dev/null || true)"
 fi
-: "${NOTARY_PROFILE:=theplan-notary}"
+if [ -z "$NOTARY_PROFILE" ]; then
+  echo "FEHLER: Kein Notary-Profil bekannt." >&2
+  echo "Entweder NOTARY_PROFILE setzen oder einmalig fuer diesen Clone:" >&2
+  echo "  git config --local mdClip.notaryProfile <profil>" >&2
+  exit 2
+fi
 export NOTARY_PROFILE
 
 # Fail-fast VOR dem Bauen: Ein unbrauchbares Profil erst nach dem Bauen zu

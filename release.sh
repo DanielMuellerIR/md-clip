@@ -19,8 +19,7 @@
 #
 # Voraussetzungen:
 #   - "Developer ID Application"-Zertifikat im Schlüsselbund
-#   - notarytool-Profil: NOTARY_PROFILE, `git config mdClip.notaryProfile`
-#     oder der flottenweite Default theplan-notary
+#   - notarytool-Profil: NOTARY_PROFILE oder `git config mdClip.notaryProfile`
 #
 # Aufruf:
 #   ./release.sh                     # vollständiger Release-Lauf
