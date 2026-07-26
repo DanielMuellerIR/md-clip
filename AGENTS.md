@@ -24,6 +24,17 @@
 - **macOS-only bewusst prüfen:** Änderungen unter `wrappers/`, `assets/` oder
   `helpers/*.swift` brauchen zusätzlich isolierte Wrapper-/Bundle-Tests; reale
   Signing-, Notary- und Mount-Läufe nur bei einem ausdrücklich beauftragten Release.
+- **Vier Einstiegspunkte, bewusst getrennt:** `install.sh` ist das
+  plattformübergreifende CLI-Setup (läuft auch auf Linux) und installiert **keine**
+  App. Der macOS-App-Weg liegt daneben: `build.sh` baut nur, `install-app.sh` baut,
+  notarisiert und installiert nach `/Applications`, `release.sh` packt das DMG und
+  installiert nie. Beide notarisieren zuerst die App selbst, dann erst das Image.
+  Profilname aus `NOTARY_PROFILE`, `git config mdClip.notaryProfile` oder dem
+  Default `theplan-notary`.
+- **Profil-Vorabcheck immer mit Wiederholung.** `xcrun notarytool history` meldet
+  gelegentlich fälschlich „No Keychain password item found", obwohl das Profil da
+  ist (2026-07-26 belegt). Ein einzelner Fehlversuch würde einen kompletten
+  Release-Lauf grundlos abbrechen — deshalb fünf Versuche.
 
 ## Verzeichnisstruktur
 

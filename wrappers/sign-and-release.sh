@@ -18,14 +18,37 @@ set -euo pipefail
 
 # ---------- Konstanten ----------
 
-# Apple-ID für notarytool — als Umgebungsvariable setzen, nicht hardcoden.
-# Beispiel: export APPLE_ID="deine@apple-id.example"
-APPLE_ID="${APPLE_ID:?Bitte APPLE_ID als Umgebungsvariable setzen (deine Apple-ID-E-Mail)}"
+# Apple-ID nur noch als Hinweistext für das einmalige `store-credentials`.
+# Sie wurde früher zwingend als Umgebungsvariable verlangt, obwohl das Skript sie
+# nirgends benutzt: Die Zugangsdaten liegen vollständig im notarytool-Profil im
+# Schlüsselbund. Die Pflicht blockierte damit jeden Lauf ohne jeden Nutzen.
+APPLE_ID="${APPLE_ID:-<deine-apple-id>}"
 
 # Team-ID/Identitaet ueberschreibbar (CI/anderer Account); Default als Fallback.
 TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
 IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
-NOTARY_PROFILE="md-clip-notarytool"
+
+# Profilname: Umgebung schlägt clone-lokale Git-Konfiguration, dann der
+# flottenweite Kanon. Der früher fest eingebaute Name "md-clip-notarytool"
+# existiert nicht auf jedem Mac und ließ den Lauf erst nach dem Bauen scheitern.
+NOTARY_PROFILE="${NOTARY_PROFILE:-}"
+if [ -z "$NOTARY_PROFILE" ]; then
+  NOTARY_PROFILE="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." config --local --get mdClip.notaryProfile 2>/dev/null || true)"
+fi
+: "${NOTARY_PROFILE:=theplan-notary}"
+
+# --no-finder-layout überspringt den AppleScript-Schritt: Er öffnet ein echtes
+# Finder-Fenster und reißt den Fokus an sich, was headless-Läufe (und Läufe neben
+# laufender Arbeit) stört. Das DMG ist dann funktional, aber ohne Layout und
+# Hintergrundbild — für ein echtes Release also nicht benutzen.
+FINDER_LAYOUT=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-finder-layout) FINDER_LAYOUT=0 ;;
+    *) echo "Unbekannte Option: $arg" >&2
+       echo "Aufruf: ./release.sh [--no-finder-layout]" >&2; exit 2 ;;
+  esac
+done
 
 # DMG-Volume-Name = das, was im Finder über dem Fenster steht. Der reale
 # Mountpoint ist absichtlich ein privates Build-Verzeichnis; fremde Volumes
@@ -61,7 +84,22 @@ fi
 
 # Existiert das Notary-Schlüsselbund-Profil?
 # Wir testen es mit einem History-Aufruf — funktioniert nur mit gültigem Profil.
-if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+#
+# Warum mit Wiederholungen: Der Aufruf meldet gelegentlich fälschlich
+# „No Keychain password item found", obwohl das Profil da ist (am 2026-07-26 auf
+# M3 belegt — Versuch 1 fehlgeschlagen, Versuch 2 sofort OK, dazwischen nichts
+# verändert). Ein einzelner Fehlversuch würde hier einen kompletten Release-Lauf
+# abbrechen. Ein wirklich fehlendes Profil scheitert dagegen auch nach fünf
+# Versuchen; die Aussagekraft geht also nicht verloren.
+notary_profile_works() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 && return 0
+    sleep 3
+  done
+  return 1
+}
+if ! notary_profile_works; then
   echo "FEHLER: notarytool-Schlüsselbund-Profil '$NOTARY_PROFILE' nicht eingerichtet." >&2
   echo
   echo "So einrichten (Passwort INTERAKTIV eingeben, NICHT als Argument!):" >&2
@@ -127,6 +165,21 @@ codesign --sign "$IDENTITY" \
 # Verifikation: bricht ab, wenn die Signatur kaputt oder unvollständig ist.
 codesign --verify --strict --verbose=2 "$APP_BUNDLE"
 echo "✓ Bundle signiert"
+
+# ---------- 2b. App notarisieren ----------
+# Vor dem DMG, nicht danach: Wer die App aus dem Image herauszieht, hätte sonst
+# ein Bundle ohne eigenes Ticket — das Ticket des DMG reist nicht mit. notarytool
+# nimmt kein nacktes .app entgegen, deshalb der Umweg über ein ZIP. Das
+# angeheftete Ticket landet als Datei im Bundle und wird unten mitkopiert.
+echo "==> Notarisiere App-Bundle (Profil $NOTARY_PROFILE)"
+APP_ZIP="$(mktemp -d)/md-clip.zip"
+ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ZIP"
+xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+rm -rf "$(dirname "$APP_ZIP")"
+xcrun stapler staple "$APP_BUNDLE"
+xcrun stapler validate "$APP_BUNDLE"
+spctl --assess --type execute -vv "$APP_BUNDLE" 2>&1 | tail -2
+echo "✓ App notarisiert und gestapelt"
 
 # ---------- 3. DMG mit Installations-Layout erzeugen ----------
 
@@ -228,6 +281,7 @@ chflags hidden "$MOUNT_DIR/.background"
 # Finder-Layout via AppleScript. Die Werte hier (Fenstergröße,
 # Icon-Positionen) müssen mit dem Hintergrundbild zusammenpassen,
 # das von assets/generate-dmg-background.swift erzeugt wird.
+if [ "$FINDER_LAYOUT" -eq 1 ]; then
 echo "==> Konfiguriere Finder-Ansicht"
 MOUNT_DIR="$MOUNT_DIR" osascript <<'APPLESCRIPT'
 set mountPath to system attribute "MOUNT_DIR"
@@ -267,6 +321,9 @@ tell application "Finder"
   end tell
 end tell
 APPLESCRIPT
+else
+  echo "==> Finder-Ansicht übersprungen (--no-finder-layout)"
+fi
 
 # Kurz warten, bis das Finder-AppleScript die .DS_Store geschrieben hat.
 # Ohne das verliert das fertige DMG manchmal das Layout — Race-Condition

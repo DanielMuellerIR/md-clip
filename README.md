@@ -188,6 +188,21 @@ Das erzeugt `wrappers/md-clip.app`. Diese App ziehst du ins Dock. Ein Klick dara
 
 Eigenes Icon zuweisen: Rechtsklick auf die App → **Informationen** → ein Bild auf das kleine App-Symbol oben links ziehen.
 
+### Bauen, installieren, Release
+
+Im Repo-Root liegen die drei Einstiegspunkte für die App — bewusst getrennt von `install.sh`, das das plattformübergreifende CLI-Setup ist und auch auf Linux läuft:
+
+```bash
+./build.sh                        # baut md-clip.app nach build/, ohne zu signieren
+./install-app.sh                  # baut, notarisiert, installiert nach /Applications
+./release.sh                      # baut, notarisiert, packt das DMG — installiert nie
+./release.sh --no-finder-layout   # ohne Finder-Fensterlayout (für headless Läufe)
+```
+
+`install-app.sh` und `release.sh` notarisieren zuerst die **App selbst** und heften ihr das Ticket an. Das ist der Punkt: Eine App, die nur im notarisierten Disk-Image steckt, verliert ihre Garantie, sobald jemand sie herauszieht.
+
+Dafür braucht es ein „Developer ID Application"-Zertifikat und ein notarytool-Keychain-Profil. Der Profilname kommt aus `NOTARY_PROFILE`, aus `git config mdClip.notaryProfile` oder — als Default — `theplan-notary`; Keychain-Profile sind pro Mac lokal und werden nie synchronisiert.
+
 ## Globaler Hotkey (macOS)
 
 macOS-Bordmittel reichen für einen system-weiten Tastatur-Shortcut:
