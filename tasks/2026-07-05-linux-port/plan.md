@@ -42,6 +42,13 @@ blieb unangetastet, dort ist kein passwortloses sudo eingerichtet).
 | `install.sh` frisches Linux | legt `~/.local/bin` an, `md-clip` läuft |
 | Fehlerpfade Linux | leeres Clipboard → Exit 1; fehlendes xclip → Exit 2 mit apt-Hinweis |
 
+Wiederholt am 2026-07-29 nach dem Umbau der Markdown-Nachbearbeitung
+(`tidy_markdown`), diesmal im Ubuntu-24.04-Container auf dem Linux-Test-Host
+Popo: ohne Display 11/11 grün (Clipboard-Tests übersprungen), mit Xvfb 13/13
+grün einschließlich `utf16-html-clipboard`. Wayland wurde diesmal nicht
+wiederholt. Temporäres Verzeichnis und Container danach entfernt, das
+vorhandene `ubuntu:24.04`-Image blieb unangetastet.
+
 Phase 2 des Plans verlangte eine manuelle Testmatrix (2 Desktops × 2 Browser) an
 einem echten Gerät. Ersetzt durch die reproduzierbaren Roundtrip-Tests oben: Die
 kritische Browser-Eigenheit ist die HTML-Kodierung auf dem Clipboard, und die
@@ -76,6 +83,14 @@ Desktop (Firefox/Chromium markieren → kopieren → md-clip → einfügen).
    abbildbar" festhält. Jetzt laufen beide Plattformen gegen **dieselbe**
    Erwartungsdatei, und der Test bewacht damit die Gleichheit selbst.
    (Zweiter Ausgleich: `unwrap_list_paragraphs` gegen pandocs lose Listen.)
+
+   Nachtrag 2026-07-29: Die hier zitierte Annahme war falsch. pandoc schreibt
+   den Hard-Break in **jedem** Zieldialekt als sichtbaren Backslash, gfm
+   eingeschlossen — nachgeprüft mit pandoc 3.9.0.2. Der Ausgleich über
+   `rtf_fix_escaped_newlines` bleibt richtig, die Begründung „zwei unsichtbare
+   Leerzeichen" war es nicht. Inzwischen erzeugt `tidy_markdown` die zwei
+   Leerzeichen selbst, und der `trailing-hardbreak`-Test läuft im
+   Default-Dialekt.
 
 ## Abweichungen vom ursprünglichen Plan
 

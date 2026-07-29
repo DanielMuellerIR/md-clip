@@ -272,13 +272,38 @@ tidy_markdown() {
         $plain =~ s/^(?:[ \t]|\xc2\xa0)+//;
         $plain =~ s/(?:[ \t]|\xc2\xa0)+$//;
 
+        my $original = $rest;
+
         if ($plain eq "\xe2\x80\xa2") {
-            $lines[$i] = $prefix . $space . q{-};
+            $rest = q{-};
         } elsif ($rest =~ /^(?:\\_){3,}$/) {
-            $lines[$i] = $prefix . $space . (q{_} x (length($rest) / 2));
+            $rest = q{_} x (length($rest) / 2);
         } elsif ($rest =~ /^\\-/) {
-            $lines[$i] = $prefix . $space . substr($rest, 1);
+            $rest = substr($rest, 1);
         }
+
+        # Pipe und Raute escaped pandoc immer, obwohl beide nur in einem
+        # einzigen Zusammenhang Markdown-Zeichen sind: `|` trennt Zellen in
+        # einer Tabellenzeile, `#` beginnt eine Überschrift am Zeilenanfang.
+        # Überall sonst ist der Backslash überzählig und im Ergebnis sichtbar.
+        # Eine Tabellenzeile bleibt komplett, wie pandoc sie geschrieben hat:
+        # sie beginnt immer mit `|` (die Trennzeile eingeschlossen), und ihre
+        # Escapes gehören dort zur Spaltenbreite. Ein Zeichen daraus zu
+        # entfernen würde die Ausrichtung der Tabelle verschieben.
+        unless ($rest =~ /^\|/) {
+            my $keep = q{};
+            if ($rest =~ /^\\#/) {
+                $keep = q{\#};  # Raute am Zeilenanfang bleibt escaped
+                $rest = substr($rest, 2);
+            }
+            # Über Escape-PAARE laufen, nicht über einzelne Zeichen: sonst
+            # würde der zweite Backslash eines echten `\\` als Anfang eines
+            # neuen Escapes gelesen.
+            $rest =~ s{\\(.)}{ ($1 eq q{|} || $1 eq q{#}) ? $1 : qq{\\$1} }gse;
+            $rest = $keep . $rest;
+        }
+
+        $lines[$i] = $prefix . $space . $rest if $rest ne $original;
     }
 
     # ---- Durchlauf 2d: Leerzeilen-Läufe zusammenziehen ----

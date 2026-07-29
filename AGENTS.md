@@ -23,6 +23,13 @@
   jeder Aufräumregel. Wer eine neue Regel hinzufügt, hängt sie in einen der
   Durchläufe mit `next if $is_code[$i]` ein, nicht als blindes `perl -0pe`
   über das ganze Dokument.
+- **Überzählige Escapes nimmt `tidy_markdown` zurück, Tabellenzeilen nicht.**
+  `\-` am Zeilenanfang, `\_\_\_`, sowie `\|` und `\#` im Fließtext werden
+  entescapt; escaped bleiben die Raute am Zeilenanfang (dort beginnt sie eine
+  Überschrift) und **alles in einer Tabellenzeile** (die beginnt mit `|`). In
+  der Tabelle gehören die Escapes zur Spaltenbreite — ein Zeichen daraus zu
+  entfernen verschiebt die Ausrichtung. Ein `\#` in einer Zelle bleibt deshalb
+  bewusst stehen; wer das ändern will, muss die Tabelle neu ausrichten.
 - **Zeilenumbruch im Absatz = zwei Leerzeichen, kein `\`.** pandoc schreibt
   Hard-Breaks als sichtbaren Backslash; `tidy_markdown` ersetzt ihn. Umbrüche,
   die nur Layout waren (vor Leerzeile, vor Listenpunkt, am Dokumentende),
@@ -31,6 +38,12 @@
 - **Beide Plattformen laufen gegen dieselben Erwartungsdateien.** Wenn ein
   Linux-Ergebnis abweicht, ist das ein Befund — nicht der Anlass, eine zweite
   Erwartung einzuführen. Expected-Dateien nie still regenerieren.
+  Die Erwartungen laufen dabei auch gegen zwei pandoc-Versionen (macOS 3.9.0.2,
+  Ubuntu 24.04 3.1.3). Ein Fixture darf deshalb nichts festschreiben, was von
+  der pandoc-Version abhängt. Konkret verifiziert am 2026-07-29: Die
+  Sprachangabe eines Code-Blocks gehört in `<code class="language-x">`. Steht
+  sie zusätzlich am `<pre>`, schreibt pandoc 3.1.3 ` ``` language-x `, 3.9 aber
+  ` ``` x ` — und dasselbe Fixture kann nicht beide erfüllen.
 - **Vor Linux-Änderungen testen:** `./tests/run-tests.sh` (macOS) und ein
   Linux-Lauf. Rezept für den Container-Lauf ohne fremde Systeme anzufassen:
   `tasks/2026-07-05-linux-port/plan.md`.

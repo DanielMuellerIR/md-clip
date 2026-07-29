@@ -223,12 +223,17 @@ run_test "code-blocks (Backslash in Code bleibt Code)" \
   "$actual" \
   "$FIXTURES/code-blocks.expected.md"
 
-# --- Test 10: Escapes, die getippte Marker unlesbar machen ---
+# --- Test 10: überzählige Escapes ---
 # pandoc escaped einen getippten Gedankenstrich am Zeilenanfang zu `\-` und
 # eine getippte Trennlinie zu `\_\_\_`. Ein Absatz, der nur aus einem fett
 # gesetzten Bullet besteht, war ebenfalls ein getippter Listenpunkt.
+#
+# Dazu Pipe und Raute: beide escaped pandoc überall, Markdown-Zeichen sind sie
+# aber nur an einer Stelle — `|` in einer Tabellenzeile, `#` am Zeilenanfang.
+# Der Test pinnt beide Seiten: im Fließtext fällt der Backslash weg, in der
+# Tabellenzeile und vor der Zeilenanfangs-Raute bleibt er stehen.
 actual=$(convert_html < "$FIXTURES/escaped-markers.html")
-run_test "escaped-markers (getippte Marker ohne Backslash)" \
+run_test "escaped-markers (überzählige Backslashes weg)" \
   "$actual" \
   "$FIXTURES/escaped-markers.expected.md"
 
