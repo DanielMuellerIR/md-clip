@@ -245,6 +245,7 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
 
 - **Code-Blöcke** kommen meist als 4-Leerzeichen-Einrückung statt als ` ``` `-Fence. Beides ist gültiges Markdown und wird von allen Renderern korrekt erkannt.
 - **Sprach-Annotation** für Code-Blöcke geht verloren — die meisten Quellen liefern sie ohnehin nicht mit.
+- **Zeilenumbrüche innerhalb eines Absatzes** werden als zwei Leerzeichen am Zeilenende geschrieben — das ist in Markdown ein harter Umbruch, aber unsichtbar. Ein Editor, der beim Speichern Leerzeichen am Zeilenende entfernt, löscht damit den Umbruch. Die Alternative wäre ein sichtbarer `\` am Zeilenende; die ist bewusst nicht gewählt.
 - **Bilder** werden weggelassen. Nur Text wird konvertiert.
 - **Microsoft-Word-Dokumente mit komplexer Bild-Einbettung**: Bilder werden nicht extrahiert (keine `![]()`-Referenzen). Der Text und Tabellen-Inhalt kommt sauber raus, Bildplätze aber leer.
 

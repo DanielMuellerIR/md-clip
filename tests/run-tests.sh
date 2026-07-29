@@ -178,28 +178,59 @@ run_test "ordinary-lists (Listentypen bleiben erhalten)" \
 
 # --- Test 7: <br><br>-Absätze + Listen ---
 # <br><br> wird von pandoc zu Hard-Break-Backslash-Müll (`text\` + lone `\`).
-# tidy_hard_breaks muss daraus saubere Absätze + Listen machen, ohne
+# tidy_markdown muss daraus saubere Absätze + Listen machen, ohne
 # Hard-Breaks in echtem Fließtext zu zerstören.
 actual=$(convert_html < "$FIXTURES/br-paragraphs.html")
 run_test "br-paragraphs (<br><br> → Absätze ohne Backslash-Müll)" \
   "$actual" \
   "$FIXTURES/br-paragraphs.expected.md"
 
-# --- Test 8: Trailing-Hard-Break am Dokument-Ende ---
+# --- Test 8: Hard-Breaks als zwei Leerzeichen, letzter Marker weg ---
 # Ein abschließendes <br> beim Copy erzeugt einen Hard-Break-Marker am
-# Dokument-Ende. Im `--to markdown`-Dialekt ist dieser Marker ein sichtbarer
-# `\` — die häufigste Quelle überzähliger Backslashes. tidy_hard_breaks muss
-# NUR den letzten (sinnlosen) Marker entfernen; die echten Hard-Breaks in den
-# Zeilen davor (mehrzeilige Adresse) MÜSSEN als `\` erhalten bleiben.
-# Bewusst mit `-t markdown` (statt Default gfm), weil nur dieser Dialekt den
-# Hard-Break als sichtbaren `\` schreibt — gfm/commonmark nutzen zwei
-# (unsichtbare) Leerzeichen, die ein Expected-File nicht stabil abbilden kann.
-PANDOC_OPTS=(-f html -t markdown-raw_html --wrap=none)
+# Dokument-Ende. pandoc schreibt jeden Hard-Break als sichtbaren `\` — in
+# JEDEM Dialekt, gfm eingeschlossen. tidy_markdown muss daraus machen:
+#   - letzter, sinnloser Marker: ganz weg,
+#   - echte Hard-Breaks davor (mehrzeilige Adresse): zwei Leerzeichen.
+#
+# ACHTUNG: Die beiden Leerzeichen am Zeilenende im Expected-File sind der
+# eigentliche Prüfgegenstand. Ein Editor, der Trailing-Whitespace beim
+# Speichern entfernt, macht diesen Test unbrauchbar — deshalb prüft der
+# Test danach zusätzlich per printf-Vergleich, dass sie wirklich da sind.
 actual=$(convert_html < "$FIXTURES/trailing-hardbreak.html")
-PANDOC_OPTS=(-f html -t gfm-raw_html --wrap=none)
-run_test "trailing-hardbreak (abschließendes <br> → kein End-Backslash)" \
+run_test "trailing-hardbreak (<br> → zwei Leerzeichen, kein Backslash)" \
   "$actual" \
   "$FIXTURES/trailing-hardbreak.expected.md"
+
+# Zweite, vom Expected-File unabhängige Absicherung derselben Regel.
+TOTAL=$((TOTAL + 1))
+if printf '%s' "$actual" | grep -q 'Besuchsadresse:  $' \
+  && ! printf '%s' "$actual" | grep -q '\\$'; then
+  echo "✓ hardbreak-form (zwei Leerzeichen statt Backslash)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ hardbreak-form (zwei Leerzeichen statt Backslash)"
+  printf '%s' "$actual" | cat -v | sed 's/^/    /'
+  FAILED=$((FAILED + 1))
+fi
+
+# --- Test 9: Code-Blöcke bleiben unangetastet ---
+# In Code ist ein Backslash am Zeilenende echter Inhalt (Shell-Fortsetzung)
+# und `\-` echter Code. tidy_markdown darf dort nichts umschreiben — weder
+# im eingerückten noch im eingezäunten Block, und auch die Leerzeilen
+# INNERHALB eines eingerückten Blocks müssen erhalten bleiben.
+actual=$(convert_html < "$FIXTURES/code-blocks.html")
+run_test "code-blocks (Backslash in Code bleibt Code)" \
+  "$actual" \
+  "$FIXTURES/code-blocks.expected.md"
+
+# --- Test 10: Escapes, die getippte Marker unlesbar machen ---
+# pandoc escaped einen getippten Gedankenstrich am Zeilenanfang zu `\-` und
+# eine getippte Trennlinie zu `\_\_\_`. Ein Absatz, der nur aus einem fett
+# gesetzten Bullet besteht, war ebenfalls ein getippter Listenpunkt.
+actual=$(convert_html < "$FIXTURES/escaped-markers.html")
+run_test "escaped-markers (getippte Marker ohne Backslash)" \
+  "$actual" \
+  "$FIXTURES/escaped-markers.expected.md"
 
 echo
 echo "==> Clipboard-Roundtrip-Tests"

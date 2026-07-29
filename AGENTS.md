@@ -15,6 +15,19 @@
 - **Eine Pipeline-Quelle:** Produkt und Fixture-Tests sourcen gemeinsam
   `lib/pipeline.sh`. Nur die plattformspezifische Funktion `rtf_to_html`
   bleibt an den jeweiligen Rändern. Keine Pipeline-Kopie in Tests anlegen.
+- **`tidy_markdown` fasst Code-Blöcke nicht an.** Dort ist ein Backslash am
+  Zeilenende echter Inhalt (Shell-Fortsetzung) und `\-` echter Code. Die
+  Funktion markiert deshalb zuerst alle Code-Zeilen — eingezäunte (``` oder
+  ~~~), eingerückte (vier Spalten jenseits des Listen-Containers) und die
+  Leerzeilen innerhalb eines eingerückten Blocks — und überspringt sie in
+  jeder Aufräumregel. Wer eine neue Regel hinzufügt, hängt sie in einen der
+  Durchläufe mit `next if $is_code[$i]` ein, nicht als blindes `perl -0pe`
+  über das ganze Dokument.
+- **Zeilenumbruch im Absatz = zwei Leerzeichen, kein `\`.** pandoc schreibt
+  Hard-Breaks als sichtbaren Backslash; `tidy_markdown` ersetzt ihn. Umbrüche,
+  die nur Layout waren (vor Leerzeile, vor Listenpunkt, am Dokumentende),
+  fallen ganz weg. Die zwei Leerzeichen in `tests/fixtures/*.expected.md` sind
+  Prüfgegenstand — nicht wegformatieren.
 - **Beide Plattformen laufen gegen dieselben Erwartungsdateien.** Wenn ein
   Linux-Ergebnis abweicht, ist das ein Befund — nicht der Anlass, eine zweite
   Erwartung einzuführen. Expected-Dateien nie still regenerieren.
