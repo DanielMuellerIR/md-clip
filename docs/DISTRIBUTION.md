@@ -4,10 +4,11 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 2026-07-22)
+## Status (Stand: 2026-08-03)
 
-- Quellstand: **v1.1.1**. Zuletzt dokumentierte veröffentlichte App-Version:
-  **v1.0.3**; dieses Dokument behauptet keine Veröffentlichung von v1.1.1.
+- Quellstand: **v1.1.2, unveröffentlicht**. Zuletzt getaggte Version: v1.1.1.
+  Zuletzt dokumentierte veröffentlichte App-Version: **v1.0.3**; dieses
+  Dokument behauptet keine Veröffentlichung von v1.1.1 oder v1.1.2.
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
 - **Stufe B — Signieren und notarisieren.** ✅ Erledigt.
