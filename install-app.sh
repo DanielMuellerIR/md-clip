@@ -29,6 +29,25 @@ APP="build/md-clip.app"
 DESTINATION="/Applications/md-clip.app"
 VERSION="$(grep '^VERSION=' bin/md-clip | head -1 | cut -d'"' -f2)"
 
+# Alles Temporäre hängt an diesen beiden Variablen und wird von EINER
+# Aufräumroutine erledigt. Der Trap steht vor dem ersten `mktemp`: Scheitert
+# `ditto` oder die Notarisierung, bleibt sonst ein großes App-Archiv liegen.
+# Eine erledigte Zwischenstufe leert ihre Variable und fällt damit aus der
+# Zuständigkeit heraus.
+APP_ZIP_DIR=""
+STAGED=""
+cleanup_install() {
+  if [ -n "$APP_ZIP_DIR" ]; then
+    rm -rf "$APP_ZIP_DIR"
+  fi
+  if [ -n "$STAGED" ]; then
+    rm -rf "$STAGED"
+  fi
+}
+trap cleanup_install EXIT
+trap 'cleanup_install; exit 130' INT
+trap 'cleanup_install; exit 143' TERM
+
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 if [ -z "$NOTARY_PROFILE" ]; then
   NOTARY_PROFILE="$(git config --local --get mdClip.notaryProfile 2>/dev/null || true)"
@@ -87,10 +106,12 @@ codesign --verify --strict --verbose=2 "$APP"
 
 echo "=== 3/4 Notarisieren ==="
 # notarytool nimmt kein nacktes .app entgegen, deshalb der Umweg über ein ZIP.
-APP_ZIP="$(mktemp -d)/md-clip.zip"
+APP_ZIP_DIR="$(mktemp -d)"
+APP_ZIP="$APP_ZIP_DIR/md-clip.zip"
 ditto -c -k --keepParent "$APP" "$APP_ZIP"
 xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-rm -rf "$(dirname "$APP_ZIP")"
+rm -rf "$APP_ZIP_DIR"
+APP_ZIP_DIR=""
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 spctl --assess --type execute -vv "$APP" 2>&1 | tail -2
@@ -100,7 +121,6 @@ echo "=== 4/4 Installieren ==="
 # darf keine halb ersetzte App in /Applications hinterlassen.
 STAGED="/Applications/.md-clip.app.install-$$"
 rm -rf "$STAGED"
-trap 'rm -rf "$STAGED"' EXIT
 ditto "$APP" "$STAGED"
 /usr/bin/swift - "$STAGED" "$DESTINATION" <<'SWIFT'
 import Foundation
@@ -119,7 +139,8 @@ if fileManager.fileExists(atPath: destination.path) {
     try fileManager.moveItem(at: source, to: destination)
 }
 SWIFT
-trap - EXIT
+# Der Zwischenstand ist verschoben, es gibt nichts mehr aufzuräumen.
+STAGED=""
 
 # Nach dem Kopieren erneut prüfen: erst dann ist die Installation belegt.
 xcrun stapler validate "$DESTINATION"

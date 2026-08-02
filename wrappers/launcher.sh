@@ -106,11 +106,29 @@ decide_cli_action() {
 # als Umgebungsvariablen an AppleScript übergeben und dort mit `quoted form
 # of` für die Shell maskiert. Dadurch bleibt auch ein App-Pfad mit Apostroph
 # reiner Dateninhalt und kann keinen Shell-Befehl einschleusen.
+#
+# Der Zustand des Ziels wird im privilegierten Schritt NOCH EINMAL geprüft.
+# decide_cli_action hat ihn zwar schon geprüft, aber danach liegt der
+# Passwort-Dialog: In diesem Zeitfenster kann dort eine reguläre Datei oder ein
+# lebender fremder Symlink entstehen, und dieser Schritt läuft als root.
 install_cli() {
   BUNDLE_CLI="$BUNDLE_CLI" SYSTEM_CLI="$SYSTEM_CLI" osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
 set bundleCli to system attribute "BUNDLE_CLI"
 set systemCli to system attribute "SYSTEM_CLI"
-set commandText to "/bin/mkdir -p /usr/local/bin && /bin/ln -sfn " & quoted form of bundleCli & " " & quoted form of systemCli
+set target to quoted form of systemCli
+-- Der Shell-Befehl in Worten:
+--   1. Zielverzeichnis anlegen, falls es fehlt.
+--   2. `[ ! -e ... ]` folgt dem Symlink. Existiert das Ziel — reguläre Datei
+--      oder lebender fremder Symlink —, bricht die Kette hier ab und lässt es
+--      unangetastet.
+--   3. Übrig bleiben zwei Fälle: gar nichts, oder ein toter Symlink. Nur den
+--      toten Symlink räumen wir weg.
+--   4. `ln -s` bewusst OHNE `-f`: Taucht in genau diesem Moment doch noch
+--      etwas auf, scheitert der Befehl, statt es mit Root-Rechten zu ersetzen.
+set commandText to "/bin/mkdir -p \"$(/usr/bin/dirname " & target & ")\"" & ¬
+  " && [ ! -e " & target & " ]" & ¬
+  " && { [ ! -L " & target & " ] || /bin/rm " & target & "; }" & ¬
+  " && /bin/ln -s " & quoted form of bundleCli & " " & target
 do shell script commandText with administrator privileges
 APPLESCRIPT
 }

@@ -8,9 +8,10 @@
 # Voraussetzungen (einmalig):
 #   1. Developer-ID-Application-Zertifikat in der Login-Keychain.
 #      Prüfen: security find-identity -v -p codesigning
-#   2. notarytool-Schlüsselbund-Profil 'md-clip-notarytool' eingerichtet:
-#      xcrun notarytool store-credentials "md-clip-notarytool" \
-#        --apple-id "$APPLE_ID" \
+#   2. notarytool-Schlüsselbund-Profil eingerichtet (Name frei wählbar, er
+#      kommt später aus NOTARY_PROFILE bzw. git config mdClip.notaryProfile):
+#      xcrun notarytool store-credentials "<profilname>" \
+#        --apple-id "<deine-apple-id>" \
 #        --team-id  "9QSWKSR4NQ"
 #      (App-spezifisches Passwort INTERAKTIV eingeben, nicht als Argument)
 
@@ -18,11 +19,9 @@ set -euo pipefail
 
 # ---------- Konstanten ----------
 
-# Apple-ID nur noch als Hinweistext für das einmalige `store-credentials`.
-# Sie wurde früher zwingend als Umgebungsvariable verlangt, obwohl das Skript sie
-# nirgends benutzt: Die Zugangsdaten liegen vollständig im notarytool-Profil im
-# Schlüsselbund. Die Pflicht blockierte damit jeden Lauf ohne jeden Nutzen.
-APPLE_ID="${APPLE_ID:-<deine-apple-id>}"
+# Die Apple-ID braucht dieses Skript nicht: Die Zugangsdaten liegen vollständig
+# im notarytool-Profil im Schlüsselbund. Sie taucht nur noch als Platzhalter im
+# Einrichtungs-Hinweis weiter unten auf.
 
 # Team-ID/Identitaet ueberschreibbar (CI/anderer Account); Default als Fallback.
 TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
@@ -109,7 +108,7 @@ if ! notary_profile_works; then
   echo
   echo "So einrichten (Passwort INTERAKTIV eingeben, NICHT als Argument!):" >&2
   echo "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" \\"  >&2
-  echo "    --apple-id \"\$APPLE_ID\" \\"                              >&2
+  echo "    --apple-id \"<deine-apple-id>\" \\"                        >&2
   echo "    --team-id  \"$TEAM_ID\""                                   >&2
   echo
   echo "Danach fragt das Tool nach dem App-spezifischen Passwort." >&2
@@ -123,6 +122,65 @@ if [ ! -f "$BACKGROUND_SRC" ]; then
   echo "        swift assets/generate-dmg-background.swift assets/dmg-background.png" >&2
   exit 1
 fi
+
+# ---------- Aufräumen ----------
+# Alles, was der Lauf temporär anlegt, hängt an einer dieser Variablen. Der
+# Trap steht bewusst VOR dem ersten mktemp: Ein Abbruch beim Notarisieren oder
+# beim DMG-Layout darf weder ein großes App-Archiv noch einen eingehängten
+# privaten Mount hinterlassen.
+APP_ZIP_DIR=""
+MOUNT_DIR=""
+MOUNT_DEVICE=""
+ATTACH_PLIST=""
+
+# Aushängen mit Wiederholung: Direkt nach dem Finder-AppleScript hält das
+# System das Volume manchmal noch einen Moment fest, und ein einzelner
+# Fehlversuch würde das Device hängen lassen.
+#
+# Bewusst OHNE `-force`: Ein erzwungenes Aushängen kann laufende Schreibvorgänge
+# abschneiden. Diese Regel hält tests/test-wrapper-safety.sh fest.
+detach_release_mount() {
+  local device="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    hdiutil detach "$device" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
+cleanup_release() {
+  if [ -n "$APP_ZIP_DIR" ] && [ -d "$APP_ZIP_DIR" ]; then
+    rm -rf "$APP_ZIP_DIR"
+    APP_ZIP_DIR=""
+  fi
+  if [ -n "$MOUNT_DEVICE" ]; then
+    # Die Referenz erst nach erfolgreichem Aushängen löschen. Sonst wäre nach
+    # einem gescheiterten Versuch das einzige Handle auf unser Device weg und
+    # niemand könnte den Mount noch gezielt lösen.
+    if detach_release_mount "$MOUNT_DEVICE"; then
+      MOUNT_DEVICE=""
+    else
+      echo "WARNUNG: Eigenes DMG-Device ließ sich nicht aushängen: $MOUNT_DEVICE" >&2
+      echo "         Bitte von Hand prüfen: hdiutil info" >&2
+    fi
+  fi
+  if [ -n "$ATTACH_PLIST" ] && [ -f "$ATTACH_PLIST" ]; then
+    rm -f "$ATTACH_PLIST"
+    ATTACH_PLIST=""
+  fi
+  if [ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ]; then
+    rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+    MOUNT_DIR=""
+  fi
+}
+
+# Bei Strg-C oder `kill` reicht Aufräumen nicht: Ohne eigenes `exit` liefe das
+# Skript hinter dem Trap einfach weiter. Die Codes 130/143 sind die üblichen
+# Werte für Abbruch per INT beziehungsweise TERM (128 + Signalnummer).
+trap cleanup_release EXIT
+trap 'cleanup_release; exit 130' INT
+trap 'cleanup_release; exit 143' TERM
 
 # ---------- 1. Bundle bauen (Stufe A) ----------
 
@@ -177,10 +235,12 @@ echo "✓ Bundle signiert"
 # nimmt kein nacktes .app entgegen, deshalb der Umweg über ein ZIP. Das
 # angeheftete Ticket landet als Datei im Bundle und wird unten mitkopiert.
 echo "==> Notarisiere App-Bundle (Profil $NOTARY_PROFILE)"
-APP_ZIP="$(mktemp -d)/md-clip.zip"
+APP_ZIP_DIR="$(mktemp -d)"
+APP_ZIP="$APP_ZIP_DIR/md-clip.zip"
 ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ZIP"
 xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-rm -rf "$(dirname "$APP_ZIP")"
+rm -rf "$APP_ZIP_DIR"
+APP_ZIP_DIR=""
 xcrun stapler staple "$APP_BUNDLE"
 xcrun stapler validate "$APP_BUNDLE"
 spctl --assess --type execute -vv "$APP_BUNDLE" 2>&1 | tail -2
@@ -199,23 +259,8 @@ rm -f "$DMG_PATH" "$RW_DMG_PATH"
 
 # Nur das von DIESEM Lauf eingehängte Device darf die Aufräumroutine lösen.
 # `hdiutil attach -plist` liefert den eindeutigen Device-Pfad; ein gleichnamiges
-# fremdes Volume unter /Volumes bleibt damit vollständig unberührt.
-MOUNT_DIR=""
-MOUNT_DEVICE=""
-ATTACH_PLIST=""
-cleanup_release_mount() {
-  if [ -n "$MOUNT_DEVICE" ]; then
-    hdiutil detach "$MOUNT_DEVICE" >/dev/null 2>&1 || true
-    MOUNT_DEVICE=""
-  fi
-  if [ -n "$ATTACH_PLIST" ] && [ -f "$ATTACH_PLIST" ]; then
-    rm -f "$ATTACH_PLIST"
-  fi
-  if [ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ]; then
-    rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup_release_mount EXIT INT TERM
+# fremdes Volume unter /Volumes bleibt damit vollständig unberührt. Variablen
+# und Aufräumroutine stehen weiter oben, siehe Abschnitt „Aufräumen".
 
 device_for_mountpoint() {
   local plist_path="$1"
@@ -259,8 +304,12 @@ hdiutil create \
 # Mounten. -nobrowse verhindert, dass das DMG im Finder als Fenster
 # aufspringt während wir noch am Layout arbeiten. Plist und Mountpoint
 # gehören ausschließlich diesem Lauf.
+# Die Platzhalter müssen ganz am Ende der Vorlage stehen: Darwins `mktemp`
+# ersetzt nur dort die X-Kette. Bei `.md-clip-attach.XXXXXX.plist` entstünde
+# wörtlich dieser Pfad — zwei Läufe kollidierten, und eine liegengebliebene
+# Datei blockierte jeden weiteren.
 MOUNT_DIR=$(mktemp -d "$BUILD_DIR/.md-clip-mount.XXXXXX")
-ATTACH_PLIST=$(mktemp "$BUILD_DIR/.md-clip-attach.XXXXXX.plist")
+ATTACH_PLIST=$(mktemp "$BUILD_DIR/.md-clip-attach.plist.XXXXXX")
 hdiutil attach "$RW_DMG_PATH" \
   -mountpoint "$MOUNT_DIR" \
   -nobrowse -noverify -noautoopen -plist > "$ATTACH_PLIST"
@@ -338,7 +387,10 @@ sleep 2
 
 # Aushängen.
 echo "==> Hänge RW-DMG aus"
-hdiutil detach "$MOUNT_DEVICE"
+detach_release_mount "$MOUNT_DEVICE" || {
+  echo "FEHLER: Eigenes DMG-Device ließ sich nicht aushängen: $MOUNT_DEVICE" >&2
+  exit 1
+}
 MOUNT_DEVICE=""
 rmdir "$MOUNT_DIR"
 MOUNT_DIR=""
@@ -390,8 +442,13 @@ xcrun stapler validate "$DMG_PATH"
 
 # spctl simuliert, was Gatekeeper beim Öffnen tun würde. Wenn das hier
 # durchgeht, geht es auch auf fremden Macs durch.
+#
+# Geprüft wird das DMG, nicht die App: `--type open` ist die Policy fürs
+# Öffnen eines Disk-Images, und ausgeliefert wird genau dieses Image. Die App
+# selbst wurde weiter oben mit der für sie zuständigen Policy `--type execute`
+# bewertet.
 spctl --assess --type open --context context:primary-signature \
-      -v "$APP_BUNDLE"
+      -v "$DMG_PATH"
 
 # ---------- Fertig ----------
 

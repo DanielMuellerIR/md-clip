@@ -36,16 +36,89 @@ if grep -Fq "$BUNDLE_CLI" "$TEST_ROOT/capture/source"; then
 fi
 echo "✓ Launcher übergibt problematische Pfade nur als Daten"
 
+# --- Launcher: der privilegierte Schritt prüft das Ziel selbst. ---
+# decide_cli_action prüft das Ziel VOR dem Passwort-Dialog; in diesem
+# Zeitfenster kann dort eine fremde Datei entstehen. Geprüft wird deshalb genau
+# der Befehl, den der Launcher an `do shell script` übergibt: Im
+# mitgeschnittenen AppleScript wird die Ausführungszeile durch
+# `return commandText` ersetzt, dann liefert der echte osascript den Text.
+# Das geht nur auf macOS — auf Linux gibt es keinen osascript.
+if [ "$(uname -s)" = "Darwin" ] && [ -x /usr/bin/osascript ]; then
+  LINK_SCRIPT="$TEST_ROOT/link.applescript"
+  sed 's/^do shell script commandText with administrator privileges$/return commandText/' \
+    "$TEST_ROOT/capture/source" > "$LINK_SCRIPT"
+  grep -Fxq 'return commandText' "$LINK_SCRIPT"
+
+  # Führt den erzeugten Befehl mit den übergebenen Pfaden aus.
+  run_link() {
+    local command_text
+    command_text=$(BUNDLE_CLI="$1" SYSTEM_CLI="$2" /usr/bin/osascript "$LINK_SCRIPT")
+    /bin/sh -c "$command_text"
+  }
+
+  LINK_BUNDLE="$TEST_ROOT/bundle/md-clip"
+  mkdir -p "$(dirname "$LINK_BUNDLE")"
+  printf 'bundle\n' > "$LINK_BUNDLE"
+
+  # Freies Ziel: Symlink wird angelegt.
+  mkdir -p "$TEST_ROOT/link-frei"
+  run_link "$LINK_BUNDLE" "$TEST_ROOT/link-frei/md-clip"
+  [ "$(readlink "$TEST_ROOT/link-frei/md-clip")" = "$LINK_BUNDLE" ]
+
+  # Toter Symlink: darf ersetzt werden.
+  mkdir -p "$TEST_ROOT/link-tot"
+  ln -s "$TEST_ROOT/link-tot/fehlt" "$TEST_ROOT/link-tot/md-clip"
+  run_link "$LINK_BUNDLE" "$TEST_ROOT/link-tot/md-clip"
+  [ "$(readlink "$TEST_ROOT/link-tot/md-clip")" = "$LINK_BUNDLE" ]
+
+  # Reguläre Datei: bleibt unangetastet, Befehl scheitert.
+  mkdir -p "$TEST_ROOT/link-datei"
+  printf 'fremd\n' > "$TEST_ROOT/link-datei/md-clip"
+  if run_link "$LINK_BUNDLE" "$TEST_ROOT/link-datei/md-clip" 2>/dev/null; then
+    echo "✗ Launcher ersetzt eine fremde Datei im privilegierten Schritt" >&2
+    exit 1
+  fi
+  grep -Fxq 'fremd' "$TEST_ROOT/link-datei/md-clip"
+
+  # Lebender fremder Symlink: bleibt unangetastet, Befehl scheitert.
+  mkdir -p "$TEST_ROOT/link-fremd"
+  printf 'fremd\n' > "$TEST_ROOT/link-fremd/anderes"
+  ln -s "$TEST_ROOT/link-fremd/anderes" "$TEST_ROOT/link-fremd/md-clip"
+  if run_link "$LINK_BUNDLE" "$TEST_ROOT/link-fremd/md-clip" 2>/dev/null; then
+    echo "✗ Launcher ersetzt einen lebenden fremden Symlink" >&2
+    exit 1
+  fi
+  [ "$(readlink "$TEST_ROOT/link-fremd/md-clip")" = "$TEST_ROOT/link-fremd/anderes" ]
+
+  echo "✓ Launcher verlinkt nur auf freies oder totes Ziel, nie mit -f"
+else
+  echo "⊘ Launcher-Linkschritt übersprungen — osascript gibt es nur auf macOS"
+fi
+
 # --- Release: nur privater Mountpoint und von attach gemeldetes Device. ---
 RELEASE_SCRIPT="$PROJECT_ROOT/wrappers/sign-and-release.sh"
 grep -Fq 'mktemp -d "$BUILD_DIR/.md-clip-mount.XXXXXX"' "$RELEASE_SCRIPT"
 grep -Fq -- '-plist > "$ATTACH_PLIST"' "$RELEASE_SCRIPT"
-grep -Fq 'hdiutil detach "$MOUNT_DEVICE"' "$RELEASE_SCRIPT"
+grep -Fq 'detach_release_mount "$MOUNT_DEVICE"' "$RELEASE_SCRIPT"
+grep -Fq 'hdiutil detach "$device"' "$RELEASE_SCRIPT"
 if grep -Eq 'hdiutil detach "/Volumes|hdiutil detach "\$MOUNT_DIR"|hdiutil detach .*force' "$RELEASE_SCRIPT"; then
   echo "✗ Release-Skript enthält weiterhin namens- oder mountpointbasiertes Force-Detach" >&2
   exit 1
 fi
 echo "✓ Release-Skript löst ausschließlich das eigene attach-Device"
+
+# --- Release: die Plist-Vorlage muss wirklich eindeutige Pfade liefern. ---
+# Darwins mktemp ersetzt die X-Kette nur am ENDE der Vorlage. Stünde noch ein
+# Suffix dahinter, entstünde wörtlich dieser Pfad — der zweite Aufruf scheiterte.
+grep -Fq 'mktemp "$BUILD_DIR/.md-clip-attach.plist.XXXXXX"' "$RELEASE_SCRIPT"
+mkdir -p "$TEST_ROOT/mktemp-probe"
+PLIST_ONE=$(mktemp "$TEST_ROOT/mktemp-probe/.md-clip-attach.plist.XXXXXX")
+PLIST_TWO=$(mktemp "$TEST_ROOT/mktemp-probe/.md-clip-attach.plist.XXXXXX")
+if [ "$PLIST_ONE" = "$PLIST_TWO" ]; then
+  echo "✗ Plist-Vorlage liefert keinen eindeutigen Pfad" >&2
+  exit 1
+fi
+echo "✓ Release-Skript bekommt fuer jede Plist einen eindeutigen Pfad"
 
 # --- Cache: manipulierte Downloads werden verworfen, gültige atomar gesetzt. ---
 # shellcheck source=../wrappers/verified-cache.sh
