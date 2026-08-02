@@ -647,6 +647,12 @@ cleanup_output() {
 }
 trap cleanup_output EXIT INT TERM
 
+# Lief eine Konvertierung (HTML/RTF) oder wurde nur Plain-Text durchgereicht?
+# Die beiden Fälle haben unterschiedliche Regeln für das Schluss-Newline:
+# durchgereichter Text bleibt bytegenau, konvertierter wird normalisiert
+# (siehe unten beim Schreiben ins Clipboard).
+CONVERTED=0
+
 # Sonderpfad: --plain überspringt jede Konvertierung.
 if [ "$PLAIN" -eq 1 ]; then
   vlog "Plain-Modus: Clipboard-Text durchreichen"
@@ -660,10 +666,12 @@ else
     html)
       html=$(try_html) || die 1 "Kein HTML auf dem Clipboard (--from html)."
       printf '%s' "$html" | convert_html > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
+      CONVERTED=1
       ;;
     rtf)
       rtf=$(try_rtf) || die 1 "Kein RTF auf dem Clipboard (--from rtf)."
       printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
+      CONVERTED=1
       ;;
     plain)
       clip_read_text > "$OUTPUT_FILE" || true
@@ -694,8 +702,10 @@ else
           fi
           printf '%s' "$html" | convert_html > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
         fi
+        CONVERTED=1
       elif rtf=$(try_rtf); then
         printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
+        CONVERTED=1
       else
         # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
         clip_read_text > "$OUTPUT_FILE" || true
@@ -710,6 +720,16 @@ fi
 
 # Output ausliefern: entweder Clipboard ersetzen oder stdout.
 if [ "$REPLACE" -eq 1 ]; then
+  # Schluss-Newline eines KONVERTIERTEN Ergebnisses vor dem Clipboard weg.
+  # pandoc beendet sein Markdown immer mit einem LF. In einer Datei ist das
+  # richtig, im Clipboard nicht: Beim Einfügen entsteht daraus eine zusätzliche
+  # leere Zeile, die im kopierten Original nie stand. Durchgereichter
+  # Plain-Text bleibt davon unberührt — dort sind die Newlines Nutzdaten und
+  # müssen bytegenau erhalten bleiben (siehe tests/test-plain-newlines.sh).
+  if [ "$CONVERTED" -eq 1 ]; then
+    perl -0777 -i -pe 's/\n+\z//' "$OUTPUT_FILE"
+  fi
+
   # clip_write_text liest von stdin und ersetzt den Clipboard-Inhalt
   # komplett — alle Rich-Flavors (HTML, RTF) verschwinden, nur Plain bleibt.
   # Der globale Export LC_ALL weiter oben ist hier wichtig: pbcopy (macOS)

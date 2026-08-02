@@ -1,7 +1,10 @@
 // tests/clipboard-string.swift
 // Liest den Plain-Text-Inhalt des Clipboards genau so, wie eine echte
 // macOS-App ihn beim Einfügen sieht — via NSPasteboard.string(forType: .string).
-// Schreibt die Zeichen als UTF-8 nach stdout (Swift's print() ist immer UTF-8).
+// Schreibt die Zeichen als UTF-8 nach stdout (Swift's print() ist immer UTF-8),
+// und zwar BYTEGENAU: kein angehängter Zeilenumbruch. Sonst könnte der Test
+// nicht unterscheiden, ob ein Schluss-Newline vom Clipboard kommt oder vom
+// Helfer selbst — genau das hat ein überzähliges LF im Clipboard verdeckt.
 //
 // Zweck: dieser Helper ist der „Goldstandard" für Tests, ob ein durch
 // md-clip --replace geschriebener Clipboard-Inhalt korrekt encoded ist.
@@ -25,7 +28,7 @@ let pb = NSPasteboard.general
 // Swift-String-Repräsentation — wir sehen also tatsächlich die Zeichen
 // und nicht irgendwelche Bytes in der falschen Codierung.
 if let text = pb.string(forType: .string) {
-    print(text)
+    print(text, terminator: "")
     exit(0)
 } else {
     FileHandle.standardError.write("Kein Plain-Text auf dem Clipboard.\n".data(using: .utf8)!)

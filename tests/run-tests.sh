@@ -343,19 +343,26 @@ else
   # Vollständige Kette laufen lassen, --replace schreibt Ergebnis ins Clipboard.
   "$PRODUCT_CLI" --replace --quiet
 
-  encoding_actual="$(clip_get_text)"
+  # Vergleich über DATEIEN statt über Shell-Variablen: `$(...)` schluckt jedes
+  # abschließende Newline und würde damit genau den Fehler verstecken, den
+  # dieser Test finden soll — ein überzähliges LF, das beim Einfügen als
+  # zusätzliche leere Zeile auftaucht. `cmp` prüft Byte für Byte.
+  ENCODING_EXPECTED_FILE="$TEST_RUNTIME/encoding.expected"
+  ENCODING_ACTUAL_FILE="$TEST_RUNTIME/encoding.actual"
+  printf '%s' "$ENCODING_EXPECTED" > "$ENCODING_EXPECTED_FILE"
+  clip_get_text > "$ENCODING_ACTUAL_FILE"
 
-  if [ "$encoding_actual" = "$ENCODING_EXPECTED" ]; then
-    echo "✓ encoding-roundtrip (UTF-8 durchs Clipboard heil geblieben)"
+  if cmp -s "$ENCODING_EXPECTED_FILE" "$ENCODING_ACTUAL_FILE"; then
+    echo "✓ encoding-roundtrip (UTF-8 durchs Clipboard, bytegenau)"
     PASSED=$((PASSED + 1))
   else
     echo "✗ encoding-roundtrip"
     echo "  Erwartet:  '$ENCODING_EXPECTED'"
-    echo "  Erhalten:  '$encoding_actual'"
+    echo "  Erhalten:  '$(cat "$ENCODING_ACTUAL_FILE")'"
     echo "  Erwartete Bytes:"
-    printf '%s' "$ENCODING_EXPECTED" | xxd | sed 's/^/    /'
+    xxd "$ENCODING_EXPECTED_FILE" | sed 's/^/    /'
     echo "  Erhaltene Bytes:"
-    printf '%s' "$encoding_actual" | xxd | sed 's/^/    /'
+    xxd "$ENCODING_ACTUAL_FILE" | sed 's/^/    /'
     FAILED=$((FAILED + 1))
   fi
   TOTAL=$((TOTAL + 1))
