@@ -63,7 +63,8 @@
   plattformübergreifende CLI-Setup (läuft auch auf Linux) und installiert **keine**
   App. Der macOS-App-Weg liegt daneben: `build.sh` baut nur, `install-app.sh` baut,
   notarisiert und installiert nach `/Applications`, `release.sh` packt das DMG und
-  installiert nie. Beide notarisieren zuerst die App selbst, dann erst das Image.
+  installiert nie. Beide notarisieren zuerst die App selbst; ein Image erzeugt
+  und notarisiert danach nur `release.sh` — `install-app.sh` baut gar keines.
   Profilname aus `NOTARY_PROFILE` oder `git config mdClip.notaryProfile` — kein
   Default im Repo, das ist ein öffentliches Repository.
 - **Profil-Vorabcheck immer mit Wiederholung.** `xcrun notarytool history` meldet

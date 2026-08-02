@@ -43,8 +43,8 @@ blieb unangetastet, dort ist kein passwortloses sudo eingerichtet).
 | Fehlerpfade Linux | leeres Clipboard → Exit 1; fehlendes xclip → Exit 2 mit apt-Hinweis |
 
 Wiederholt am 2026-07-29 nach dem Umbau der Markdown-Nachbearbeitung
-(`tidy_markdown`), diesmal im Ubuntu-24.04-Container auf dem Linux-Test-Host
-Popo: ohne Display 11/11 grün (Clipboard-Tests übersprungen), mit Xvfb 13/13
+(`tidy_markdown`), diesmal im Ubuntu-24.04-Container auf einem lokalen
+Linux-Test-Host: ohne Display 11/11 grün (Clipboard-Tests übersprungen), mit Xvfb 13/13
 grün einschließlich `utf16-html-clipboard`. Wayland wurde diesmal nicht
 wiederholt. Temporäres Verzeichnis und Container danach entfernt, das
 vorhandene `ubuntu:24.04`-Image blieb unangetastet.

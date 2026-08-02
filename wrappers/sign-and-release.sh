@@ -90,8 +90,8 @@ fi
 # Wir testen es mit einem History-Aufruf — funktioniert nur mit gültigem Profil.
 #
 # Warum mit Wiederholungen: Der Aufruf meldet gelegentlich fälschlich
-# „No Keychain password item found", obwohl das Profil da ist (am 2026-07-26 auf
-# M3 belegt — Versuch 1 fehlgeschlagen, Versuch 2 sofort OK, dazwischen nichts
+# „No Keychain password item found", obwohl das Profil da ist (am 2026-07-26
+# belegt — Versuch 1 fehlgeschlagen, Versuch 2 sofort OK, dazwischen nichts
 # verändert). Ein einzelner Fehlversuch würde hier einen kompletten Release-Lauf
 # abbrechen. Ein wirklich fehlendes Profil scheitert dagegen auch nach fünf
 # Versuchen; die Aussagekraft geht also nicht verloren.

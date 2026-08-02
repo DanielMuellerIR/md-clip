@@ -214,30 +214,42 @@ ohne Sicherheits-Warnung. Erfüllt mit v1.0.1.
   # Soll zeigen: Developer ID Application: Daniel Mueller (9QSWKSR4NQ)
   ```
 - **Team-ID:** `9QSWKSR4NQ`
-- **Apple-ID:** eigene Apple-ID (als Umgebungsvariable `APPLE_ID` setzen, nicht hardcoden)
+- **Apple-ID:** eigene Apple-ID; sie wird nur beim einmaligen
+  `store-credentials` gebraucht und danach nirgends mehr gelesen.
 - **App-spezifisches Passwort** für `notarytool` als Schlüsselbund-Profil
-  `md-clip-notarytool` hinterlegt. Eingerichtet mit:
+  hinterlegt. Der Profilname ist frei wählbar und steht bewusst nicht im Repo:
+  Schlüsselbund-Profile sind pro Mac lokal. Eingerichtet mit:
   ```bash
-  export APPLE_ID="deine@apple-id.example"
-  xcrun notarytool store-credentials "md-clip-notarytool" \
-    --apple-id "$APPLE_ID" \
+  xcrun notarytool store-credentials "<profilname>" \
+    --apple-id "deine@apple-id.example" \
     --team-id  "9QSWKSR4NQ"
   # → fragt App-spezifisches Passwort INTERAKTIV ab; landet nicht in der History
+  ```
+- **Profilname an den Releasepfad übergeben.** Ohne diesen Schritt bricht
+  `release.sh` ab, bevor überhaupt gebaut wird. Entweder einmalig für diesen
+  Clone hinterlegen oder je Lauf über die Umgebung setzen:
+  ```bash
+  git config --local mdClip.notaryProfile "<profilname>"
+  # oder:
+  NOTARY_PROFILE="<profilname>" ./release.sh
   ```
 
 ### Was im Build-Skript passiert
 
 [`wrappers/sign-and-release.sh`](../wrappers/sign-and-release.sh):
 
-1. Sanity-Checks: Identität + Profil vorhanden?
-2. Stufe A aufrufen → frisches Bundle bauen
-3. Innere Binaries (pandoc, clipboard-html, clipboard-rtf) einzeln signieren
+1. Profilname aus `NOTARY_PROFILE` bzw. `git config mdClip.notaryProfile`
+   bestimmen; fehlt beides, bricht der Lauf sofort ab.
+2. Sanity-Checks: Identität + Profil vorhanden?
+3. Stufe A aufrufen → frisches Bundle bauen
+4. Innere Binaries (pandoc, clipboard-html, clipboard-rtf) einzeln signieren
    mit `--options runtime --timestamp`
-4. App-Bundle signieren mit `--options runtime --timestamp --deep`
-5. DMG via `hdiutil create` erzeugen, DMG ebenfalls signieren
-6. `xcrun notarytool submit --keychain-profile md-clip-notarytool --wait`
-7. `xcrun stapler staple` heftet das Notarization-Ticket ans DMG
-8. `xcrun stapler validate` + `spctl --assess` verifizieren
+5. App-Bundle signieren mit `--options runtime --timestamp --deep`
+6. App notarisieren, Ticket anheften, mit `spctl --type execute` prüfen
+7. DMG via `hdiutil create` erzeugen, DMG ebenfalls signieren
+8. `xcrun notarytool submit --keychain-profile "$NOTARY_PROFILE" --wait`
+9. `xcrun stapler staple` heftet das Notarization-Ticket ans DMG
+10. `xcrun stapler validate` + `spctl --assess --type open` auf dem DMG
 
 Dauer: Build ~30 s, Notarization typisch 2–3 min. Insgesamt ~4 min.
 
@@ -307,12 +319,16 @@ jobs:
           TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
         run: |
-          xcrun notarytool store-credentials "md-clip-notarytool" \
+          xcrun notarytool store-credentials "ci-notarytool" \
             --apple-id "$APPLE_ID" \
             --team-id  "$TEAM_ID" \
             --password "$NOTARY_PASSWORD"
 
+      # Der Profilname muss beim Release-Skript ankommen, sonst bricht es
+      # vor dem Bauen ab.
       - name: Build, sign, notarize
+        env:
+          NOTARY_PROFILE: ci-notarytool
         run: bash wrappers/sign-and-release.sh
 
       - name: Upload DMG as release asset
@@ -335,7 +351,7 @@ In den GitHub-Settings unter Settings → Secrets and variables → Actions:
 | `MACOS_CERTIFICATE_P12_PASSWORD` | Passwort, mit dem das `.p12` beim Export gesichert wurde |
 | `MACOS_NOTARIZATION_APPLE_ID` | deine Apple-ID (E-Mail-Adresse des Developer-Accounts) |
 | `MACOS_NOTARIZATION_TEAM_ID` | `9QSWKSR4NQ` |
-| `MACOS_NOTARIZATION_PASSWORD` | App-spezifisches Passwort für `notarytool` (dasselbe, das lokal im Schlüsselbund-Profil `md-clip-notarytool` liegt) |
+| `MACOS_NOTARIZATION_PASSWORD` | App-spezifisches Passwort für `notarytool` (dasselbe, das lokal im gewählten notarytool-Schlüsselbund-Profil liegt) |
 | `MACOS_KEYCHAIN_PASSWORD` | Beliebig wählbares starkes Passwort, schützt nur die temporäre Runner-Keychain während des Build-Laufs |
 
 ### Wie der `.p12`-Export geht
@@ -409,8 +425,9 @@ versetzen, an dem wir gerade aufgehört haben:
 > tust:
 >
 > 1. `docs/DISTRIBUTION.md` — Status der drei Distribution-Stufen, Apple-
->    Credentials (Team-ID `9QSWKSR4NQ`, Apple-ID via `$APPLE_ID`-Env,
->    Schlüsselbund-Profil `md-clip-notarytool`), kompletter Plan für **Stufe C**
+>    Credentials (Team-ID `9QSWKSR4NQ`, Apple-ID nur beim einmaligen
+>    `store-credentials`, Profilname aus `NOTARY_PROFILE` bzw.
+>    `git config mdClip.notaryProfile`), kompletter Plan für **Stufe C**
 >    inkl. Workflow-Skelett und den sechs benötigten GitHub-Secrets.
 > 2. `docs/ENCODING.md` — Locale- und Encoding-Stolpersteine. Wichtigster
 >    Punkt: alle Bash-Skripte exportieren oben `LC_ALL=en_US.UTF-8`, NIE

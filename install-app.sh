@@ -64,8 +64,8 @@ export NOTARY_PROFILE
 # bemerken, kostet nur Zeit.
 #
 # Mit Wiederholungen, weil der Aufruf gelegentlich fälschlich „No Keychain
-# password item found" meldet, obwohl das Profil da ist (2026-07-26 auf M3
-# belegt). Ein wirklich fehlendes Profil scheitert auch nach fünf Versuchen.
+# password item found" meldet, obwohl das Profil da ist (am 2026-07-26 belegt).
+# Ein wirklich fehlendes Profil scheitert auch nach fünf Versuchen.
 notary_profile_works() {
   local attempt
   for attempt in 1 2 3 4 5; do
