@@ -50,6 +50,12 @@
 - **Vor Linux-Änderungen testen:** `./tests/run-tests.sh` (macOS) und ein
   Linux-Lauf. Rezept für den Container-Lauf ohne fremde Systeme anzufassen:
   `tasks/2026-07-05-linux-port/plan.md`.
+- **Zur kleinsten Testgruppe gehören auch die vier `tests/test-*.sh`.** Sie
+  brauchen weder Display noch echtes Clipboard, weil sie sich ihre Werkzeuge
+  als Attrappen selbst hinstellen — und laufen deshalb in der Linux-CI als
+  eigene Schritte mit. Wer eine solche Attrappe ergänzt, deckt alle drei
+  Plattform-Wege ab (pbcopy/pbpaste, xclip, wl-copy/wl-paste); sonst prüft das
+  Skript still nur die Plattform, auf der es gerade läuft.
 - **macOS-only bewusst prüfen:** Änderungen unter `wrappers/`, `assets/` oder
   `helpers/*.swift` brauchen zusätzlich isolierte Wrapper-/Bundle-Tests; reale
   Signing-, Notary- und Mount-Läufe nur bei einem ausdrücklich beauftragten Release.

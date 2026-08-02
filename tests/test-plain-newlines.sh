@@ -18,6 +18,10 @@ printf '#!/bin/sh\nexit 1\n' > "$TEST_ROOT/runtime/clipboard-html"
 printf '#!/bin/sh\nexit 1\n' > "$TEST_ROOT/runtime/clipboard-rtf"
 chmod +x "$TEST_ROOT/runtime/"*
 
+# Clipboard-Attrappen für ALLE drei Plattform-Wege. Welchen md-clip nimmt,
+# entscheidet es selbst über `uname -s` und WAYLAND_DISPLAY — der Test schreibt
+# ihm das bewusst nicht vor, sondern prüft den Weg, der hier wirklich läuft.
+# Ohne die Linux-Attrappen wäre die Bytegenauigkeits-Garantie dort unbewiesen.
 cat > "$TEST_ROOT/fake-bin/pbpaste" <<'SH'
 #!/bin/sh
 exec /bin/cat "$MD_CLIP_TEST_INPUT"
@@ -26,7 +30,30 @@ cat > "$TEST_ROOT/fake-bin/pbcopy" <<'SH'
 #!/bin/sh
 exec /bin/cat > "$MD_CLIP_TEST_OUTPUT"
 SH
-chmod +x "$TEST_ROOT/fake-bin/pbpaste" "$TEST_ROOT/fake-bin/pbcopy"
+# xclip macht Lesen und Schreiben im selben Befehl; -out/-o liest, -in/-i schreibt.
+cat > "$TEST_ROOT/fake-bin/xclip" <<'SH'
+#!/bin/sh
+mode=out
+for arg in "$@"; do
+  case "$arg" in
+    -in|-i)   mode=in ;;
+    -out|-o)  mode=out ;;
+  esac
+done
+if [ "$mode" = "in" ]; then
+  exec /bin/cat > "$MD_CLIP_TEST_OUTPUT"
+fi
+exec /bin/cat "$MD_CLIP_TEST_INPUT"
+SH
+cat > "$TEST_ROOT/fake-bin/wl-paste" <<'SH'
+#!/bin/sh
+exec /bin/cat "$MD_CLIP_TEST_INPUT"
+SH
+cat > "$TEST_ROOT/fake-bin/wl-copy" <<'SH'
+#!/bin/sh
+exec /bin/cat > "$MD_CLIP_TEST_OUTPUT"
+SH
+chmod +x "$TEST_ROOT/fake-bin/"*
 
 export PATH="$TEST_ROOT/fake-bin:$PATH"
 

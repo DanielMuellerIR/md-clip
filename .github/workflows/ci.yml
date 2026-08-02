@@ -51,6 +51,22 @@ jobs:
       - name: Tests mit X11-Clipboard (Xvfb)
         run: xvfb-run -a ./tests/run-tests.sh
 
+      # Die vier Einzelskripte haengen an keinem Display und keinem echten
+      # Clipboard — sie stellen sich ihre Werkzeuge selbst als Attrappen hin.
+      # Ohne diese Schritte koennten Regressionen der Byte-, Installations-,
+      # RTF- und Wrapper-Regeln trotz gruener CI auf main landen.
+      - name: Plain-Text bleibt bytegenau
+        run: ./tests/test-plain-newlines.sh
+
+      - name: Installer ueberschreibt keine fremden Ziele
+        run: ./tests/test-install-safety.sh
+
+      - name: pandoc ohne RTF-Reader wird abgelehnt
+        run: ./tests/test-dependencies.sh
+
+      - name: Launcher, Release-Mount und Download-Cache
+        run: ./tests/test-wrapper-safety.sh
+
       # Rauchprobe fuer die Fehlerpfade: Ohne Clipboard-Inhalt muss md-clip mit
       # Exit 1 und klarer Meldung abbrechen, nicht mit einem Bash-Fehler.
       - name: Leeres Clipboard meldet Exit 1
