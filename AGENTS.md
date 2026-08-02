@@ -25,11 +25,14 @@
   über das ganze Dokument.
 - **Überzählige Escapes nimmt `tidy_markdown` zurück, Tabellenzeilen nicht.**
   `\-` am Zeilenanfang, `\_\_\_`, sowie `\|` und `\#` im Fließtext werden
-  entescapt; escaped bleiben die Raute am Zeilenanfang (dort beginnt sie eine
-  Überschrift) und **alles in einer Tabellenzeile** (die beginnt mit `|`). In
-  der Tabelle gehören die Escapes zur Spaltenbreite — ein Zeichen daraus zu
-  entfernen verschiebt die Ausrichtung. Ein `\#` in einer Zelle bleibt deshalb
-  bewusst stehen; wer das ändern will, muss die Tabelle neu ausrichten.
+  entescapt. Escaped bleiben drei Stellen: die Raute am Anfang eines Blocks —
+  also am Zeilenanfang **und** direkt hinter einem Listenmarker, denn `- # Text`
+  wäre eine Überschrift im Listenpunkt —, **alles in einer Tabellenzeile** (die
+  beginnt mit `|`) und **alles in Inline-Code** zwischen Backticks. In der
+  Tabelle gehören die Escapes zur Spaltenbreite; ein Zeichen daraus zu entfernen
+  verschiebt die Ausrichtung. Ein `\#` in einer Zelle bleibt deshalb bewusst
+  stehen; wer das ändern will, muss die Tabelle neu ausrichten. In Inline-Code
+  ist der Backslash echter Inhalt: `` `\#` `` bedeutet dort Backslash-Raute.
 - **Zeilenumbruch im Absatz = zwei Leerzeichen, kein `\`.** pandoc schreibt
   Hard-Breaks als sichtbaren Backslash; `tidy_markdown` ersetzt ihn. Umbrüche,
   die nur Layout waren (vor Leerzeile, vor Listenpunkt, am Dokumentende),

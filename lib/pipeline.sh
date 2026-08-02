@@ -49,13 +49,26 @@ preprocess_google_classroom() {
 
 # Füllt leere HTML-Anker VOR pandoc. Dadurch müssen wir keine Markdown-URLs
 # mit verschachtelten Klammern, Titeln oder Escapes selbst parsen.
+#
+# „Leer" heißt: der Anker hat keinen sichtbaren Text. Das gilt auch für den
+# üblichen Icon-Link `<a href="…"><i class="icon"></i></a>` — die Auszeichnung
+# darin bringt in Markdown nichts mit, pandoc schriebe daraus ein unsichtbares
+# `[](…)`. Ein Anker um ein Bild bleibt dagegen unangetastet: das Bild IST der
+# sichtbare Inhalt und wird zu `[![alt](bild)](ziel)`.
 fill_empty_html_links() {
   perl -0pe '
-    s{<a\b([^>]*\bhref\s*=\s*(?:"([^"]*)"|\x27([^\x27]*)\x27)[^>]*)>\s*</a>}{
-      my $attributes = $1;
+    s{<a\b([^>]*\bhref\s*=\s*(?:"([^"]*)"|\x27([^\x27]*)\x27)[^>]*)>(.*?)</a>}{
+      my $whole = $&;
+      my ($attributes, $inner) = ($1, $4);
       my $href = defined($2) ? $2 : $3;
+      my $visible = $inner;
+      $visible =~ s/<[^>]*>//g;        # Tags tragen selbst keinen Text bei
+      $visible =~ s/&nbsp;/ /gi;
+      $visible =~ s/\s+//g;
       # Span verhindert pandocs Autolink-Kürzung, die Link-Titel verwirft.
-      "<a$attributes><span>$href</span></a>"
+      ($visible eq q{} && $inner !~ /<img\b/i)
+        ? "<a$attributes><span>$href</span></a>"
+        : $whole
     }gise
   '
 }
@@ -145,6 +158,45 @@ tidy_markdown() {
         $body =~ s/\\$// if (length($tail) % 2) == 1;
         $body =~ s/[ \t]+$//;
         return $body;
+    }
+
+    # Nimmt die überzähligen Escapes vor `|` und `#` zurück — aber nur
+    # außerhalb von Inline-Code. Zwischen Backticks ist ein Backslash echter
+    # Inhalt: `` `\#` `` bedeutet dort wirklich Backslash-Raute, und wer den
+    # Backslash entfernt, ändert den Code.
+    #
+    # Dafür wird die Zeile an Backtick-Gruppen zerlegt. Ein Code-Span endet
+    # laut Markdown erst bei einer Backtick-Gruppe GLEICHER Länge; findet sich
+    # keine, war der Backtick gewöhnlicher Text und wird mitbehandelt.
+    sub unescape_pipe_hash {
+        my ($text) = @_;
+        my @parts = split(/(`+)/, $text, -1);   # gerade Indizes = Text
+        my $out   = q{};
+        my $i     = 0;
+
+        while ($i <= $#parts) {
+            # Über Escape-PAARE laufen, nicht über einzelne Zeichen: sonst
+            # würde der zweite Backslash eines echten `\\` als Anfang eines
+            # neuen Escapes gelesen.
+            my $plain = $parts[$i];
+            $plain =~ s{\\(.)}{ ($1 eq q{|} || $1 eq q{#}) ? $1 : qq{\\$1} }gse;
+            $out .= $plain;
+            $i++;
+            last if $i > $#parts;
+
+            my $delim = $parts[$i];
+            my $close = $i + 2;
+            $close += 2 while $close <= $#parts && $parts[$close] ne $delim;
+            if ($close <= $#parts) {
+                $out .= join(q{}, @parts[$i .. $close]);   # Code bleibt roh
+                $i = $close + 1;
+            } else {
+                $out .= $delim;
+                $i++;
+            }
+        }
+
+        return $out;
     }
 
     # ---- Durchlauf 1: Code-Zeilen markieren ----
@@ -284,23 +336,27 @@ tidy_markdown() {
 
         # Pipe und Raute escaped pandoc immer, obwohl beide nur in einem
         # einzigen Zusammenhang Markdown-Zeichen sind: `|` trennt Zellen in
-        # einer Tabellenzeile, `#` beginnt eine Überschrift am Zeilenanfang.
-        # Überall sonst ist der Backslash überzählig und im Ergebnis sichtbar.
+        # einer Tabellenzeile, `#` beginnt eine Überschrift. Überall sonst ist
+        # der Backslash überzählig und im Ergebnis sichtbar.
         # Eine Tabellenzeile bleibt komplett, wie pandoc sie geschrieben hat:
         # sie beginnt immer mit `|` (die Trennzeile eingeschlossen), und ihre
         # Escapes gehören dort zur Spaltenbreite. Ein Zeichen daraus zu
         # entfernen würde die Ausrichtung der Tabelle verschieben.
         unless ($rest =~ /^\|/) {
+            # Eine Überschrift beginnt am Anfang ihres Blocks — das ist der
+            # Zeilenanfang ODER die Stelle direkt hinter einem Listenmarker.
+            # `- \# Text` ohne Backslash wäre eine Überschrift IM Listenpunkt,
+            # also bleibt der Backslash auch dort stehen.
+            my ($marker) = $rest =~ /^((?:[-*+]|\d{1,9}[.)])[ \t]+)/;
+            $marker = defined($marker) ? $marker : q{};
+            my $tail = substr($rest, length($marker));
+
             my $keep = q{};
-            if ($rest =~ /^\\#/) {
-                $keep = q{\#};  # Raute am Zeilenanfang bleibt escaped
-                $rest = substr($rest, 2);
+            if ($tail =~ /^\\#/) {
+                $keep = q{\#};  # Raute am Blockanfang bleibt escaped
+                $tail = substr($tail, 2);
             }
-            # Über Escape-PAARE laufen, nicht über einzelne Zeichen: sonst
-            # würde der zweite Backslash eines echten `\\` als Anfang eines
-            # neuen Escapes gelesen.
-            $rest =~ s{\\(.)}{ ($1 eq q{|} || $1 eq q{#}) ? $1 : qq{\\$1} }gse;
-            $rest = $keep . $rest;
+            $rest = $marker . $keep . unescape_pipe_hash($tail);
         }
 
         $lines[$i] = $prefix . $space . $rest if $rest ne $original;
