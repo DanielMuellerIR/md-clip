@@ -93,16 +93,11 @@ bash wrappers/build-app-bundled.sh
 [ -d "$APP" ] || { echo "FEHLER: Erwartetes Bundle fehlt: $APP" >&2; exit 1; }
 
 echo "=== 2/4 Signieren (innere Binaries zuerst) ==="
-for binary in \
-  "$APP/Contents/Resources/bin/pandoc" \
-  "$APP/Contents/Resources/bin/clipboard-html" \
-  "$APP/Contents/Resources/bin/clipboard-rtf"
-do
-  [ -f "$binary" ] || continue
-  codesign --sign "$IDENTITY" --options runtime --timestamp --force "$binary"
-done
-codesign --sign "$IDENTITY" --options runtime --timestamp --force --deep "$APP"
-codesign --verify --strict --verbose=2 "$APP"
+# Reihenfolge (innen nach außen, inkl. Sparkle-Framework und Updater-Helfer)
+# steht zentral in wrappers/sign-bundle.sh — dieselbe Datei benutzt auch
+# der Release-Weg, damit Installation und Release nicht auseinanderlaufen.
+bash wrappers/sign-bundle.sh "$APP" "$IDENTITY"
+bash wrappers/verify-bundle.sh "$APP" --signed
 
 echo "=== 3/4 Notarisieren ==="
 # notarytool nimmt kein nacktes .app entgegen, deshalb der Umweg über ein ZIP.

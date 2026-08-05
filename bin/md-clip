@@ -110,7 +110,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.1.2"
+VERSION="1.2.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -267,6 +267,9 @@ OPTIONS
                        (default: gfm).
   -q, --quiet          Keine Status-Ausgaben auf stderr.
   -n, --notify         Desktop-Notification bei Erfolg (für Wrapper-Aufrufe).
+      --check-updates  Sichtbar nach App-Updates suchen (Sparkle-Dialog).
+                       Nur in der macOS-App-Installation verfügbar; eine
+                       git-Installation wird per git pull aktualisiert.
   -V, --verbose        Diagnose-Output (welche Flavors, welcher Pfad).
   -v, --version        Versionsnummer ausgeben.
   -h, --help           Diese Hilfe anzeigen.
@@ -497,6 +500,22 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     -h|--help)      usage; exit 0 ;;
+    --check-updates)
+      # Sichtbare Update-Suche über Sparkle. Aktualisiert wird die App-
+      # Installation: Der Updater-Helfer liegt im App-Bundle unter
+      # Contents/MacOS/, dieses Skript im selben Bundle unter
+      # Contents/Resources/bin/ — daher der Verwandtschaftspfad. Eine
+      # git-/install.sh-Installation hat keinen Updater (Update-Weg dort:
+      # git pull), und unter Linux gibt es keine App.
+      # `|| true`, damit ein fehlendes MacOS-Verzeichnis (kein Bundle-Layout)
+      # unter `set -e` nicht das Skript beendet, sondern unten sauber in der
+      # Fehlermeldung landet.
+      UPDATER_DIR="$(cd -P "$SCRIPT_DIR/../../MacOS" 2>/dev/null && pwd || true)"
+      if [ "$PLATFORM" != "macos" ] || [ -z "$UPDATER_DIR" ] || [ ! -x "$UPDATER_DIR/md-clip-updater" ]; then
+        die 2 "Die Update-Suche gibt es nur in der macOS-App-Installation (md-clip.app). Diese Installation wird per git pull bzw. install.sh aktualisiert."
+      fi
+      exec "$UPDATER_DIR/md-clip-updater" --interactive
+      ;;
     --) shift; break ;;
     -*) die 2 "Unbekannte Option: $1 (siehe --help)" ;;
     *)  die 2 "Unerwartetes Argument: $1 (siehe --help)" ;;

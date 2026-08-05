@@ -40,6 +40,14 @@ PANDOC_VERSION="3.9.0.2"
 PANDOC_ZIP_SHA256="6e9eca844076bcbb599bbeebbba78a70f93b5307782b85c2c272872812c88875"
 PANDOC_COPYRIGHT_SHA256="842e33ef01625e93f85bebb8bac83aa570186b7aa77a09971257cc29f8f60740"
 
+# Sparkle-Version (Update-Framework). Exakt gepinnt, weil der Updater die
+# installierte App austauscht: Ein Versionssprung wird bewusst geprüft, nie
+# still aufgelöst — dieselbe Regel wie in poormans_text. Die Prüfsumme wurde
+# am 2026-08-06 gegen den unabhängig gepflegten Wert im Homebrew-Cask
+# `sparkle` gegenverifiziert (Cask-Commit ae0cb300).
+SPARKLE_VERSION="2.9.4"
+SPARKLE_TAR_SHA256="ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9"
+
 # ---------- Pfade ----------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,11 +97,17 @@ PANDOC_ARCHIVE_ROOT="pandoc-${PANDOC_VERSION}-arm64"
 PANDOC_ARCHIVE_BIN="$PANDOC_ARCHIVE_ROOT/bin/pandoc"
 PANDOC_STAGE=$(mktemp -d "$BUILD_DIR/.pandoc-extract.XXXXXX")
 PANDOC_BUILD_TMP=$(mktemp "$BUILD_DIR/.pandoc-binary.XXXXXX")
-cleanup_pandoc_stage() {
+# SPARKLE_STAGE wird erst in Schritt 3 angelegt; die Aufräumroutine kennt ihn
+# schon jetzt, damit auch ein Abbruch mittendrin nichts liegen lässt.
+SPARKLE_STAGE=""
+cleanup_build_stages() {
   rm -rf "$PANDOC_STAGE"
   rm -f "$PANDOC_BUILD_TMP"
+  if [ -n "$SPARKLE_STAGE" ]; then
+    rm -rf "$SPARKLE_STAGE"
+  fi
 }
-trap cleanup_pandoc_stage EXIT INT TERM
+trap cleanup_build_stages EXIT INT TERM
 
 unzip -q "$PANDOC_ZIP" "$PANDOC_ARCHIVE_BIN" -d "$PANDOC_STAGE"
 PANDOC_BIN="$PANDOC_STAGE/$PANDOC_ARCHIVE_BIN"
@@ -118,10 +132,45 @@ for helper in clipboard-html clipboard-rtf; do
   swiftc -target "arm64-apple-macos${MIN_MACOS}" "$src" -o "$out"
 done
 
+# ---------- 3. Sparkle laden und Updater-Helfer kompilieren ----------
+
+# Sparkle liefert fertig gebaute, von den Sparkle-Entwicklern signierte
+# Binaries als tar.xz. Wie bei pandoc gilt: nur verifiziert aus dem Cache,
+# und nur die dokumentierten Archivpfade werden entpackt.
+SPARKLE_TAR="$CACHE_DIR/Sparkle-${SPARKLE_VERSION}.tar.xz"
+SPARKLE_URL="https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+if sha256_matches "$SPARKLE_TAR" "$SPARKLE_TAR_SHA256"; then
+  echo "✓ Verifiziertes Sparkle aus Cache: $SPARKLE_TAR"
+else
+  echo "==> Lade und verifiziere $SPARKLE_URL"
+  download_verified "$SPARKLE_URL" "$SPARKLE_TAR_SHA256" "$SPARKLE_TAR" || exit 1
+fi
+
+SPARKLE_STAGE=$(mktemp -d "$BUILD_DIR/.sparkle-extract.XXXXXX")
+tar -x -C "$SPARKLE_STAGE" -f "$SPARKLE_TAR" ./Sparkle.framework ./LICENSE
+
+# Zusätzlich zur Prüfsumme: Die Signatur der Sparkle-Entwickler muss auf dem
+# entpackten Framework intakt sein. Ein Archiv, dessen Framework diese Prüfung
+# nicht besteht, kommt nicht ins Bundle.
+codesign --verify --deep --strict "$SPARKLE_STAGE/Sparkle.framework"
+test -s "$SPARKLE_STAGE/LICENSE"
+
+echo "==> Kompiliere md-clip-updater"
+# Der Updater-Helfer ist die einzige Cocoa-Laufzeit der App: Er treibt
+# Sparkle an (siehe helpers/md-clip-updater.swift). Gelinkt wird gegen das
+# frisch entpackte Framework; zur Laufzeit findet er es über den rpath im
+# Bundle unter Contents/Frameworks.
+swiftc -target "arm64-apple-macos${MIN_MACOS}" \
+  -F "$SPARKLE_STAGE" \
+  "$PROJECT_ROOT/helpers/md-clip-updater.swift" \
+  -o "$BUILD_DIR/md-clip-updater" \
+  -Xlinker -rpath -Xlinker "@loader_path/../Frameworks"
+
 # ---------- 4. .app-Bundle-Struktur ----------
 
 echo "==> Erstelle .app-Struktur"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 mkdir -p "$APP_BUNDLE/Contents/Resources/bin"
 mkdir -p "$APP_BUNDLE/Contents/Resources/Licenses"
 
@@ -131,6 +180,21 @@ cp "$PROJECT_ROOT/lib/pipeline.sh" "$APP_BUNDLE/Contents/Resources/bin/pipeline.
 cp "$BUILD_DIR/clipboard-html"     "$APP_BUNDLE/Contents/Resources/bin/clipboard-html"
 cp "$BUILD_DIR/clipboard-rtf"      "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"
 cp "$BUILD_DIR/pandoc"             "$APP_BUNDLE/Contents/Resources/bin/pandoc"
+
+# Sparkle-Framework ins Bundle. `ditto` statt `cp -R`, weil Frameworks aus
+# Symlinks bestehen (Sparkle -> Versions/Current/Sparkle) und dyld genau
+# diese Struktur erwartet.
+ditto "$SPARKLE_STAGE/Sparkle.framework" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+# Die App ist nicht sandboxed. Sparkles XPC-Dienste sind damit weder aktiviert
+# noch nötig — im Bundle wären sie nur nutzlose Angriffsfläche.
+rm -rf "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+rm -f  "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework/XPCServices"
+
+# Updater-Helfer neben den Launcher: In Contents/MacOS/ ist Bundle.main für
+# den Helfer die md-clip.app — Sparkle liest Feed-URL und Schlüssel dann aus
+# der Info.plist des Bundles, nicht aus einer zweiten Konstante im Code.
+cp "$BUILD_DIR/md-clip-updater" "$APP_BUNDLE/Contents/MacOS/md-clip-updater"
+chmod +x "$APP_BUNDLE/Contents/MacOS/md-clip-updater"
 
 # Icon-Datei mitliefern. .icns muss in Contents/Resources/ liegen und im
 # Info.plist als CFBundleIconFile referenziert werden, damit macOS es im
@@ -188,6 +252,29 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <string>md-clip</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Daniel Müller. MIT License.</string>
+    <!-- Sparkle. Die App sucht beim Start selbsttätig nach Updates (höchstens
+         einmal je 24 Stunden, siehe helpers/md-clip-updater.swift), lädt und
+         installiert aber ausschließlich nach Zustimmung. Anonyme Hardware-
+         und Systemprofildaten werden nicht übertragen. Feed und Archiv müssen
+         mit dem hier hinterlegten öffentlichen Ed25519-Schlüssel signiert
+         sein; es ist dasselbe Schlüsselpaar wie bei Poor Man's Text und
+         Fastra (siehe docs/SPARKLE-RELEASE.md). -->
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
+    <key>SUFeedURL</key>
+    <string>https://danielmuellerir.github.io/md-clip/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>Yo814iJMK/ZhDswOUNHuY+fW7ZxD3fRz9jFJRxnPeYY=</string>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
 </dict>
 </plist>
 PLIST
@@ -212,6 +299,11 @@ download_verified \
 test -s "$PANDOC_COPYRIGHT_CACHE"
 cp "$PANDOC_COPYRIGHT_CACHE" "$LIC_DIR/pandoc-COPYRIGHT.txt"
 
+# Sparkles Lizenz (MIT) gehört wie die pandoc-Lizenz in die verteilte App,
+# nicht nur ins Build-Verzeichnis. Sie kommt aus demselben verifizierten
+# Archiv wie das Framework (Schritt 3).
+cp "$SPARKLE_STAGE/LICENSE" "$LIC_DIR/Sparkle-LICENSE.txt"
+
 cat > "$LIC_DIR/README.txt" <<NOTE
 md-clip enthält ein unverändert weiterverteiltes pandoc-Binary
 (Version ${PANDOC_VERSION}), veröffentlicht unter der GNU General
@@ -223,6 +315,10 @@ Pandoc-Quellcode: https://github.com/jgm/pandoc/tree/${PANDOC_VERSION}
 Schriftliches Angebot (GPL): Der vollständige Quellcode dieser pandoc-
 Version wird auf Anfrage für mindestens drei Jahre bereitgestellt.
 Kontakt: siehe GitHub-Repo DanielMuellerIR/md-clip (Issues oder Discussions)
+
+Außerdem enthält md-clip das Update-Framework Sparkle
+(Version ${SPARKLE_VERSION}, MIT-Lizenz, siehe Sparkle-LICENSE.txt).
+Sparkle-Quellcode: https://github.com/sparkle-project/Sparkle
 
 md-clip selbst steht unter der MIT-Lizenz. MIT- und GPL-Komponenten
 werden hier als Aggregation distribuiert — nicht als abgeleitetes Werk.

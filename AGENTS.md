@@ -80,6 +80,17 @@
   gelegentlich fälschlich „No Keychain password item found", obwohl das Profil da
   ist (2026-07-26 belegt). Ein einzelner Fehlversuch würde einen kompletten
   Release-Lauf grundlos abbrechen — deshalb fünf Versuche.
+- **Sparkle-Updates:** Die App aktualisiert sich über Sparkle (exakt gepinnt in
+  `wrappers/build-app-bundled.sh`, Prüfsumme gegen den Homebrew-Cask
+  gegenverifiziert). Weil die App nur ein Shell-Launcher ist, treibt der
+  kompilierte Helfer `helpers/md-clip-updater.swift` (im Bundle:
+  `Contents/MacOS/md-clip-updater`) Sparkle an — er ist die einzige
+  Cocoa-Laufzeit der App. Signiert wird zentral über `wrappers/sign-bundle.sh`
+  (innen nach außen, ohne `--deep`), geprüft über `wrappers/verify-bundle.sh`.
+  Das Ed25519-Schlüsselpaar ist bewusst dasselbe wie bei Poor Man's Text und
+  Fastra; eine Rotation betrifft alle drei Apps. Nach jedem GitHub-Release
+  veröffentlicht `.github/workflows/publish-appcast.yml` den signierten Feed.
+  Ablauf und Begründungen: [docs/SPARKLE-RELEASE.md](docs/SPARKLE-RELEASE.md).
 
 ## Verzeichnisstruktur
 
@@ -88,6 +99,7 @@
 - [README.md](README.md) — Projekt-Einstieg und Nutzerdokumentation.
 - [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) — Projektdokumentation.
 - [docs/ENCODING.md](docs/ENCODING.md) — Projektdokumentation.
+- [docs/SPARKLE-RELEASE.md](docs/SPARKLE-RELEASE.md) — Sparkle-Updates bauen, signieren und veröffentlichen.
 - [docs/archive/BLUEPRINT.md](docs/archive/BLUEPRINT.md) — Projektdokumentation.
 - `assets/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `bin/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.

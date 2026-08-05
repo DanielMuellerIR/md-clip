@@ -172,6 +172,21 @@ end tell
 APPLESCRIPT
 }
 
+# Stößt die stille Update-Suche an (Sparkle, siehe
+# helpers/md-clip-updater.swift). Der Helfer drosselt sich selbst auf
+# höchstens einen Feed-Abruf je 24 Stunden und beendet sich ohne Fund
+# wortlos — nur wenn es ein Update gibt, erscheint ein Dialog.
+#
+# Entkoppelt gestartet (&, Ausgaben verworfen): Die Update-Suche darf die
+# Konvertierung weder verzögern noch — etwa bei fehlendem Netz — scheitern
+# lassen. Fehlt der Helfer (z.B. Entwicklungs-Build ohne Sparkle), passiert
+# schlicht nichts.
+start_update_check() {
+  local updater="$MACOS_DIR/md-clip-updater"
+  [ -x "$updater" ] || return 0
+  "$updater" --background >/dev/null 2>&1 &
+}
+
 # ---------- Hauptlogik ----------
 
 launcher_main() {
@@ -210,6 +225,13 @@ launcher_main() {
   # Jetzt der eigentliche md-clip-Lauf. --replace ersetzt das Clipboard,
   # --notify zeigt eine macOS-Benachrichtigung bei Erfolg.
   "$BUNDLE_CLI" --replace --notify
+  local cli_status=$?
+
+  # Update-Suche NACH der Konvertierung: Sie ist Nebensache und läuft im
+  # Hintergrund weiter, wenn dieser Launcher sich gleich beendet.
+  start_update_check
+
+  return "$cli_status"
 }
 
 # Tests dürfen die Funktionen laden, ohne Dialoge oder das Bundle zu starten.

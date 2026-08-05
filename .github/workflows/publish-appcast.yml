@@ -1,0 +1,118 @@
+# Veroeffentlicht nach jedem GitHub-Release den signierten Sparkle-Feed
+# (appcast.xml) ueber GitHub Pages. Die installierte md-clip.app fragt diesen
+# Feed ab (SUFeedURL in der Info.plist) und bietet gefundene Updates an.
+#
+# Anders als in poormans_text gibt es hier kein SwiftPM: Sparkles
+# generate_appcast kommt aus derselben exakt gepinnten Binaer-Distribution,
+# die auch wrappers/build-app-bundled.sh ins Bundle packt — Version und
+# Pruefsumme werden von dort gelesen, damit nichts auseinanderdriftet.
+name: Publish Sparkle appcast
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Bereits veroeffentlichtes Release-Tag, zum Beispiel v1.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: sparkle-appcast
+  cancel-in-progress: false
+
+jobs:
+  appcast:
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Download release disk image and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p update site
+          gh release download "$RELEASE_TAG" --pattern '*.dmg' --dir update
+
+          shopt -s nullglob
+          dmgs=(update/*.dmg)
+          if (( ${#dmgs[@]} != 1 )); then
+            echo "FEHLER: Release $RELEASE_TAG muss genau ein DMG enthalten." >&2
+            exit 1
+          fi
+
+          # Gleicher Basisname: generate_appcast ordnet die Markdown-Datei dem DMG zu.
+          gh release view "$RELEASE_TAG" --json body --jq .body > "${dmgs[0]%.dmg}.md"
+
+      - name: Fetch pinned Sparkle tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Version und Pruefsumme aus dem Build-Skript lesen — eine Quelle,
+          # kein zweiter Pin, der wegdriften kann.
+          SPARKLE_VERSION=$(grep '^SPARKLE_VERSION=' wrappers/build-app-bundled.sh | cut -d'"' -f2)
+          SPARKLE_TAR_SHA256=$(grep '^SPARKLE_TAR_SHA256=' wrappers/build-app-bundled.sh | cut -d'"' -f2)
+          if [[ -z "$SPARKLE_VERSION" || -z "$SPARKLE_TAR_SHA256" ]]; then
+            echo "FEHLER: Sparkle-Pin nicht aus wrappers/build-app-bundled.sh lesbar." >&2
+            exit 1
+          fi
+
+          source wrappers/verified-cache.sh
+          download_verified \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
+            "$SPARKLE_TAR_SHA256" \
+            sparkle-dist.tar.xz
+
+          mkdir -p sparkle-dist
+          tar -x -C sparkle-dist -f sparkle-dist.tar.xz ./bin/generate_appcast
+          test -x sparkle-dist/bin/generate_appcast
+
+      - name: Generate signed appcast
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "FEHLER: GitHub-Secret SPARKLE_PRIVATE_KEY fehlt." >&2
+            exit 1
+          fi
+
+          # Der geheime Schluessel steht weder in argv noch in einer Datei oder im Log.
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | sparkle-dist/bin/generate_appcast \
+            --ed-key-file - \
+            --embed-release-notes \
+            --maximum-versions 1 \
+            --maximum-deltas 0 \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/" \
+            --link "https://github.com/${GITHUB_REPOSITORY}" \
+            -o "$PWD/site/appcast.xml" \
+            "$PWD/update"
+
+          xmllint --noout site/appcast.xml
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - name: Publish appcast on GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

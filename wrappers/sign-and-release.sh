@@ -205,44 +205,12 @@ bash "$SCRIPT_DIR/build-app-bundled.sh"
 
 # ---------- 2. Signieren ----------
 
-# Reihenfolge: INNERE Binaries zuerst, dann das Bundle drumherum.
-# Pandoc kommt ggf. schon mit der Apple-Signatur des pandoc-Releases — die
-# überschreiben wir mit --force durch unsere Developer-ID-Signatur.
-#
-# --options runtime: Hardened Runtime aktivieren. Voraussetzung für
-#                    Notarization seit 2020.
-# --timestamp:       Apple's secure timestamp service einbinden. Sorgt
-#                    dafür, dass die Signatur auch nach dem Ablauf des
-#                    Zertifikats gültig bleibt.
-
-echo "==> Signiere innere Binaries"
-for binary in \
-  "$APP_BUNDLE/Contents/Resources/bin/pandoc" \
-  "$APP_BUNDLE/Contents/Resources/bin/clipboard-html" \
-  "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"
-do
-  echo "   $(basename "$binary")"
-  codesign --sign "$IDENTITY" \
-           --options runtime \
-           --timestamp \
-           --force \
-           "$binary"
-done
-
-echo "==> Signiere App-Bundle"
-# --deep stellt sicher, dass der Bundle-Code-Hash auch die schon
-# signierten inneren Binaries einschließt. Apple rät zwar grundsätzlich
-# von --deep ab, weil es bei komplexen Apps Macken hat — bei unserer
-# flachen Struktur ist es aber unkritisch und einfacher als jedes Sub-
-# Resource einzeln zu deklarieren.
-codesign --sign "$IDENTITY" \
-         --options runtime \
-         --timestamp \
-         --force --deep \
-         "$APP_BUNDLE"
-
-# Verifikation: bricht ab, wenn die Signatur kaputt oder unvollständig ist.
-codesign --verify --strict --verbose=2 "$APP_BUNDLE"
+# Reihenfolge (innen nach außen, inkl. Sparkle-Framework und Updater-Helfer)
+# steht zentral in wrappers/sign-bundle.sh — dieselbe Datei benutzt auch
+# install-app.sh, damit Installation und Release nicht auseinanderlaufen.
+echo "==> Signiere Bundle (wrappers/sign-bundle.sh)"
+bash "$SCRIPT_DIR/sign-bundle.sh" "$APP_BUNDLE" "$IDENTITY"
+bash "$SCRIPT_DIR/verify-bundle.sh" "$APP_BUNDLE" --signed
 echo "✓ Bundle signiert"
 
 # ---------- 2b. App notarisieren ----------

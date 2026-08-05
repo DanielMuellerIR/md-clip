@@ -4,11 +4,13 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 2026-08-03)
+## Status (Stand: 2026-08-06)
 
-- Quellstand: **v1.1.2, unveröffentlicht**. Zuletzt getaggte Version: v1.1.1.
-  Zuletzt dokumentierte veröffentlichte App-Version: **v1.0.3**; dieses
-  Dokument behauptet keine Veröffentlichung von v1.1.1 oder v1.1.2.
+- Quellstand: **v1.2.0, unveröffentlicht** (bis 2026-08-06 als v1.1.2
+  geführt; mit dem eingebauten Sparkle-Updater wurde daraus eine
+  Funktions-Version). Zuletzt getaggte Version: v1.1.1. Zuletzt dokumentierte
+  veröffentlichte App-Version: **v1.0.3**; dieses Dokument behauptet keine
+  Veröffentlichung von v1.1.1 oder v1.2.0.
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
 - **Stufe B — Signieren und notarisieren.** ✅ Erledigt.
@@ -21,6 +23,9 @@ einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 - Zuletzt dokumentierte veröffentlichte Version: **v1.0.3** als signiertes,
   notarisiertes DMG unter
   [github.com/DanielMuellerIR/md-clip/releases](https://github.com/DanielMuellerIR/md-clip/releases).
+- **Sparkle-Auto-Update** (Framework im Bundle, Updater-Helfer,
+  Appcast-Workflow). ✅ Erledigt in v1.2.0 — Details in
+  [SPARKLE-RELEASE.md](SPARKLE-RELEASE.md).
 - **Stufe C — GitHub Action für automatisierte Releases.** ⏳ Nächste
   Session.
 

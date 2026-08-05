@@ -25,4 +25,8 @@ bash wrappers/build-app-bundled.sh
 APP="build/md-clip.app"
 [ -d "$APP" ] || { echo "FEHLER: Erwartetes Bundle fehlt: $APP" >&2; exit 1; }
 
+# Strukturprüfung des Produkts (Werkzeuge, Sparkle, Lizenzen, Versionen) —
+# das Bundle wird geprüft, nicht dem Build geglaubt.
+bash wrappers/verify-bundle.sh "$APP"
+
 echo "BUILD OK: $PWD/$APP"

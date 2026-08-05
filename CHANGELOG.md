@@ -1,10 +1,20 @@
 # Changelog
 
-## 1.1.2 — unveröffentlicht
+## 1.2.0 — unveröffentlicht
 
 Der Tag `v1.1.1` und der Stand danach hätten sonst dieselbe Versionsnummer und
-denselben DMG-Dateinamen getragen, obwohl der Inhalt ein anderer ist.
+denselben DMG-Dateinamen getragen, obwohl der Inhalt ein anderer ist. Mit dem
+eingebauten Updater ist aus dem Fix-Stand (zwischenzeitlich als 1.1.2 geführt)
+eine Funktions-Version geworden.
 
+- Die App aktualisiert sich selbst über Sparkle 2.9.4 (wie Poor Man's Text):
+  stille Suche nach einer Konvertierung, höchstens einmal täglich; sichtbare
+  Suche per `md-clip --check-updates`. Installiert wird ausschließlich nach
+  Bestätigung im Dialog, Feed und Archiv sind Ed25519-signiert, Hardware- und
+  Systemprofildaten werden nicht übertragen. Details:
+  `docs/SPARKLE-RELEASE.md`. Ältere Installationen müssen diese Version
+  einmalig von Hand per DMG installieren; erst danach greifen Updates aus der
+  App heraus.
 - Drei App-Einstiegspunkte klar getrennt: `build.sh` baut, `install-app.sh`
   installiert nach `/Applications`, `release.sh` packt das DMG. Die App wird
   jetzt selbst notarisiert, nicht nur das Image.

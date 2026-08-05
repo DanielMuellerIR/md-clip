@@ -22,6 +22,8 @@ Ab jetzt: formatierten Text irgendwo markieren (`⌘C`), md-clip-Icon klicken, i
 
 Voraussetzung: macOS 11 oder neuer auf Apple Silicon. Eine separate Installation von Homebrew oder pandoc ist nicht erforderlich — alles Nötige ist im Programm enthalten.
 
+**Updates:** Die App prüft nach einer Konvertierung im Hintergrund höchstens einmal täglich, ob es eine neue Version gibt (Update-Framework [Sparkle](https://sparkle-project.org)). Gefundene Updates werden nur angezeigt — installiert wird ausschließlich nach Bestätigung im Dialog. Es werden keine Hardware- oder Systemprofildaten übertragen. Sofort suchen: `md-clip --check-updates` im Terminal.
+
 ## Beispiel
 
 Du kopierst folgenden Absatz aus einem Browser:
