@@ -1,11 +1,21 @@
 # Changelog
 
-## 1.2.0 — unveröffentlicht
+## 1.2.1 — unveröffentlicht
 
-Der Tag `v1.1.1` und der Stand danach hätten sonst dieselbe Versionsnummer und
-denselben DMG-Dateinamen getragen, obwohl der Inhalt ein anderer ist. Mit dem
-eingebauten Updater ist aus dem Fix-Stand (zwischenzeitlich als 1.1.2 geführt)
-eine Funktions-Version geworden.
+- Die Erfolgsmeldung der App erscheint als echte macOS-Mitteilung unter der
+  Identität „md-clip" mit eigenem Eintrag in den Mitteilungs-Einstellungen
+  (einmalige Erlaubnis-Nachfrage beim ersten Lauf). Bisher lief sie per
+  AppleScript unter „Skripteditor" — auf neueren macOS-Versionen wurden diese
+  Banner still unterdrückt, die Meldung kam nie an. Der AppleScript-Weg bleibt
+  nur als Fallback der git-Installation ohne App-Bundle; lehnt der Nutzer
+  Mitteilungen ab, wird das respektiert und nicht umgangen.
+
+## 1.2.0
+
+Veröffentlicht am 2026-08-06. Der Tag `v1.1.1` und der Stand danach hätten
+sonst dieselbe Versionsnummer und denselben DMG-Dateinamen getragen, obwohl der
+Inhalt ein anderer ist. Mit dem eingebauten Updater ist aus dem Fix-Stand
+(zwischenzeitlich als 1.1.2 geführt) eine Funktions-Version geworden.
 
 - Die App aktualisiert sich selbst über Sparkle 2.9.4 (wie Poor Man's Text):
   stille Suche nach einer Konvertierung, höchstens einmal täglich; sichtbare

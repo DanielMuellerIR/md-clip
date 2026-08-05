@@ -80,6 +80,17 @@
   gelegentlich fälschlich „No Keychain password item found", obwohl das Profil da
   ist (2026-07-26 belegt). Ein einzelner Fehlversuch würde einen kompletten
   Release-Lauf grundlos abbrechen — deshalb fünf Versuche.
+- **Mitteilungen unter eigener Identität:** Die Erfolgsmeldung der App macht
+  `helpers/md-clip-notifier.swift` über das UserNotifications-Framework — als
+  „md-clip" mit eigenem Eintrag in den Mitteilungs-Einstellungen. Der Helfer
+  ist im Bundle ein EIGENES kleines App-Bundle
+  (`Contents/Resources/md-clip-notifier.app`), kein nacktes Binary: Nur das
+  Haupt-Executable eines Bundles darf die Erlaubnis anfragen (UNErrorDomain 1
+  am 2026-08-06 belegt; dasselbe Muster wie Sparkles Updater.app und
+  terminal-notifier). Der osascript-Weg in `notify()` ist nur der Fallback der
+  git-Installation: macOS ordnet Skript-Meldungen dem „Skripteditor" zu und
+  unterdrückt deren Banner auf neueren Versionen still. Lehnt der Nutzer
+  Mitteilungen ab, wird das respektiert — kein Umweg über osascript.
 - **Sparkle-Updates:** Die App aktualisiert sich über Sparkle (exakt gepinnt in
   `wrappers/build-app-bundled.sh`, Prüfsumme gegen den Homebrew-Cask
   gegenverifiziert). Weil die App nur ein Shell-Launcher ist, treibt der

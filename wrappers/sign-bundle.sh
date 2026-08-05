@@ -46,6 +46,7 @@ SIGN_TARGETS=(
   "$APP/Contents/Resources/bin/clipboard-html"
   "$APP/Contents/Resources/bin/clipboard-rtf"
   "$APP/Contents/MacOS/md-clip-updater"
+  "$APP/Contents/Resources/md-clip-notifier.app"
   "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
   "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
   "$SPARKLE_FRAMEWORK"

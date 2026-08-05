@@ -298,3 +298,31 @@ set -e
 grep -Fxq -- '--replace' "$UPDATE_ROOT/capture/cli-args"
 grep -Fxq 'cli-zuerst' "$UPDATE_ROOT/capture/order"
 echo "✓ Launcher konvertiert zuerst und reicht den CLI-Exit-Status durch"
+
+# --- Mitteilungen: eigene Identität zuerst, osascript nur als Fallback. ---
+# Vertrag in bin/md-clip (Befund 2026-08-06: osascript-Meldungen laufen unter
+# „Skripteditor" und werden auf neueren macOS-Versionen still unterdrückt):
+# Innerhalb von notify() muss der Bundle-Helfer md-clip-notifier VOR dem
+# osascript-Aufruf stehen, und seine Ablehnung darf NICHT in den
+# osascript-Zweig durchfallen (return direkt nach dem Helfer-Aufruf).
+MD_CLIP_SRC="$PROJECT_ROOT/bin/md-clip"
+# `|| true`: Ein Nicht-Treffer soll unten die sprechende Fehlermeldung
+# auslösen, nicht das Skript über set -e wortlos beenden.
+NOTIFIER_PATH_LINE=$(grep -n 'md-clip-notifier\.app/Contents/MacOS/md-clip-notifier' "$MD_CLIP_SRC" | head -1 | cut -d: -f1 || true)
+NOTIFIER_CALL_LINE=$(grep -n '"\$notifier" "\$1"' "$MD_CLIP_SRC" | head -1 | cut -d: -f1 || true)
+OSASCRIPT_NOTIFY_LINE=$(grep -n "display notification (item 1 of argv)" "$MD_CLIP_SRC" | head -1 | cut -d: -f1 || true)
+if [ -z "$NOTIFIER_PATH_LINE" ]; then
+  echo "✗ notify() kennt den Bundle-Helfer md-clip-notifier.app nicht" >&2
+  exit 1
+fi
+if [ -z "$NOTIFIER_CALL_LINE" ] || [ -z "$OSASCRIPT_NOTIFY_LINE" ] \
+   || [ "$NOTIFIER_CALL_LINE" -gt "$OSASCRIPT_NOTIFY_LINE" ]; then
+  echo "✗ notify() bevorzugt nicht den Bundle-Helfer md-clip-notifier" >&2
+  exit 1
+fi
+NEXT_AFTER_CALL=$(sed -n "$((NOTIFIER_CALL_LINE + 1))p" "$MD_CLIP_SRC" | tr -d ' ')
+if [ "$NEXT_AFTER_CALL" != "return0" ]; then
+  echo "✗ Nach dem Mitteilungs-Helfer fehlt das direkte return — Ablehnung würde in osascript durchfallen" >&2
+  exit 1
+fi
+echo "✓ notify() meldet unter eigener Identität, osascript nur ohne Bundle-Helfer"

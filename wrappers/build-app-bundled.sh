@@ -124,7 +124,7 @@ echo "✓ pandoc bereit ($(du -h "$BUILD_DIR/pandoc" | cut -f1))"
 
 # ---------- 2. Swift-Helper kompilieren ----------
 
-for helper in clipboard-html clipboard-rtf; do
+for helper in clipboard-html clipboard-rtf md-clip-notifier; do
   src="$PROJECT_ROOT/helpers/${helper}.swift"
   out="$BUILD_DIR/${helper}"
   echo "==> Kompiliere ${helper}"
@@ -195,6 +195,56 @@ rm -f  "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework/XPCServices"
 # der Info.plist des Bundles, nicht aus einer zweiten Konstante im Code.
 cp "$BUILD_DIR/md-clip-updater" "$APP_BUNDLE/Contents/MacOS/md-clip-updater"
 chmod +x "$APP_BUNDLE/Contents/MacOS/md-clip-updater"
+
+# Mitteilungs-Helfer als EIGENES kleines App-Bundle unter Resources/. Ein
+# nacktes Binary neben dem Launcher darf keine Mitteilungs-Erlaubnis anfragen
+# (UNErrorDomain 1, am 2026-08-06 auch aus dem Finder-Start belegt): Der
+# Anfragende muss das Haupt-Executable eines registrierbaren Bundles sein.
+# Dasselbe Muster nutzen Sparkles Updater.app und terminal-notifier. Der
+# Anzeigename ist bewusst „md-clip" — so heißt der Eintrag in den
+# Mitteilungs-Einstellungen und der Absender des Banners.
+NOTIFIER_APP="$APP_BUNDLE/Contents/Resources/md-clip-notifier.app"
+mkdir -p "$NOTIFIER_APP/Contents/MacOS" "$NOTIFIER_APP/Contents/Resources"
+cp "$BUILD_DIR/md-clip-notifier" "$NOTIFIER_APP/Contents/MacOS/md-clip-notifier"
+chmod +x "$NOTIFIER_APP/Contents/MacOS/md-clip-notifier"
+# Gleiche Icon-Datei wie die Haupt-App: macOS zeigt es im Banner an.
+# (ICNS_SOURCE der Haupt-App wird erst weiter unten gesetzt, deshalb hier
+# der direkte Pfad.)
+if [ -f "$PROJECT_ROOT/assets/md-clip.icns" ]; then
+  cp "$PROJECT_ROOT/assets/md-clip.icns" "$NOTIFIER_APP/Contents/Resources/md-clip.icns"
+fi
+cat > "$NOTIFIER_APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>md-clip</string>
+    <key>CFBundleDisplayName</key>
+    <string>md-clip</string>
+    <key>CFBundleIdentifier</key>
+    <string>${BUNDLE_ID}.notifier</string>
+    <key>CFBundleVersion</key>
+    <string>${APP_VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${APP_VERSION}</string>
+    <key>CFBundleExecutable</key>
+    <string>md-clip-notifier</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>${MIN_MACOS}</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>CFBundleIconFile</key>
+    <string>md-clip</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Daniel Müller. MIT License.</string>
+</dict>
+</plist>
+PLIST
 
 # Icon-Datei mitliefern. .icns muss in Contents/Resources/ liegen und im
 # Info.plist als CFBundleIconFile referenziert werden, damit macOS es im
