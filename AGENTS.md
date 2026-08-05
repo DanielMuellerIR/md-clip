@@ -33,6 +33,15 @@
   verschiebt die Ausrichtung. Ein `\#` in einer Zelle bleibt deshalb bewusst
   stehen; wer das ändern will, muss die Tabelle neu ausrichten. In Inline-Code
   ist der Backslash echter Inhalt: `` `\#` `` bedeutet dort Backslash-Raute.
+  **„Listenmarker" heißt dabei: beliebig viele hintereinander** — pandoc
+  schreibt verschachtelte Listen als `- - \# tief` —, und beim Ziel `markdown`
+  zählen auch alphabetische (`a.`, `b)`) sowie Definitionslisten-Marker (`:`,
+  `~`) dazu. Erkennt die Regel nur den ersten, wird aus dem Text eine
+  Überschrift. **„Zwischen Backticks" heißt: zwischen NICHT maskierten
+  Backticks** — `` \` `` ist ein wörtlicher Backtick und keine Code-Grenze,
+  sonst bliebe im Fließtext dahinter ein sichtbares `\#` stehen. Beide Regeln
+  stammen aus dem Review vom 2026-08-05 und sind in
+  `tests/fixtures/escaped-markers.*` festgehalten.
 - **Zeilenumbruch im Absatz = zwei Leerzeichen, kein `\`.** pandoc schreibt
   Hard-Breaks als sichtbaren Backslash; `tidy_markdown` ersetzt ihn. Umbrüche,
   die nur Layout waren (vor Leerzeile, vor Listenpunkt, am Dokumentende),

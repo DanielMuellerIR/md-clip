@@ -17,12 +17,24 @@ denselben DMG-Dateinamen getragen, obwohl der Inhalt ein anderer ist.
 - Inline-Code bleibt beim Aufräumen unangetastet: `` `\#` `` heißt dort
   Backslash-Raute und wird nicht zu `` `#` ``.
 - Eine Raute direkt hinter einem Listenmarker bleibt escaped, sonst würde aus
-  `- # Text` eine Überschrift im Listenpunkt.
+  `- # Text` eine Überschrift im Listenpunkt. Das gilt auch für verschachtelte
+  Listen (`- - # tief`) sowie für alphabetische und Definitionslisten des Ziels
+  `markdown` — dort wurde aus dem Text sonst eine Überschrift.
 - Links ohne sichtbaren Text — etwa reine Icon-Links — bekommen ihre URL als
   Linktext, statt als unsichtbares `[](…)` zu verschwinden. Links um ein Bild
-  bleiben unverändert.
-- `--replace` legt kein überzähliges Schluss-Newline mehr ins Clipboard;
-  durchgereichter Plain-Text bleibt weiterhin bytegenau.
+  oder ein eingebettetes SVG bleiben unverändert; ein SVG-Icon im Link verliert
+  seine Grafik also nicht mehr.
+- `--replace` legt kein überzähliges Schluss-Newline mehr ins Clipboard —
+  entfernt wird genau eines, nämlich Pandocs Dateiende. Endet der kopierte Text
+  auf einen leeren Absatz, bleibt der erhalten. Durchgereichter Plain-Text ist
+  weiterhin bytegenau.
+- Ein wörtlicher Backtick im Fließtext gilt nicht mehr als Anfang von
+  Inline-Code: `` vor ` # mitte ` nach `` behält keinen sichtbaren Backslash
+  vor der Raute zurück.
+- Ein abgebrochener Release-Lauf lässt sein schreibbares Zwischen-Image nicht
+  mehr im Build-Verzeichnis liegen.
+- Die vier Sicherheitsfälle des privilegierten Installationsschritts laufen
+  jetzt auch unter Linux und damit in der CI, nicht nur auf macOS.
 - Der Erststart-Dialog der App ersetzt beim Einrichten des
   Kommandozeilen-Befehls keine fremde Datei mehr, die zwischen Nachfrage und
   Passworteingabe entsteht.

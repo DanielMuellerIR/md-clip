@@ -160,6 +160,27 @@ run_test "empty-link (leerer Anker-Text → URL als Text)" \
   "$actual" \
   "$FIXTURES/empty-link.expected.md"
 
+# --- Test 4b: Anker um ein Inline-SVG behält seine Grafik ---
+# Kein Fixture, sondern eine gezielte Zusicherung: pandoc bettet ein Inline-SVG
+# als `data:`-Bild ein, und dessen Base64 hängt an der pandoc-Version — eine
+# Erwartungsdatei könnte macOS 3.9 und Ubuntu 3.1.3 nicht gleichzeitig erfüllen
+# (AGENTS: „Ein Fixture darf nichts festschreiben, was von der pandoc-Version
+# abhängt"). Geprüft wird deshalb nur das, was versionsunabhängig gelten muss:
+# Die Grafik darf nicht durch den nackten URL-Text ersetzt werden — genau das
+# tat fill_empty_html_links bis zum Review-Fund 2026-08-05.
+svg_actual=$(printf '%s' \
+  '<a href="https://ziel"><svg viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg></a>' \
+  | convert_html)
+if [ "$svg_actual" = '[https://ziel](https://ziel)' ]; then
+  echo "✗ svg-link (Anker um Inline-SVG)"
+  echo "  Die Grafik wurde durch den URL-Text ersetzt: $svg_actual"
+  FAILED=$((FAILED + 1))
+else
+  echo "✓ svg-link (Inline-SVG im Anker bleibt erhalten)"
+  PASSED=$((PASSED + 1))
+fi
+TOTAL=$((TOTAL + 1))
+
 # --- Test 5: Google-Classroom-Link-Anhänge ---
 # Anhänge sind <a> die Block-Divs (Titel, URL, Thumbnail) umschließen.
 # Erwartung: kompakte Liste `- [Titel](href)`, authuser gestrippt,
@@ -363,6 +384,35 @@ else
     xxd "$ENCODING_EXPECTED_FILE" | sed 's/^/    /'
     echo "  Erhaltene Bytes:"
     xxd "$ENCODING_ACTUAL_FILE" | sed 's/^/    /'
+    FAILED=$((FAILED + 1))
+  fi
+  TOTAL=$((TOTAL + 1))
+
+  # --- Roundtrip 1b: echter Schluss-Leerabsatz überlebt das Clipboard ---
+  # Der Roundtrip oben hat genau einen nichtleeren Absatz und kann deshalb nicht
+  # sehen, wie viele Schluss-LFs entfernt werden. Endet das Dokument aber auf
+  # einen leeren Absatz, liefert die Kette ZWEI: eines ist Pandocs Dateiende,
+  # das andere der Absatz. Das frühere `s/\n+\z//` nahm beide und verschluckte
+  # damit den Absatz (Review-Fund 2026-08-05).
+  TRAILING_HTML="$TEST_RUNTIME/trailing.html"
+  printf '%s' '<p>a</p><p><br></p>' > "$TRAILING_HTML"
+  clip_put_html "$TRAILING_HTML"
+  "$PRODUCT_CLI" --replace --quiet
+
+  TRAILING_EXPECTED_FILE="$TEST_RUNTIME/trailing.expected"
+  TRAILING_ACTUAL_FILE="$TEST_RUNTIME/trailing.actual"
+  printf 'a\n' > "$TRAILING_EXPECTED_FILE"
+  clip_get_text > "$TRAILING_ACTUAL_FILE"
+
+  if cmp -s "$TRAILING_EXPECTED_FILE" "$TRAILING_ACTUAL_FILE"; then
+    echo "✓ trailing-empty-paragraph (genau ein Schluss-LF entfernt)"
+    PASSED=$((PASSED + 1))
+  else
+    echo "✗ trailing-empty-paragraph"
+    echo "  Erwartete Bytes:"
+    xxd "$TRAILING_EXPECTED_FILE" | sed 's/^/    /'
+    echo "  Erhaltene Bytes:"
+    xxd "$TRAILING_ACTUAL_FILE" | sed 's/^/    /'
     FAILED=$((FAILED + 1))
   fi
   TOTAL=$((TOTAL + 1))

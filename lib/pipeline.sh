@@ -55,6 +55,14 @@ preprocess_google_classroom() {
 # darin bringt in Markdown nichts mit, pandoc schriebe daraus ein unsichtbares
 # `[](…)`. Ein Anker um ein Bild bleibt dagegen unangetastet: das Bild IST der
 # sichtbare Inhalt und wird zu `[![alt](bild)](ziel)`.
+#
+# Dasselbe gilt für ein eingebettetes `<svg>`: pandoc macht daraus ein Bild mit
+# `data:`-URL, auch außerhalb eines Ankers. Ohne die Ausnahme ersetzte diese
+# Funktion die komplette Grafik durch den nackten URL-Text — der Icon-Link mit
+# Inline-SVG ist im Web der Normalfall, nicht der Sonderfall (Review-Fund
+# 2026-08-05, am Verhalten von pandoc 3.9 belegt). `<video>`, `<audio>` und
+# `<object>` bleiben bewusst draußen: aus ihnen macht pandoc gar nichts
+# Sichtbares, dort ist der URL-Text die bessere Ausgabe.
 fill_empty_html_links() {
   perl -0pe '
     s{<a\b([^>]*\bhref\s*=\s*(?:"([^"]*)"|\x27([^\x27]*)\x27)[^>]*)>(.*?)</a>}{
@@ -66,7 +74,7 @@ fill_empty_html_links() {
       $visible =~ s/&nbsp;/ /gi;
       $visible =~ s/\s+//g;
       # Span verhindert pandocs Autolink-Kürzung, die Link-Titel verwirft.
-      ($visible eq q{} && $inner !~ /<img\b/i)
+      ($visible eq q{} && $inner !~ /<(?:img|svg)\b/i)
         ? "<a$attributes><span>$href</span></a>"
         : $whole
     }gise
@@ -168,9 +176,41 @@ tidy_markdown() {
     # Dafür wird die Zeile an Backtick-Gruppen zerlegt. Ein Code-Span endet
     # laut Markdown erst bei einer Backtick-Gruppe GLEICHER Länge; findet sich
     # keine, war der Backtick gewöhnlicher Text und wird mitbehandelt.
+    # Zerlegt eine Zeile in Text- und Backtick-Gruppen — wie split(/(`+)/),
+    # aber ein MASKIERTER Backtick zählt nicht als Code-Grenze. pandoc schreibt
+    # einen wörtlichen Backtick als `\``; die alte Zerlegung hielt den Bereich
+    # dazwischen für Inline-Code und ließ das `\#` darin escaped stehen, obwohl
+    # es gewöhnlicher Fließtext war (Review-Fund 2026-08-05).
+    #
+    # Escape-PAARE überspringen, nicht einzelne Zeichen: sonst würde der zweite
+    # Backslash eines echten `\\` den folgenden Backtick fälschlich maskieren.
+    # Rückgabe wie bei split: gerade Indizes Text, ungerade Backtick-Gruppen.
+    sub split_code_delims {
+        my ($text) = @_;
+        my @parts  = (q{});
+        my $i      = 0;
+        my $len    = length $text;
+
+        while ($i < $len) {
+            my $c = substr($text, $i, 1);
+            if ($c eq q{\\} && $i + 1 < $len) {
+                $parts[-1] .= substr($text, $i, 2);
+                $i += 2;
+            } elsif ($c eq q{`}) {
+                my ($run) = substr($text, $i) =~ /^(`+)/;
+                push @parts, $run, q{};
+                $i += length $run;
+            } else {
+                $parts[-1] .= $c;
+                $i++;
+            }
+        }
+        return @parts;
+    }
+
     sub unescape_pipe_hash {
         my ($text) = @_;
-        my @parts = split(/(`+)/, $text, -1);   # gerade Indizes = Text
+        my @parts = split_code_delims($text);   # gerade Indizes = Text
         my $out   = q{};
         my $i     = 0;
 
@@ -347,7 +387,22 @@ tidy_markdown() {
             # Zeilenanfang ODER die Stelle direkt hinter einem Listenmarker.
             # `- \# Text` ohne Backslash wäre eine Überschrift IM Listenpunkt,
             # also bleibt der Backslash auch dort stehen.
-            my ($marker) = $rest =~ /^((?:[-*+]|\d{1,9}[.)])[ \t]+)/;
+            #
+            # MEHRERE Marker hintereinander, weil pandoc verschachtelte Listen
+            # in einer Zeile schreibt: `- - \# tief`. Erkannte die Regel nur den
+            # ersten, fiel der Backslash weg und aus dem Text wurde eine
+            # Überschrift — im AST belegt (Review-Fund 2026-08-05). Alphabetische
+            # Marker (`a.`, `b)`) kommen beim Ziel `markdown` dazu; ein
+            # unmaskiertes `a)` am Zeilenanfang ist dort immer ein Listenmarker,
+            # gewöhnlichen Text hätte pandoc als `a\)` geschrieben. `:` und `~`
+            # sind die Definitionslisten-Marker desselben Ziels — auch dort
+            # wurde aus dem Text sonst eine Überschrift.
+            #
+            # Im Zweifel lieber einen Marker zu viel erkennen: dann bleibt ein
+            # überzähliger Backslash stehen (sichtbarer Schönheitsfehler), statt
+            # dass sich die Dokumentstruktur ändert.
+            my ($marker) =
+                $rest =~ /^((?:(?:[-*+:~]|\d{1,9}[.)]|[A-Za-z][.)])[ \t]+)+)/;
             $marker = defined($marker) ? $marker : q{};
             my $tail = substr($rest, length($marker));
 

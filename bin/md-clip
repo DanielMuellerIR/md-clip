@@ -726,8 +726,13 @@ if [ "$REPLACE" -eq 1 ]; then
   # leere Zeile, die im kopierten Original nie stand. Durchgereichter
   # Plain-Text bleibt davon unberührt — dort sind die Newlines Nutzdaten und
   # müssen bytegenau erhalten bleiben (siehe tests/test-plain-newlines.sh).
+  #
+  # GENAU EINS, nicht `\n+`: Endet das Dokument auf einen echten leeren Absatz,
+  # liefert die Kette zwei LFs — eines ist Pandocs Dateiende, das andere der
+  # Absatz. `\n+` fraß beide und damit den Absatz (Review-Fund 2026-08-05,
+  # belegt an `<p>a</p><p><br></p>` → `a\n\n`).
   if [ "$CONVERTED" -eq 1 ]; then
-    perl -0777 -i -pe 's/\n+\z//' "$OUTPUT_FILE"
+    perl -0777 -i -pe 's/\n\z//' "$OUTPUT_FILE"
   fi
 
   # clip_write_text liest von stdin und ersetzt den Clipboard-Inhalt

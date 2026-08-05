@@ -42,58 +42,113 @@ echo "✓ Launcher übergibt problematische Pfade nur als Daten"
 # der Befehl, den der Launcher an `do shell script` übergibt: Im
 # mitgeschnittenen AppleScript wird die Ausführungszeile durch
 # `return commandText` ersetzt, dann liefert der echte osascript den Text.
-# Das geht nur auf macOS — auf Linux gibt es keinen osascript.
+# osascript gibt es nur auf macOS. Die vier Zustandsfälle liefen deshalb früher
+# ausschließlich dort — und damit NIE in der Linux-CI, obwohl genau dieser
+# Befehl als root läuft (Review-Fund 2026-08-05). Jetzt läuft der funktionale
+# Teil überall:
+#
+#   * Auf macOS liefert der echte osascript den Befehlstext.
+#   * Sonst baut ihn `build_link_command` nach.
+#
+# Damit die Nachbildung nicht still vom AppleScript wegdriftet, wird zuerst der
+# Vertrag geprüft: Der Befehlsaufbau im mitgeschnittenen Quelltext MUSS exakt
+# der hier festgehaltenen Fassung entsprechen. Wer den Launcher ändert, sieht
+# hier rot und muss beide Seiten nachziehen. Auf macOS wird zusätzlich belegt,
+# dass Nachbildung und osascript zeichengleich dasselbe liefern.
+EXPECTED_COMMAND_STMT='set commandText to "/bin/mkdir -p \"$(/usr/bin/dirname " & target & ")\"" & " && [ ! -e " & target & " ]" & " && { [ ! -L " & target & " ] || /bin/rm " & target & "; }" & " && /bin/ln -s " & quoted form of bundleCli & " " & target'
+ACTUAL_COMMAND_STMT=$(
+  awk '/^set commandText to /{f=1} /^do shell script /{f=0} f' "$TEST_ROOT/capture/source" \
+    | tr '\n' ' ' | sed 's/¬//g' | tr -s ' ' | sed 's/ *$//'
+)
+if [ "$ACTUAL_COMMAND_STMT" != "$EXPECTED_COMMAND_STMT" ]; then
+  echo "✗ Der privilegierte Befehl im Launcher weicht vom geprüften Vertrag ab." >&2
+  echo "  Launcher: $ACTUAL_COMMAND_STMT" >&2
+  echo "  Erwartet: $EXPECTED_COMMAND_STMT" >&2
+  exit 1
+fi
+
+# AppleScripts `quoted form of` ist POSIX-Einfachquoting: alles in '…', und ein
+# enthaltenes ' wird zu '\''.
+sh_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+build_link_command() {
+  local bundle target
+  bundle=$(sh_quote "$1")
+  target=$(sh_quote "$2")
+  printf '%s' "/bin/mkdir -p \"\$(/usr/bin/dirname $target)\" && [ ! -e $target ]"
+  printf '%s' " && { [ ! -L $target ] || /bin/rm $target; } && /bin/ln -s $bundle $target"
+}
+
 if [ "$(uname -s)" = "Darwin" ] && [ -x /usr/bin/osascript ]; then
   LINK_SCRIPT="$TEST_ROOT/link.applescript"
   sed 's/^do shell script commandText with administrator privileges$/return commandText/' \
     "$TEST_ROOT/capture/source" > "$LINK_SCRIPT"
   grep -Fxq 'return commandText' "$LINK_SCRIPT"
 
-  # Führt den erzeugten Befehl mit den übergebenen Pfaden aus.
-  run_link() {
-    local command_text
-    command_text=$(BUNDLE_CLI="$1" SYSTEM_CLI="$2" /usr/bin/osascript "$LINK_SCRIPT")
-    /bin/sh -c "$command_text"
+  link_command() {
+    BUNDLE_CLI="$1" SYSTEM_CLI="$2" /usr/bin/osascript "$LINK_SCRIPT"
   }
 
-  LINK_BUNDLE="$TEST_ROOT/bundle/md-clip"
-  mkdir -p "$(dirname "$LINK_BUNDLE")"
-  printf 'bundle\n' > "$LINK_BUNDLE"
-
-  # Freies Ziel: Symlink wird angelegt.
-  mkdir -p "$TEST_ROOT/link-frei"
-  run_link "$LINK_BUNDLE" "$TEST_ROOT/link-frei/md-clip"
-  [ "$(readlink "$TEST_ROOT/link-frei/md-clip")" = "$LINK_BUNDLE" ]
-
-  # Toter Symlink: darf ersetzt werden.
-  mkdir -p "$TEST_ROOT/link-tot"
-  ln -s "$TEST_ROOT/link-tot/fehlt" "$TEST_ROOT/link-tot/md-clip"
-  run_link "$LINK_BUNDLE" "$TEST_ROOT/link-tot/md-clip"
-  [ "$(readlink "$TEST_ROOT/link-tot/md-clip")" = "$LINK_BUNDLE" ]
-
-  # Reguläre Datei: bleibt unangetastet, Befehl scheitert.
-  mkdir -p "$TEST_ROOT/link-datei"
-  printf 'fremd\n' > "$TEST_ROOT/link-datei/md-clip"
-  if run_link "$LINK_BUNDLE" "$TEST_ROOT/link-datei/md-clip" 2>/dev/null; then
-    echo "✗ Launcher ersetzt eine fremde Datei im privilegierten Schritt" >&2
+  # Beleg, dass die Nachbildung dem echten AppleScript entspricht — sonst
+  # prüfte die Linux-CI etwas anderes als das, was auf dem Mac wirklich läuft.
+  probe_real=$(link_command "/tmp/O'Neil/md-clip" "/tmp/Ziel mit Leerzeichen/md-clip")
+  probe_built=$(build_link_command "/tmp/O'Neil/md-clip" "/tmp/Ziel mit Leerzeichen/md-clip")
+  if [ "$probe_real" != "$probe_built" ]; then
+    echo "✗ Nachbildung des Launcher-Befehls weicht von osascript ab" >&2
+    echo "  osascript:  $probe_real" >&2
+    echo "  nachgebaut: $probe_built" >&2
     exit 1
   fi
-  grep -Fxq 'fremd' "$TEST_ROOT/link-datei/md-clip"
-
-  # Lebender fremder Symlink: bleibt unangetastet, Befehl scheitert.
-  mkdir -p "$TEST_ROOT/link-fremd"
-  printf 'fremd\n' > "$TEST_ROOT/link-fremd/anderes"
-  ln -s "$TEST_ROOT/link-fremd/anderes" "$TEST_ROOT/link-fremd/md-clip"
-  if run_link "$LINK_BUNDLE" "$TEST_ROOT/link-fremd/md-clip" 2>/dev/null; then
-    echo "✗ Launcher ersetzt einen lebenden fremden Symlink" >&2
-    exit 1
-  fi
-  [ "$(readlink "$TEST_ROOT/link-fremd/md-clip")" = "$TEST_ROOT/link-fremd/anderes" ]
-
-  echo "✓ Launcher verlinkt nur auf freies oder totes Ziel, nie mit -f"
+  echo "✓ Nachbildung des privilegierten Befehls ist zeichengleich zu osascript"
 else
-  echo "⊘ Launcher-Linkschritt übersprungen — osascript gibt es nur auf macOS"
+  link_command() {
+    build_link_command "$1" "$2"
+  }
+  echo "✓ Privilegierter Befehl aus dem geprüften Vertrag nachgebaut (kein osascript)"
 fi
+
+# Führt den erzeugten Befehl mit den übergebenen Pfaden aus.
+run_link() {
+  /bin/sh -c "$(link_command "$1" "$2")"
+}
+
+LINK_BUNDLE="$TEST_ROOT/bundle/md-clip"
+mkdir -p "$(dirname "$LINK_BUNDLE")"
+printf 'bundle\n' > "$LINK_BUNDLE"
+
+# Freies Ziel: Symlink wird angelegt.
+mkdir -p "$TEST_ROOT/link-frei"
+run_link "$LINK_BUNDLE" "$TEST_ROOT/link-frei/md-clip"
+[ "$(readlink "$TEST_ROOT/link-frei/md-clip")" = "$LINK_BUNDLE" ]
+
+# Toter Symlink: darf ersetzt werden.
+mkdir -p "$TEST_ROOT/link-tot"
+ln -s "$TEST_ROOT/link-tot/fehlt" "$TEST_ROOT/link-tot/md-clip"
+run_link "$LINK_BUNDLE" "$TEST_ROOT/link-tot/md-clip"
+[ "$(readlink "$TEST_ROOT/link-tot/md-clip")" = "$LINK_BUNDLE" ]
+
+# Reguläre Datei: bleibt unangetastet, Befehl scheitert.
+mkdir -p "$TEST_ROOT/link-datei"
+printf 'fremd\n' > "$TEST_ROOT/link-datei/md-clip"
+if run_link "$LINK_BUNDLE" "$TEST_ROOT/link-datei/md-clip" 2>/dev/null; then
+  echo "✗ Launcher ersetzt eine fremde Datei im privilegierten Schritt" >&2
+  exit 1
+fi
+grep -Fxq 'fremd' "$TEST_ROOT/link-datei/md-clip"
+
+# Lebender fremder Symlink: bleibt unangetastet, Befehl scheitert.
+mkdir -p "$TEST_ROOT/link-fremd"
+printf 'fremd\n' > "$TEST_ROOT/link-fremd/anderes"
+ln -s "$TEST_ROOT/link-fremd/anderes" "$TEST_ROOT/link-fremd/md-clip"
+if run_link "$LINK_BUNDLE" "$TEST_ROOT/link-fremd/md-clip" 2>/dev/null; then
+  echo "✗ Launcher ersetzt einen lebenden fremden Symlink" >&2
+  exit 1
+fi
+[ "$(readlink "$TEST_ROOT/link-fremd/md-clip")" = "$TEST_ROOT/link-fremd/anderes" ]
+
+echo "✓ Launcher verlinkt nur auf freies oder totes Ziel, nie mit -f"
 
 # --- Release: nur privater Mountpoint und von attach gemeldetes Device. ---
 RELEASE_SCRIPT="$PROJECT_ROOT/wrappers/sign-and-release.sh"
@@ -106,6 +161,24 @@ if grep -Eq 'hdiutil detach "/Volumes|hdiutil detach "\$MOUNT_DIR"|hdiutil detac
   exit 1
 fi
 echo "✓ Release-Skript löst ausschließlich das eigene attach-Device"
+
+# --- Release: das schreibbare Zwischen-Image hängt am Cleanup. ---
+# Es ist mehrere hundert MB groß und wurde früher erst im Erfolgsweg gelöscht;
+# jeder Abbruch davor ließ es liegen (Review-Fund 2026-08-05). Geprüft wird die
+# ganze Kette der Zuständigkeit: erst nach `hdiutil create` übernehmen, im
+# Cleanup nur bei ausgehängtem Device löschen, nach der regulären Löschung
+# wieder abgeben.
+grep -Fxq 'RW_DMG_OWNED=1' "$RELEASE_SCRIPT"
+grep -Fq 'if [ -n "$RW_DMG_OWNED" ] && [ -z "$MOUNT_DEVICE" ]; then' "$RELEASE_SCRIPT"
+# Die Übernahme muss NACH der Erzeugung stehen, sonst räumt der Cleanup ein
+# fremdes Image ab, das dort schon lag.
+CREATE_LINE=$(grep -n '^hdiutil create' "$RELEASE_SCRIPT" | head -1 | cut -d: -f1)
+OWNED_LINE=$(grep -n '^RW_DMG_OWNED=1$' "$RELEASE_SCRIPT" | head -1 | cut -d: -f1)
+if [ -z "$CREATE_LINE" ] || [ -z "$OWNED_LINE" ] || [ "$OWNED_LINE" -lt "$CREATE_LINE" ]; then
+  echo "✗ Zuständigkeit für das RW-Image wird nicht nach hdiutil create übernommen" >&2
+  exit 1
+fi
+echo "✓ Release-Skript räumt sein schreibbares Zwischen-Image auch bei Abbruch weg"
 
 # --- Release: die Plist-Vorlage muss wirklich eindeutige Pfade liefern. ---
 # Darwins mktemp ersetzt die X-Kette nur am ENDE der Vorlage. Stünde noch ein

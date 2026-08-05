@@ -71,6 +71,10 @@ BACKGROUND_SRC="$PROJECT_ROOT/assets/dmg-background.png"
 APP_VERSION=$(grep '^VERSION=' "$PROJECT_ROOT/bin/md-clip" | head -1 | cut -d'"' -f2)
 DMG_PATH="$BUILD_DIR/md-clip-${APP_VERSION}.dmg"
 RW_DMG_PATH="$BUILD_DIR/md-clip-${APP_VERSION}-rw.dmg"
+# Gesetzt, sobald hdiutil create das Image angelegt hat: nur dann darf die
+# Aufraeumroutine es loeschen. Vorher koennte dort noch das Image eines
+# frueheren Laufs liegen, das uns nicht gehoert.
+RW_DMG_OWNED=""
 
 echo "==> md-clip Sign-and-Release v${APP_VERSION}"
 
@@ -172,6 +176,18 @@ cleanup_release() {
   if [ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ]; then
     rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
     MOUNT_DIR=""
+  fi
+  # Das schreibbare Zwischen-Image ist mehrere hundert MB groß und wurde im
+  # regulären Weg erst nach der Konvertierung gelöscht — jeder Abbruch davor
+  # ließ es im Build-Verzeichnis liegen (Review-Fund 2026-08-05).
+  #
+  # ERST nach dem Aushängen: Solange oben ein Device hängt, ist die Datei die
+  # Unterlage dieses Mounts, und sie wegzuziehen hinterlässt ein kaputtes
+  # Volume statt aufzuräumen. Schlug das Detach fehl, steht MOUNT_DEVICE noch —
+  # dann bleibt auch das Image liegen, mitsamt der Warnung von oben.
+  if [ -n "$RW_DMG_OWNED" ] && [ -z "$MOUNT_DEVICE" ]; then
+    rm -f "$RW_DMG_PATH"
+    RW_DMG_OWNED=""
   fi
 }
 
@@ -300,6 +316,7 @@ hdiutil create \
   -format    UDRW \
   -size      "${DMG_SIZE_MB}m" \
   "$RW_DMG_PATH"
+RW_DMG_OWNED=1
 
 # Mounten. -nobrowse verhindert, dass das DMG im Finder als Fenster
 # aufspringt während wir noch am Layout arbeiten. Plist und Mountpoint
@@ -405,6 +422,7 @@ hdiutil convert "$RW_DMG_PATH" \
   -o "$DMG_PATH"
 
 rm -f "$RW_DMG_PATH"
+RW_DMG_OWNED=""
 
 # DMG selbst signieren. Sonst hängt Gatekeeper schon beim Download das
 # Quarantine-Bit ans DMG, und das DMG selbst meckert beim ersten Öffnen.
