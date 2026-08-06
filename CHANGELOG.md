@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.2.1 — unveröffentlicht
+## 1.2.1
+
+Veröffentlicht am 2026-08-06. Erstes Update, das eine installierte App
+(1.2.0) nachweislich selbst über Sparkle bezogen und eingespielt hat.
 
 - Die Erfolgsmeldung erscheint als kurzes Einblend-Fenster der App selbst
   („Markdown ist im Clipboard", unten mittig, blendet nach zwei Sekunden
