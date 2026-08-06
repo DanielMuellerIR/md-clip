@@ -2,13 +2,18 @@
 
 ## 1.2.1 — unveröffentlicht
 
-- Die Erfolgsmeldung der App erscheint als echte macOS-Mitteilung unter der
-  Identität „md-clip" mit eigenem Eintrag in den Mitteilungs-Einstellungen
-  (einmalige Erlaubnis-Nachfrage beim ersten Lauf). Bisher lief sie per
-  AppleScript unter „Skripteditor" — auf neueren macOS-Versionen wurden diese
-  Banner still unterdrückt, die Meldung kam nie an. Der AppleScript-Weg bleibt
-  nur als Fallback der git-Installation ohne App-Bundle; lehnt der Nutzer
-  Mitteilungen ab, wird das respektiert und nicht umgangen.
+- Die Erfolgsmeldung erscheint als kurzes Einblend-Fenster der App selbst
+  („Markdown ist im Clipboard", unten mittig, blendet nach zwei Sekunden
+  wieder aus), statt als Mitteilung des Notification Centers. Bisher lief die
+  Meldung per AppleScript unter der Identität „Skripteditor" und kam auf
+  neueren macOS-Versionen nie sichtbar an. Das Notification Center scheidet
+  grundsätzlich aus: macOS erfragt die nötige Erlaubnis nur nach einem
+  nutzerinitiierten Start, und eine Anfrage aus einem Automationskontext —
+  md-clips Normalfall (Dock-Klick-Kette, Hotkey, Skripte) — sperrt die App
+  dauerhaft und ohne Nachfrage. Das Einblend-Fenster braucht keine Erlaubnis,
+  stiehlt keinen Fokus und funktioniert in jedem Aufrufweg. Der
+  AppleScript-Weg bleibt nur als Fallback der git-Installation ohne
+  App-Bundle.
 
 ## 1.2.0
 

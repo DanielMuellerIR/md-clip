@@ -80,17 +80,18 @@
   gelegentlich fälschlich „No Keychain password item found", obwohl das Profil da
   ist (2026-07-26 belegt). Ein einzelner Fehlversuch würde einen kompletten
   Release-Lauf grundlos abbrechen — deshalb fünf Versuche.
-- **Mitteilungen unter eigener Identität:** Die Erfolgsmeldung der App macht
-  `helpers/md-clip-notifier.swift` über das UserNotifications-Framework — als
-  „md-clip" mit eigenem Eintrag in den Mitteilungs-Einstellungen. Der Helfer
-  ist im Bundle ein EIGENES kleines App-Bundle
-  (`Contents/Resources/md-clip-notifier.app`), kein nacktes Binary: Nur das
-  Haupt-Executable eines Bundles darf die Erlaubnis anfragen (UNErrorDomain 1
-  am 2026-08-06 belegt; dasselbe Muster wie Sparkles Updater.app und
-  terminal-notifier). Der osascript-Weg in `notify()` ist nur der Fallback der
-  git-Installation: macOS ordnet Skript-Meldungen dem „Skripteditor" zu und
-  unterdrückt deren Banner auf neueren Versionen still. Lehnt der Nutzer
-  Mitteilungen ab, wird das respektiert — kein Umweg über osascript.
+- **Erfolgsmeldung als HUD, nicht übers Notification Center.** Die App zeigt
+  „Markdown ist im Clipboard" über `helpers/md-clip-hud.swift` (im Bundle:
+  `Contents/MacOS/md-clip-hud`) als kurzes eigenes Einblend-Fenster — ohne
+  jede Erlaubnis-Mechanik. Zwei am 2026-08-06 auf macOS 26 belegte Gründe:
+  osascript-Meldungen laufen unter „Skripteditor"-Identität, und die
+  UserNotifications-Erlaubnis wird nur nach nutzerinitiiertem Start einer
+  gültig signierten App an einem ordentlichen Ort erfragt — kommt die Anfrage
+  je aus einem Automationskontext (Hotkey, Skript, CLI, Kind-Prozess), setzt
+  macOS die Bundle-ID still und ohne Reset-Weg auf „verweigert". Die ID
+  `io.github.danielmuellerir.md-clip.notifier` ist auf Daniels M3 genau so
+  verbrannt. Deshalb: kein UserNotifications-Anlauf ohne neues Konzept;
+  der osascript-Weg in `notify()` bleibt nur Fallback der git-Installation.
 - **Sparkle-Updates:** Die App aktualisiert sich über Sparkle (exakt gepinnt in
   `wrappers/build-app-bundled.sh`, Prüfsumme gegen den Homebrew-Cask
   gegenverifiziert). Weil die App nur ein Shell-Launcher ist, treibt der

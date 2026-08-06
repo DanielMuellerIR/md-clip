@@ -30,13 +30,8 @@ SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
 [ -f "$INFO_PLIST" ] || { echo "Info.plist fehlt im Bundle." >&2; exit 66; }
 [ -x "$LAUNCHER" ]   || { echo "Launcher fehlt im Bundle." >&2; exit 66; }
 [ -x "$UPDATER" ]    || { echo "Updater-Helfer fehlt im Bundle." >&2; exit 66; }
-NOTIFIER_APP="$APP/Contents/Resources/md-clip-notifier.app"
-[ -x "$NOTIFIER_APP/Contents/MacOS/md-clip-notifier" ] || {
-  echo "Mitteilungs-Helfer-App fehlt im Bundle." >&2
-  exit 66
-}
-[ -f "$NOTIFIER_APP/Contents/Info.plist" ] || {
-  echo "Info.plist der Mitteilungs-Helfer-App fehlt." >&2
+[ -x "$APP/Contents/MacOS/md-clip-hud" ] || {
+  echo "HUD-Helfer fehlt im Bundle." >&2
   exit 66
 }
 for tool in md-clip pipeline.sh pandoc clipboard-html clipboard-rtf; do
@@ -138,7 +133,7 @@ if [ "$SIGNED" -eq 1 ]; then
 
   verify_distribution_signature "$APP" "App"
   verify_distribution_signature "$UPDATER" "Updater-Helfer"
-  verify_distribution_signature "$NOTIFIER_APP" "Mitteilungs-Helfer"
+  verify_distribution_signature "$APP/Contents/MacOS/md-clip-hud" "HUD-Helfer"
   # Sparkle kommt fertig gebaut von außen und wird beim Signieren neu
   # gesiegelt. Diese Prüfung stellt sicher, dass die eigene Developer ID
   # wirklich auf Framework, Updater-App und Autoupdate liegt — sonst

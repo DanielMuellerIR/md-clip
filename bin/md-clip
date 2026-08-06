@@ -212,21 +212,17 @@ notify() {
   fi
 
   if [ "$PLATFORM" = "macos" ]; then
-    # Bundle-Layout: Der Mitteilungs-Helfer meldet unter der Identität der
-    # md-clip.app (eigener Eintrag in den Mitteilungs-Einstellungen, einmalige
-    # Erlaubnis-Nachfrage). Der osascript-Weg darunter läuft dagegen unter
-    # „Skripteditor" — auf neueren macOS-Versionen werden solche Banner still
-    # unterdrückt (Befund 2026-08-06). Er bleibt nur als Fallback für die
-    # git-Installation ohne App-Bundle. Lehnt der Nutzer Mitteilungen ab,
-    # beendet sich der Helfer mit Erfolg und es gibt bewusst KEINEN
-    # osascript-Fallback — die Ablehnung würde sonst umgangen.
-    # Der Helfer ist ein eigenes kleines App-Bundle unter Resources/ — nur das
-    # Haupt-Executable eines Bundles darf die Mitteilungs-Erlaubnis anfragen
-    # (direkt aufgerufen wie bei terminal-notifier, kein `open` nötig).
-    local notifier
-    notifier="$(cd -P "$SCRIPT_DIR/.." 2>/dev/null && pwd || true)/md-clip-notifier.app/Contents/MacOS/md-clip-notifier"
-    if [ -x "$notifier" ]; then
-      "$notifier" "$1" || true
+    # Bundle-Layout: Die Erfolgsmeldung zeigt der HUD-Helfer als kurzes
+    # Einblend-Fenster der App — ohne Erlaubnis-Mechanik des Notification
+    # Centers, die für md-clips Aufrufwege (Dock, Hotkey, Skript) nicht
+    # tragfähig ist (Begründung in helpers/md-clip-hud.swift). Entkoppelt
+    # gestartet: Das Ein-/Ausblenden dauert gut zwei Sekunden, und darauf
+    # soll weder die CLI noch der Launcher warten. Der osascript-Weg unten
+    # bleibt der Fallback der git-Installation ohne App-Bundle.
+    local hud
+    hud="$(cd -P "$SCRIPT_DIR/../../MacOS" 2>/dev/null && pwd || true)/md-clip-hud"
+    if [ -x "$hud" ]; then
+      "$hud" "$1" >/dev/null 2>&1 &
       return 0
     fi
     # Anführungszeichen und Backslashes im Meldungstext würden den AppleScript-
