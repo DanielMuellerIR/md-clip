@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.2 — unveröffentlicht
+## 1.2.2 — 2026-08-07
 
 Alle zehn Befunde des Code-Reviews vom 2026-08-06, jeder vor dem Fix am echten
 Code nachvollzogen. Die beiden Doku-Befunde stehen im letzten Punkt zusammen.

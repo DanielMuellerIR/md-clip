@@ -89,7 +89,7 @@
   gültig signierten App an einem ordentlichen Ort erfragt — kommt die Anfrage
   je aus einem Automationskontext (Hotkey, Skript, CLI, Kind-Prozess), setzt
   macOS die Bundle-ID still und ohne Reset-Weg auf „verweigert". Die ID
-  `io.github.danielmuellerir.md-clip.notifier` ist auf Daniels M3 genau so
+  `io.github.danielmuellerir.md-clip.notifier` ist auf dem Entwicklungs-Mac genau so
   verbrannt. Deshalb: kein UserNotifications-Anlauf ohne neues Konzept;
   der osascript-Weg in `notify()` bleibt nur Fallback der git-Installation.
 - **Sparkle-Updates:** Die App aktualisiert sich über Sparkle (exakt gepinnt in
