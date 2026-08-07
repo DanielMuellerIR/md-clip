@@ -62,17 +62,20 @@ jobs:
           # angeboten, und ein manueller Lauf fuer ein aelteres Tag nimmt das
           # aktuelle Update wieder aus dem Feed (Review-Fund 2026-08-06).
           release_json="$(gh release view "$RELEASE_TAG" \
-            --json isPrerelease,isDraft,isLatest)"
+            --json isPrerelease,isDraft)"
           prerelease="$(jq -r '.isPrerelease' <<<"$release_json")"
           draft="$(jq -r '.isDraft' <<<"$release_json")"
-          latest="$(jq -r '.isLatest' <<<"$release_json")"
+          # "Aktuelles stabiles Release" ueber die API pruefen statt ueber das
+          # gh-Feld isLatest: die gh-Version des Runners kennt das Feld nicht
+          # (belegt im fehlgeschlagenen Lauf zu v1.2.2 am 2026-08-07).
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
 
           if [[ "$prerelease" != "false" || "$draft" != "false" ]]; then
             echo "FEHLER: $RELEASE_TAG ist ein Prerelease oder Entwurf und gehoert nicht in den stabilen Feed." >&2
             exit 1
           fi
-          if [[ "$latest" != "true" ]]; then
-            echo "FEHLER: $RELEASE_TAG ist nicht das aktuelle stabile Release; der Feed wuerde zurueckfallen." >&2
+          if [[ "$latest_tag" != "$RELEASE_TAG" ]]; then
+            echo "FEHLER: $RELEASE_TAG ist nicht das aktuelle stabile Release ($latest_tag); der Feed wuerde zurueckfallen." >&2
             exit 1
           fi
 
