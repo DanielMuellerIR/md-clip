@@ -14,6 +14,8 @@ Pipe | und Raute # mitten im Satz
 
 Inline-Code: `\#` und `a\|b`
 
+Code mit Schluss-Backslash: `\#foo\`
+
 - \# keine Überschrift im Listenpunkt
 
 1.  \# auch hier keine Überschrift

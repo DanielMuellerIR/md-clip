@@ -91,23 +91,14 @@ case "$FEED_URL" in
 esac
 [ -n "$PUBLIC_KEY" ] || { echo "SUPublicEDKey fehlt in der Info.plist." >&2; exit 65; }
 
-# ---------- Versionsgleichheit ----------
-
-# Info.plist und eingebettete CLI müssen dieselbe Version melden — beide
-# stammen aus derselben Quelle (VERSION= in bin/md-clip), aber genau das
-# soll hier am Produkt belegt und nicht nur dem Build geglaubt werden.
-PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
-# Erst vollständig einlesen, dann die erste Zeile nehmen. `--version | head -1`
-# wäre unter `set -o pipefail` ein SIGPIPE-Abbruch (Exit 141): head schließt
-# die Pipe nach der ersten Zeile, während md-clip noch weiterschreibt.
-CLI_OUTPUT="$("$BUNDLED_CLI" --version)"
-CLI_VERSION="${CLI_OUTPUT%%$'\n'*}"
-if [ "$CLI_VERSION" != "md-clip $PLIST_VERSION" ]; then
-  echo "App- und CLI-Version stimmen nicht überein: '$CLI_VERSION' vs '$PLIST_VERSION'." >&2
-  exit 65
-fi
-
 # ---------- Signaturen ----------
+#
+# Dieser Abschnitt steht VOR der Versionsprüfung, und das ist der Punkt: Die
+# Versionsprüfung startet das Shell-Skript im übergebenen Bundle. Bei einem
+# fremden oder beschädigten Release-Artefakt liefe damit fremder Code, bevor
+# überhaupt feststeht, ob das Bundle vertrauenswürdig ist — die Prüfung würde
+# es hinterher zwar ablehnen, der Schaden wäre aber schon angerichtet
+# (Review-Fund 2026-08-06). Erst Vertrauensnachweis, dann Ausführung.
 
 if [ "$SIGNED" -eq 1 ]; then
   codesign --verify --deep --strict --verbose=2 "$APP"
@@ -142,6 +133,22 @@ if [ "$SIGNED" -eq 1 ]; then
   verify_distribution_signature "$SPARKLE_FRAMEWORK/Versions/B/Updater.app" "Sparkle-Updater"
   verify_distribution_signature "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate" "Sparkle-Autoupdate"
   verify_distribution_signature "$APP/Contents/Resources/bin/pandoc" "pandoc"
+fi
+
+# ---------- Versionsgleichheit ----------
+
+# Info.plist und eingebettete CLI müssen dieselbe Version melden — beide
+# stammen aus derselben Quelle (VERSION= in bin/md-clip), aber genau das
+# soll hier am Produkt belegt und nicht nur dem Build geglaubt werden.
+PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
+# Erst vollständig einlesen, dann die erste Zeile nehmen. `--version | head -1`
+# wäre unter `set -o pipefail` ein SIGPIPE-Abbruch (Exit 141): head schließt
+# die Pipe nach der ersten Zeile, während md-clip noch weiterschreibt.
+CLI_OUTPUT="$("$BUNDLED_CLI" --version)"
+CLI_VERSION="${CLI_OUTPUT%%$'\n'*}"
+if [ "$CLI_VERSION" != "md-clip $PLIST_VERSION" ]; then
+  echo "App- und CLI-Version stimmen nicht überein: '$CLI_VERSION' vs '$PLIST_VERSION'." >&2
+  exit 65
 fi
 
 echo "VERIFY OK: $APP ($PLIST_VERSION)"

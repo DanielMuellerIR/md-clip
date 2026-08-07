@@ -34,14 +34,47 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    # Der private Sparkle-Schluessel steht bewusst NICHT hier, sondern nur im
+    # Schritt, der signiert. Im Job-env laege er sonst in jedem Schritt offen —
+    # auch in Actions Dritter — und dasselbe Schluesselpaar signiert die Updates
+    # von drei Apps (Review-Fund 2026-08-06).
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
 
     steps:
+      # Ausgecheckt wird der Stand DES RELEASES, nicht der Branch, aus dem der
+      # Lauf gestartet wurde. Sonst verarbeitete ein manueller Lauf ein altes
+      # Release mit den Werkzeugen und Sparkle-Pins eines anderen Stands
+      # (Review-Fund 2026-08-06).
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Ensure the tag is the current stable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Der Feed traegt genau einen Eintrag (--maximum-versions 1) und wird
+          # bei jedem Lauf komplett ersetzt. Deshalb darf nur das aktuelle
+          # stabile Release hinein: Ein Prerelease wuerde stabilen Clients
+          # angeboten, und ein manueller Lauf fuer ein aelteres Tag nimmt das
+          # aktuelle Update wieder aus dem Feed (Review-Fund 2026-08-06).
+          release_json="$(gh release view "$RELEASE_TAG" \
+            --json isPrerelease,isDraft,isLatest)"
+          prerelease="$(jq -r '.isPrerelease' <<<"$release_json")"
+          draft="$(jq -r '.isDraft' <<<"$release_json")"
+          latest="$(jq -r '.isLatest' <<<"$release_json")"
+
+          if [[ "$prerelease" != "false" || "$draft" != "false" ]]; then
+            echo "FEHLER: $RELEASE_TAG ist ein Prerelease oder Entwurf und gehoert nicht in den stabilen Feed." >&2
+            exit 1
+          fi
+          if [[ "$latest" != "true" ]]; then
+            echo "FEHLER: $RELEASE_TAG ist nicht das aktuelle stabile Release; der Feed wuerde zurueckfallen." >&2
+            exit 1
+          fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
@@ -57,6 +90,20 @@ jobs:
           dmgs=(update/*.dmg)
           if (( ${#dmgs[@]} != 1 )); then
             echo "FEHLER: Release $RELEASE_TAG muss genau ein DMG enthalten." >&2
+            exit 1
+          fi
+
+          # Tag, DMG-Name und ausgecheckte Produktversion muessen dieselbe
+          # Version meinen — sonst signierte der Feed ein Archiv, das nicht zum
+          # ausgecheckten Quellstand gehoert.
+          version="${RELEASE_TAG#v}"
+          product_version="$(grep '^VERSION=' bin/md-clip | cut -d'"' -f2)"
+          if [[ "$product_version" != "$version" ]]; then
+            echo "FEHLER: bin/md-clip meldet $product_version, das Tag sagt $version." >&2
+            exit 1
+          fi
+          if [[ "$(basename "${dmgs[0]}")" != "md-clip-${version}.dmg" ]]; then
+            echo "FEHLER: DMG heisst $(basename "${dmgs[0]}"), erwartet war md-clip-${version}.dmg." >&2
             exit 1
           fi
 
@@ -88,6 +135,8 @@ jobs:
 
       - name: Generate signed appcast
         shell: bash
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then

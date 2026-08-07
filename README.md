@@ -122,7 +122,7 @@ Alle Optionen im Überblick:
 | `--plain` | `-p` | Keine Konvertierung, nur Klartext durchreichen |
 | `--from FORMAT` | `-f` | Eingabe erzwingen: `auto`, `html`, `rtf`, `plain` |
 | `--to FORMAT` | `-t` | Markdown-Dialekt: `gfm`, `markdown`, `commonmark` |
-| `--notify` | `-n` | Benachrichtigung bei Erfolg anzeigen (macOS: Mitteilungszentrale, Linux: `notify-send`) |
+| `--notify` | `-n` | Erfolgsmeldung anzeigen (macOS-App: kurzes Einblend-Fenster der App selbst; Quellinstallation ohne App-Bundle: Mitteilungszentrale; Linux: `notify-send`) |
 | `--quiet` | `-q` | Keine Statusmeldungen |
 | `--verbose` | `-V` | Diagnose-Ausgabe, welcher Pfad gewählt wurde |
 | `--version` | `-v` | Versionsnummer |

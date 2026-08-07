@@ -173,70 +173,82 @@ tidy_markdown() {
     # Inhalt: `` `\#` `` bedeutet dort wirklich Backslash-Raute, und wer den
     # Backslash entfernt, ändert den Code.
     #
-    # Dafür wird die Zeile an Backtick-Gruppen zerlegt. Ein Code-Span endet
-    # laut Markdown erst bei einer Backtick-Gruppe GLEICHER Länge; findet sich
-    # keine, war der Backtick gewöhnlicher Text und wird mitbehandelt.
-    # Zerlegt eine Zeile in Text- und Backtick-Gruppen — wie split(/(`+)/),
-    # aber ein MASKIERTER Backtick zählt nicht als Code-Grenze. pandoc schreibt
-    # einen wörtlichen Backtick als `\``; die alte Zerlegung hielt den Bereich
-    # dazwischen für Inline-Code und ließ das `\#` darin escaped stehen, obwohl
-    # es gewöhnlicher Fließtext war (Review-Fund 2026-08-05).
+    # Die Zeile wird dafür von links nach rechts gelesen, und die
+    # Backslash-Maskierung gilt dabei nur AUSSERHALB von Code:
     #
-    # Escape-PAARE überspringen, nicht einzelne Zeichen: sonst würde der zweite
-    # Backslash eines echten `\\` den folgenden Backtick fälschlich maskieren.
-    # Rückgabe wie bei split: gerade Indizes Text, ungerade Backtick-Gruppen.
-    sub split_code_delims {
-        my ($text) = @_;
-        my @parts  = (q{});
-        my $i      = 0;
-        my $len    = length $text;
+    #   * Außerhalb ist `` \` `` ein wörtlicher Backtick und beginnt keinen
+    #     Code-Span. Ohne diese Regel hielt die Funktion den Bereich dahinter
+    #     für Inline-Code und ließ ein `\#` darin escaped stehen, obwohl es
+    #     gewöhnlicher Fließtext war (Review-Fund 2026-08-05).
+    #   * Innerhalb eines Code-Spans hat der Backslash dagegen KEINE
+    #     Escape-Wirkung. Ein gleich langer Backtick-Lauf schließt den Span
+    #     deshalb auch dann, wenn direkt davor ein Backslash steht. Früher
+    #     verschluckte die Zerlegung diesen Abschluss, der Span blieb offen,
+    #     und sein Inhalt wurde als Fließtext entescapt — aus dem Code
+    #     `` `\#foo\` `` wurde `` `#foo\` `` (Review-Fund 2026-08-06).
+
+    # Sucht das Ende eines Code-Spans: den ersten Backtick-Lauf GLEICHER Länge
+    # ab $start. Läufe anderer Länge sind innerhalb des Spans gewöhnlicher
+    # Inhalt. Rückgabe: Index hinter dem schließenden Lauf — oder -1, wenn es
+    # keinen gibt; dann war der öffnende Lauf gar kein Code-Anfang, sondern
+    # selbst gewöhnlicher Text.
+    sub find_code_span_end {
+        my ($text, $start, $run_len) = @_;
+        my $len = length $text;
+        my $i   = $start;
 
         while ($i < $len) {
-            my $c = substr($text, $i, 1);
-            if ($c eq q{\\} && $i + 1 < $len) {
-                $parts[-1] .= substr($text, $i, 2);
-                $i += 2;
-            } elsif ($c eq q{`}) {
+            if (substr($text, $i, 1) eq q{`}) {
                 my ($run) = substr($text, $i) =~ /^(`+)/;
-                push @parts, $run, q{};
+                return $i + length($run) if length($run) == $run_len;
                 $i += length $run;
             } else {
-                $parts[-1] .= $c;
                 $i++;
             }
         }
-        return @parts;
+        return -1;
+    }
+
+    # Nimmt in gewöhnlichem Text die Backslashes vor `|` und `#` weg. Läuft
+    # über Escape-PAARE, nicht über einzelne Zeichen: sonst würde der zweite
+    # Backslash eines echten `\\` als Anfang eines neuen Escapes gelesen.
+    sub unescape_plain {
+        my ($text) = @_;
+        $text =~ s{\\(.)}{ ($1 eq q{|} || $1 eq q{#}) ? $1 : qq{\\$1} }gse;
+        return $text;
     }
 
     sub unescape_pipe_hash {
         my ($text) = @_;
-        my @parts = split_code_delims($text);   # gerade Indizes = Text
-        my $out   = q{};
+        my $out   = q{};   # fertiges Ergebnis
+        my $plain = q{};   # gesammelter Fließtext, noch nicht entescapt
         my $i     = 0;
+        my $len   = length $text;
 
-        while ($i <= $#parts) {
-            # Über Escape-PAARE laufen, nicht über einzelne Zeichen: sonst
-            # würde der zweite Backslash eines echten `\\` als Anfang eines
-            # neuen Escapes gelesen.
-            my $plain = $parts[$i];
-            $plain =~ s{\\(.)}{ ($1 eq q{|} || $1 eq q{#}) ? $1 : qq{\\$1} }gse;
-            $out .= $plain;
-            $i++;
-            last if $i > $#parts;
-
-            my $delim = $parts[$i];
-            my $close = $i + 2;
-            $close += 2 while $close <= $#parts && $parts[$close] ne $delim;
-            if ($close <= $#parts) {
-                $out .= join(q{}, @parts[$i .. $close]);   # Code bleibt roh
-                $i = $close + 1;
+        while ($i < $len) {
+            my $c = substr($text, $i, 1);
+            if ($c eq q{\\} && $i + 1 < $len) {
+                $plain .= substr($text, $i, 2);   # Escape-Paar am Stück
+                $i += 2;
+            } elsif ($c eq q{`}) {
+                my ($run) = substr($text, $i) =~ /^(`+)/;
+                my $end = find_code_span_end($text, $i + length($run), length($run));
+                if ($end < 0) {
+                    $plain .= $run;               # kein Abschluss: bloßer Text
+                    $i += length $run;
+                } else {
+                    $out .= unescape_plain($plain);
+                    $plain = q{};
+                    $out .= substr($text, $i, $end - $i);   # Code bleibt roh
+                    $i = $end;
+                }
             } else {
-                $out .= $delim;
+                $plain .= $c;
                 $i++;
             }
         }
 
-        return $out;
+        return $out . unescape_plain($plain);
     }
 
     # ---- Durchlauf 1: Code-Zeilen markieren ----
@@ -398,11 +410,18 @@ tidy_markdown() {
             # sind die Definitionslisten-Marker desselben Ziels — auch dort
             # wurde aus dem Text sonst eine Überschrift.
             #
+            # RÖMISCHE Marker sind mehrstellig: aus `<ol type="i" start="4">`
+            # schreibt pandoc beim Ziel `markdown` ein `iv.`. Ein einzelner
+            # Buchstabe deckt das nicht ab, und ohne den Marker fiel der
+            # Backslash weg — aus dem Listentext wurde wieder eine Überschrift
+            # (im AST belegt, Review-Fund 2026-08-06). Groß und klein getrennt,
+            # weil pandoc römische Zahlen nie mischt.
+            #
             # Im Zweifel lieber einen Marker zu viel erkennen: dann bleibt ein
             # überzähliger Backslash stehen (sichtbarer Schönheitsfehler), statt
             # dass sich die Dokumentstruktur ändert.
             my ($marker) =
-                $rest =~ /^((?:(?:[-*+:~]|\d{1,9}[.)]|[A-Za-z][.)])[ \t]+)+)/;
+                $rest =~ /^((?:(?:[-*+:~]|\d{1,9}[.)]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])[ \t]+)+)/;
             $marker = defined($marker) ? $marker : q{};
             my $tail = substr($rest, length($marker));
 

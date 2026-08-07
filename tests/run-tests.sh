@@ -166,18 +166,54 @@ run_test "empty-link (leerer Anker-Text → URL als Text)" \
 # Erwartungsdatei könnte macOS 3.9 und Ubuntu 3.1.3 nicht gleichzeitig erfüllen
 # (AGENTS: „Ein Fixture darf nichts festschreiben, was von der pandoc-Version
 # abhängt"). Geprüft wird deshalb nur das, was versionsunabhängig gelten muss:
-# Die Grafik darf nicht durch den nackten URL-Text ersetzt werden — genau das
-# tat fill_empty_html_links bis zum Review-Fund 2026-08-05.
+# Die Grafik muss als Markdown-Bild mit `data:image/svg+xml` IM Ziellink
+# stehen — genau das verlor fill_empty_html_links bis zum Review-Fund
+# 2026-08-05.
+#
+# Die Prüfung ist bewusst POSITIV formuliert. Vorher stand hier nur „Ergebnis
+# ist ungleich [https://ziel](https://ziel)"; eine leere Ausgabe oder ein
+# `[](https://ziel)` wäre damit als Erfolg durchgegangen, obwohl die Grafik
+# komplett fehlt (Review-Fund 2026-08-06).
+
+# svg_link_ok: Steht in der Ausgabe ein Bild mit SVG-Datenquelle, und liegt es
+# innerhalb des Ziellinks? Fixe Zeichenketten, kein Muster — die Base64-Bytes
+# des Bildes unterscheiden sich je pandoc-Version und dürfen hier nicht zählen.
+svg_link_ok() {
+  local out="$1"
+  printf '%s' "$out" | grep -qF '[![' \
+    && printf '%s' "$out" | grep -qF '](data:image/svg+xml' \
+    && printf '%s' "$out" | grep -qF ')](https://ziel)'
+}
+
 svg_actual=$(printf '%s' \
   '<a href="https://ziel"><svg viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg></a>' \
   | convert_html)
-if [ "$svg_actual" = '[https://ziel](https://ziel)' ]; then
-  echo "✗ svg-link (Anker um Inline-SVG)"
-  echo "  Die Grafik wurde durch den URL-Text ersetzt: $svg_actual"
-  FAILED=$((FAILED + 1))
-else
+if svg_link_ok "$svg_actual"; then
   echo "✓ svg-link (Inline-SVG im Anker bleibt erhalten)"
   PASSED=$((PASSED + 1))
+else
+  echo "✗ svg-link (Anker um Inline-SVG)"
+  echo "  Kein SVG-Bild im Ziellink: $svg_actual"
+  FAILED=$((FAILED + 1))
+fi
+TOTAL=$((TOTAL + 1))
+
+# Gegenprobe auf die Prüfung selbst: Drei grafiklose Ausgaben — leer, nackter
+# URL-Text, leerer Linktext — müssen alle abgelehnt werden. Ohne diesen Schritt
+# könnte die Zusicherung oben unbemerkt wieder verwässern.
+svg_negative_ok=1
+for svg_bad in '' '[https://ziel](https://ziel)' '[](https://ziel)'; do
+  if svg_link_ok "$svg_bad"; then
+    svg_negative_ok=0
+    echo "  Grafiklose Ausgabe fälschlich akzeptiert: '$svg_bad'"
+  fi
+done
+if [ "$svg_negative_ok" -eq 1 ]; then
+  echo "✓ svg-link-negativkontrolle (grafiklose Ausgabe fällt durch)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ svg-link-negativkontrolle"
+  FAILED=$((FAILED + 1))
 fi
 TOTAL=$((TOTAL + 1))
 
@@ -253,10 +289,49 @@ run_test "code-blocks (Backslash in Code bleibt Code)" \
 # aber nur an einer Stelle — `|` in einer Tabellenzeile, `#` am Zeilenanfang.
 # Der Test pinnt beide Seiten: im Fließtext fällt der Backslash weg, in der
 # Tabellenzeile und vor der Zeilenanfangs-Raute bleibt er stehen.
+#
+# Die Zeile „Code mit Schluss-Backslash" sichert den Sonderfall aus dem
+# Review-Fund 2026-08-06: Endet Inline-Code auf einen Backslash, schließt der
+# folgende Backtick den Code trotzdem. Vorher galt er als maskiert, der Span
+# blieb offen, und aus `` `\#foo\` `` wurde `` `#foo\` `` — verändertes Code.
 actual=$(convert_html < "$FIXTURES/escaped-markers.html")
 run_test "escaped-markers (überzählige Backslashes weg)" \
   "$actual" \
   "$FIXTURES/escaped-markers.expected.md"
+
+# --- Test 10b: römisch nummerierte Liste beim Ziel `markdown` ---
+# `md-clip --to markdown` schaltet pandocs Fancy Lists frei; aus
+# `<ol type="i" start="4">` wird dort der MEHRSTELLIGE Marker `iv.`. Erkennt
+# die Escape-Regel ihn nicht, fällt der Backslash vor der Raute weg und aus dem
+# Listentext wird eine Überschrift erster Ebene (Review-Fund 2026-08-06).
+#
+# Geprüft wird nicht der Text, sondern die STRUKTUR: Das Ergebnis wird erneut
+# von pandoc gelesen und darf keinen Header enthalten. Das ist unabhängig davon,
+# wie eine pandoc-Version den Marker genau setzt — anders als eine
+# Erwartungsdatei, die den Marker festschreiben müsste.
+roman_input='<ol type="i" start="4"><li># tief</li></ol>'
+roman_actual=$(
+  PANDOC_OPTS=(-f html -t markdown-raw_html --wrap=none)
+  printf '%s' "$roman_input" | convert_html
+)
+roman_ast=$(printf '%s\n' "$roman_actual" | pandoc -f markdown -t native)
+
+# Gegenprobe: Genau die kaputte Ausgabe muss im AST als Header auftauchen —
+# sonst prüfte der Test oben etwas, das gar nicht schiefgehen kann.
+roman_broken_ast=$(printf 'iv. # tief\n' | pandoc -f markdown -t native)
+
+TOTAL=$((TOTAL + 1))
+if printf '%s' "$roman_ast" | grep -q 'OrderedList' \
+  && ! printf '%s' "$roman_ast" | grep -q 'Header' \
+  && printf '%s' "$roman_broken_ast" | grep -q 'Header'; then
+  echo "✓ roman-list-marker (mehrstelliger Marker schützt die Raute)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ roman-list-marker (mehrstelliger Marker schützt die Raute)"
+  echo "  Ergebnis: $roman_actual"
+  printf '%s\n' "$roman_ast" | sed 's/^/    /'
+  FAILED=$((FAILED + 1))
+fi
 
 echo
 echo "==> Clipboard-Roundtrip-Tests"

@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.2.2 — unveröffentlicht
+
+Alle zehn Befunde des Code-Reviews vom 2026-08-06, jeder vor dem Fix am echten
+Code nachvollzogen. Die beiden Doku-Befunde stehen im letzten Punkt zusammen.
+
+- Inline-Code, der auf einen Backslash endet, bleibt unverändert. Der
+  schließende Backtick galt bisher als maskiert, der Code-Span blieb offen und
+  sein Inhalt wurde wie Fließtext aufgeräumt: Aus `` `\#foo\` `` wurde
+  `` `#foo\` ``, der Code hatte also einen anderen Inhalt als vorher.
+- Römisch nummerierte Listen (`--to markdown`, `<ol type="i">`) behalten ihre
+  Struktur. Der mehrstellige Marker `iv.` wurde nicht als Listenmarker erkannt,
+  dadurch fiel der Schutz-Backslash vor der Raute weg und aus dem Listentext
+  wurde eine Überschrift erster Ebene.
+- Nach einem Update startet die App sich nicht mehr selbst neu. Sparkles
+  Standard-Neustart löste eine Konvertierung aus und ersetzte damit ungefragt
+  den Clipboard-Inhalt — auch dann, wenn während Dialog oder Download etwas
+  anderes kopiert worden war.
+- `wrappers/verify-bundle.sh` prüft im Modus `--signed` erst alle Signaturen
+  und startet danach das Skript im Bundle. Bisher lief die Versionsabfrage
+  zuerst; ein manipuliertes fremdes Bundle konnte damit Code ausführen, bevor
+  überhaupt feststand, ob es vertrauenswürdig ist.
+- Der Appcast-Workflow gibt den privaten Signierschlüssel nur noch dem Schritt,
+  der signiert, statt allen Schritten des Jobs. Dasselbe Schlüsselpaar signiert
+  die Updates von drei Apps.
+- Der Appcast-Workflow veröffentlicht nur noch das aktuelle stabile Release:
+  Prereleases, Entwürfe und ältere, von Hand gewählte Tags werden abgelehnt.
+  Vorher hätte ein Prerelease stabilen Clients angeboten werden können, und ein
+  manueller Lauf für ein altes Tag hätte das aktuelle Update aus dem Feed
+  genommen.
+- Der Appcast-Workflow checkt den Stand des Releases aus statt des Branches,
+  aus dem er gestartet wurde, und prüft vor dem Veröffentlichen, dass Tag,
+  DMG-Dateiname und Produktversion dieselbe Version meinen.
+- Der SVG-Test prüft jetzt positiv, dass ein Bild mit `data:image/svg+xml` im
+  Ziellink steht — mit Gegenprobe. Vorher genügte ihm jede Ausgabe außer einer
+  bestimmten; eine leere Ausgabe wäre als Erfolg durchgegangen.
+- Dokumentation: `--notify` beschreibt das Einblend-Fenster der App und die
+  Mitteilungszentrale der Quellinstallation getrennt; AGENTS und der
+  Build-Kommentar nennen den HUD-Helfer als zweite Cocoa-Laufzeit im Bundle.
+
 ## 1.2.1
 
 Veröffentlicht am 2026-08-06. Erstes Update, das eine installierte App

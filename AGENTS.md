@@ -96,8 +96,14 @@
   `wrappers/build-app-bundled.sh`, Prüfsumme gegen den Homebrew-Cask
   gegenverifiziert). Weil die App nur ein Shell-Launcher ist, treibt der
   kompilierte Helfer `helpers/md-clip-updater.swift` (im Bundle:
-  `Contents/MacOS/md-clip-updater`) Sparkle an — er ist die einzige
-  Cocoa-Laufzeit der App. Signiert wird zentral über `wrappers/sign-bundle.sh`
+  `Contents/MacOS/md-clip-updater`) Sparkle an — er ist die Sparkle-Laufzeit
+  der App. Cocoa-basiert ist er damit nicht allein: `helpers/md-clip-hud.swift`
+  importiert ebenfalls AppKit und startet eine `NSApplication`. Wer Signatur,
+  Laufzeit oder Kompatibilität prüft, muss beide Helfer ansehen. Nach einem
+  Update startet Sparkle die App bewusst NICHT neu (Delegate-Methode
+  `updaterShouldRelaunchApplication` im Updater): Jeder Start der App führt
+  sofort `md-clip --replace` aus und ersetzte damit ungefragt das Clipboard.
+  Signiert wird zentral über `wrappers/sign-bundle.sh`
   (innen nach außen, ohne `--deep`), geprüft über `wrappers/verify-bundle.sh`.
   Das Ed25519-Schlüsselpaar ist bewusst dasselbe wie bei Poor Man's Text und
   Fastra; eine Rotation betrifft alle drei Apps. Nach jedem GitHub-Release

@@ -17,10 +17,9 @@
 //                  Wird von `md-clip --check-updates` aufgerufen.
 //
 // Installiert wird ausschließlich nach Zustimmung im Sparkle-Dialog
-// (SUAllowsAutomaticUpdates ist in der Info.plist abgeschaltet). Nach
-// „Install and Relaunch" startet macOS die App neu — der Launcher führt dann
-// wie bei jedem Start eine Konvertierung aus; das Clipboard enthält zu dem
-// Zeitpunkt bereits Markdown, der Lauf ist also praktisch folgenlos.
+// (SUAllowsAutomaticUpdates ist in der Info.plist abgeschaltet). Nach dem
+// Einspielen startet Sparkle die Host-App normalerweise neu — hier bewusst
+// nicht, siehe updaterShouldRelaunchApplication(_:) unten.
 
 import AppKit
 import Sparkle
@@ -91,6 +90,18 @@ final class UpdaterCoordinator: NSObject, SPUUpdaterDelegate, SPUStandardUserDri
         // überspringen, später erinnern). Bei einer Installation übernimmt
         // ab hier Sparkles Autoupdate-Programm; dieser Prozess kann weg.
         DispatchQueue.main.async { NSApp.terminate(nil) }
+    }
+
+    /// Kein Neustart der App nach dem Einspielen. md-clip.app ist eine
+    /// Einweg-App: Jeder Start führt sofort `md-clip --replace --notify` aus
+    /// (siehe wrappers/launcher.sh) und ersetzt damit den Clipboard-Inhalt.
+    /// Sparkles Standard-Neustart würde also eine Konvertierung auslösen, die
+    /// niemand beauftragt hat — und die kann echten Inhalt überschreiben, wenn
+    /// der Nutzer während Dialog oder Download etwas anderes kopiert hat
+    /// (Review-Fund 2026-08-06). Die neue Fassung startet beim nächsten
+    /// Dock-Klick oder Hotkey ganz normal.
+    func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool {
+        return false
     }
 
     func updater(

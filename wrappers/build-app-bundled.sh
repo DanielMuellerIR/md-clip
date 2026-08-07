@@ -156,10 +156,12 @@ codesign --verify --deep --strict "$SPARKLE_STAGE/Sparkle.framework"
 test -s "$SPARKLE_STAGE/LICENSE"
 
 echo "==> Kompiliere md-clip-updater"
-# Der Updater-Helfer ist die einzige Cocoa-Laufzeit der App: Er treibt
-# Sparkle an (siehe helpers/md-clip-updater.swift). Gelinkt wird gegen das
-# frisch entpackte Framework; zur Laufzeit findet er es über den rpath im
-# Bundle unter Contents/Frameworks.
+# Der Updater-Helfer ist die Sparkle-Laufzeit der App: Er treibt Sparkle an
+# (siehe helpers/md-clip-updater.swift). Der zweite Cocoa-Helfer im Bundle ist
+# md-clip-hud, der die Erfolgsmeldung zeigt — beide gehören in Signatur- und
+# Kompatibilitätsprüfungen. Gelinkt wird gegen das frisch entpackte Framework;
+# zur Laufzeit findet der Updater es über den rpath im Bundle unter
+# Contents/Frameworks.
 swiftc -target "arm64-apple-macos${MIN_MACOS}" \
   -F "$SPARKLE_STAGE" \
   "$PROJECT_ROOT/helpers/md-clip-updater.swift" \
