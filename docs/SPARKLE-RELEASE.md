@@ -38,9 +38,10 @@ kompilierte Helfer `Contents/MacOS/md-clip-updater`
 - `md-clip --check-updates` startet ihn sichtbar (`--interactive`), inklusive
   „Sie sind aktuell“-Meldung. Das ist das Gegenstück zum Menüpunkt
   „Check for Updates…“ in Poor Man's Text — die md-clip.app hat kein Menü.
-- Nach „Install and Relaunch“ startet macOS die App neu; der Launcher führt
-  dann wie bei jedem Start eine Konvertierung aus. Das Clipboard enthält zu
-  dem Zeitpunkt bereits Markdown, der Lauf ist also praktisch folgenlos.
+- Nach der Installation startet Sparkle die App bewusst nicht neu. Ein
+  automatischer Neustart würde den Launcher und damit ungefragt eine neue
+  Clipboard-Konvertierung auslösen. Die neue Fassung läuft erst beim nächsten
+  ausdrücklichen Dock-Klick, Hotkey- oder CLI-Aufruf.
 
 ## Was im Projekt dazugehört
 
@@ -60,20 +61,30 @@ kompilierte Helfer `Contents/MacOS/md-clip-updater`
   Schlüssel, Versionsgleichheit — und mit `--signed` alle Signaturen.
 - `helpers/md-clip-updater.swift` hält den einen Updater-Prozess; die
   Delegate-Methoden beenden ihn, sobald nichts mehr zu tun ist.
-- `.github/workflows/publish-appcast.yml` erzeugt nach jedem Release den
-  signierten Feed und veröffentlicht ihn über GitHub Pages.
+- `.github/workflows/request-appcast.yml` reagiert ohne Secret auf das Release.
+  Erst sein Abschluss startet `.github/workflows/publish-appcast.yml` per
+  `workflow_run` aus dem vertrauenswürdigen Default-Branch. Dieser zweite
+  Workflow erzeugt den signierten Feed und veröffentlicht ihn über GitHub
+  Pages. Downloader, Sparkle-Pins und Generator kommen dabei aus einer
+  festgelegten, vertrauenswürdigen Tooling-Revision; der Release-Tag liefert
+  nur Version, DMG und Release Notes. Vor der Veröffentlichung muss der Feed
+  genau einen Eintrag enthalten, dessen beide Versionsfelder und URL zum Tag
+  passen.
 
 ## Einmalige GitHub-Einrichtung
 
 1. In den Repository-Einstellungen unter **Pages** als Quelle
-   **GitHub Actions** wählen. Das Environment `github-pages` muss neben dem
-   Branch `main` auch Tags vom Typ `v*` zulassen, weil der automatische Lauf
-   auf dem veröffentlichten Release-Tag startet.
-2. Den privaten Schlüssel als Actions-Secret `SPARKLE_PRIVATE_KEY`
-   hinterlegen. Sparkles `generate_keys -x` exportiert ihn vorübergehend in
-   eine lokale Datei; `gh secret set SPARKLE_PRIVATE_KEY < datei` liest sie
-   über stdin. Die Datei danach sicher entfernen. Den Schlüssel nie auf
-   stdout ausgeben.
+   **GitHub Actions** wählen. Das Environment `github-pages` darf nur den
+   geschützten Default-Branch `main` zulassen. Der unprivilegierte
+   Release-Dispatcher läuft aus dem Tag und darf dieses Environment nicht
+   betreten.
+2. Den privaten Schlüssel als **Environment-Secret** `SPARKLE_PRIVATE_KEY` im
+   Environment `github-pages` hinterlegen, nicht als Repository-Secret. Ein
+   früher dort hinterlegtes Repository-Secret anschließend entfernen, damit
+   kein Workflow aus einem Release-Tag darauf zugreifen kann. Sparkles
+   `generate_keys -x` exportiert den Schlüssel vorübergehend in eine lokale
+   Datei; beim Einfügen nie auf stdout ausgeben und die Datei danach sicher
+   entfernen.
 3. Der Schlüssel ist derselbe wie bei Poor Man's Text und Fastra und dort
    bereits verschlüsselt gesichert. Geht er verloren, ist eine kontrollierte
    Rotation über Developer-ID-signierte DMGs nötig — für alle drei Apps
@@ -89,13 +100,17 @@ kompilierte Helfer `Contents/MacOS/md-clip-updater`
 3. Tag und GitHub-Release mit genau einem DMG anlegen. Die Release Notes sind
    der Text, den Sparkle später im Update-Dialog anzeigt; erst danach
    veröffentlichen.
-4. `.github/workflows/publish-appcast.yml` erzeugt mit Sparkles
-   `generate_appcast` den signierten Feed und veröffentlicht ihn über GitHub
-   Pages.
+4. `.github/workflows/request-appcast.yml` stößt ohne Secret den
+   vertrauenswürdigen `.github/workflows/publish-appcast.yml` im Default-Branch
+   an. Dieser erzeugt mit Sparkles `generate_appcast` den signierten Feed und
+   veröffentlicht ihn über GitHub Pages.
 5. Workflow und Feed prüfen. Eine ältere, bereits Sparkle-fähige und
-   notarisiert installierte Version muss das Release finden, installieren und
-   neu starten.
+   notarisiert installierte Version muss das Release finden und installieren,
+   ohne md-clip automatisch neu zu starten. Beim nächsten ausdrücklichen Start
+   muss die neue Version laufen.
 
-Der Workflow kann für ein bestehendes Tag manuell gestartet werden. Er
-erwartet genau ein `*.dmg`; der Feed enthält nur das aktuelle Vollupdate und
-keine Deltas.
+Der manuelle Workflow ist ausschließlich der Wiederholungslauf für das
+aktuelle stabile Release, etwa wenn dessen automatischer Appcast-Lauf
+fehlgeschlagen ist. Ein älteres Tag, Prerelease oder Entwurf wird abgelehnt.
+Das Release muss genau ein `*.dmg` enthalten; der Feed enthält nur das aktuelle
+Vollupdate und keine Deltas.

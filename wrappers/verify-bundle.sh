@@ -24,6 +24,9 @@ LAUNCHER="$APP/Contents/MacOS/md-clip"
 UPDATER="$APP/Contents/MacOS/md-clip-updater"
 BUNDLED_CLI="$APP/Contents/Resources/bin/md-clip"
 SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=verify-bundle-trust.sh
+source "$SCRIPT_DIR/verify-bundle-trust.sh"
 
 # ---------- Struktur ----------
 
@@ -101,22 +104,28 @@ esac
 # (Review-Fund 2026-08-06). Erst Vertrauensnachweis, dann Ausführung.
 
 if [ "$SIGNED" -eq 1 ]; then
-  codesign --verify --deep --strict --verbose=2 "$APP"
+  # Diese Pruefung bindet das Bundle vor jeder Ausfuehrung seines eingebetteten
+  # CLI-Skripts an Apples Developer-ID-Kette, unsere Team-ID und die Bundle-ID.
+  verify_signed_bundle_trust "$APP"
 
   verify_distribution_signature() {
     local executable="$1"
     local label="$2"
     local signature_details
     signature_details="$(codesign -d --verbose=4 "$executable" 2>&1)"
-    if ! printf '%s\n' "$signature_details" | grep -q 'flags=.*runtime'; then
+    if ! grep -q 'flags=.*runtime' <<<"$signature_details"; then
       echo "Hardened Runtime fehlt in der $label-Signatur." >&2
       exit 65
     fi
-    if ! printf '%s\n' "$signature_details" | grep -q '^Authority=Developer ID Application:'; then
+    if ! grep -q '^Authority=Developer ID Application:' <<<"$signature_details"; then
       echo "Developer-ID-Application-Autorität fehlt in der $label-Signatur." >&2
       exit 65
     fi
-    if ! printf '%s\n' "$signature_details" | grep -q '^Timestamp='; then
+    if ! grep -q "^TeamIdentifier=$EXPECTED_TEAM_ID$" <<<"$signature_details"; then
+      echo "Unerwartete Team-ID in der $label-Signatur." >&2
+      exit 65
+    fi
+    if ! grep -q '^Timestamp=' <<<"$signature_details"; then
       echo "Sicherer Zeitstempel fehlt in der $label-Signatur." >&2
       exit 65
     fi
@@ -133,19 +142,28 @@ if [ "$SIGNED" -eq 1 ]; then
   verify_distribution_signature "$SPARKLE_FRAMEWORK/Versions/B/Updater.app" "Sparkle-Updater"
   verify_distribution_signature "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate" "Sparkle-Autoupdate"
   verify_distribution_signature "$APP/Contents/Resources/bin/pandoc" "pandoc"
+else
+  # Lokale, unsignierte Builds koennen keine Apple-Vertrauenskette belegen.
+  # Ihre Bundle-ID wird trotzdem als Strukturvertrag geprueft; Produktcode
+  # fuehren wir in diesem Pfad nicht aus.
+  verify_bundle_identifier "$APP"
 fi
 
 # ---------- Versionsgleichheit ----------
 
-# Info.plist und eingebettete CLI müssen dieselbe Version melden — beide
-# stammen aus derselben Quelle (VERSION= in bin/md-clip), aber genau das
-# soll hier am Produkt belegt und nicht nur dem Build geglaubt werden.
+# Info.plist und eingebettete CLI müssen dieselbe Version melden. Ein signiertes
+# Release darf die CLI dafuer ausfuehren, weil seine Vertrauenskette oben schon
+# feststeht. Beim unsignierten Build wird VERSION nur als Quelldatum gelesen.
 PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
-# Erst vollständig einlesen, dann die erste Zeile nehmen. `--version | head -1`
-# wäre unter `set -o pipefail` ein SIGPIPE-Abbruch (Exit 141): head schließt
-# die Pipe nach der ersten Zeile, während md-clip noch weiterschreibt.
-CLI_OUTPUT="$("$BUNDLED_CLI" --version)"
-CLI_VERSION="${CLI_OUTPUT%%$'\n'*}"
+if [ "$SIGNED" -eq 1 ]; then
+  # Erst vollständig einlesen, dann die erste Zeile nehmen. `--version | head`
+  # würde unter pipefail den Produktstatus verlieren oder SIGPIPE erzeugen.
+  CLI_OUTPUT="$("$BUNDLED_CLI" --version)"
+  CLI_VERSION="${CLI_OUTPUT%%$'\n'*}"
+else
+  CLI_SOURCE_VERSION="$(awk -F'"' '/^VERSION=/{print $2; exit}' "$BUNDLED_CLI")"
+  CLI_VERSION="md-clip $CLI_SOURCE_VERSION"
+fi
 if [ "$CLI_VERSION" != "md-clip $PLIST_VERSION" ]; then
   echo "App- und CLI-Version stimmen nicht überein: '$CLI_VERSION' vs '$PLIST_VERSION'." >&2
   exit 65

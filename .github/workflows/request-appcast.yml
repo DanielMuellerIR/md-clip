@@ -1,0 +1,20 @@
+# Unprivilegierter Ausloeser fuer den eigentlichen Appcast-Workflow.
+# Release-Workflows stammen aus dem Release-Tag und duerfen deshalb weder das
+# Sparkle-Secret noch das github-pages-Environment erhalten. Der nachgelagerte
+# workflow_run laeuft dagegen aus dem Default-Branch.
+name: Request Sparkle appcast
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request trusted appcast run
+        run: echo "Das stabile Release wird vom vertrauenswuerdigen Appcast-Workflow verarbeitet."

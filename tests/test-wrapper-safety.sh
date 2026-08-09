@@ -326,3 +326,303 @@ if [ "$NEXT_AFTER_CALL" != "return0" ]; then
   exit 1
 fi
 echo "✓ notify() zeigt das HUD entkoppelt, osascript nur ohne Bundle-Helfer"
+
+# --- Appcast: Tooling und Release-Tag bleiben getrennte Vertrauenszonen. ---
+APPCAST_WORKFLOW="$PROJECT_ROOT/.github/workflows/publish-appcast.yml"
+APPCAST_REQUEST_WORKFLOW="$PROJECT_ROOT/.github/workflows/request-appcast.yml"
+grep -Fq 'workflow_run:' "$APPCAST_WORKFLOW"
+grep -Fq "github.ref_name == github.event.repository.default_branch" "$APPCAST_WORKFLOW"
+grep -Fq 'release:' "$APPCAST_REQUEST_WORKFLOW"
+grep -Fq 'permissions:' "$APPCAST_REQUEST_WORKFLOW"
+grep -Fq 'contents: read' "$APPCAST_REQUEST_WORKFLOW"
+if grep -Eq 'SPARKLE_PRIVATE_KEY|environment:|pages: write|id-token: write' "$APPCAST_REQUEST_WORKFLOW"; then
+  echo "✗ Unprivilegierter Release-Dispatcher besitzt Secret- oder Deployment-Zugriff" >&2
+  exit 1
+fi
+if grep -Fq 'release:' "$APPCAST_WORKFLOW"; then
+  echo "✗ Privilegierter Appcast-Workflow wird weiterhin aus dem Release-Tag geladen" >&2
+  exit 1
+fi
+TOOLING_SHA="3946c521914dff93e92b1603647c1d763357fb44"
+grep -Fq "ref: $TOOLING_SHA" "$APPCAST_WORKFLOW"
+grep -Fq "!= \"$TOOLING_SHA\"" "$APPCAST_WORKFLOW"
+if grep -Fq 'TOOLING_REVISION' "$APPCAST_WORKFLOW"; then
+  echo "✗ Tooling-SHA bleibt über die Umgebung überschreibbar" >&2
+  exit 1
+fi
+
+# Der echte Auswahlblock aus dem Workflow läuft mit einer gh-Attrappe. Nur ein
+# strikt validiertes API-Ergebnis darf genau eine Zeile in GITHUB_ENV schreiben;
+# manuelle Eingaben sind lediglich eine zu bestätigende Erwartung.
+TAG_SELECTOR="$TEST_ROOT/release-tag-selector.sh"
+awk '
+  /# BEGIN RELEASE_TAG_SELECTOR/ { capture=1; next }
+  /# END RELEASE_TAG_SELECTOR/ { capture=0 }
+  capture { sub(/^          /, ""); print }
+' "$APPCAST_WORKFLOW" > "$TAG_SELECTOR"
+bash -n "$TAG_SELECTOR"
+# shellcheck source=/dev/null
+source "$TAG_SELECTOR"
+
+TAG_FAKE_BIN="$TEST_ROOT/tag-fake-bin"
+mkdir -p "$TAG_FAKE_BIN"
+cat > "$TAG_FAKE_BIN/gh" <<'SH'
+#!/bin/sh
+printf '%s\n' "$MD_CLIP_FAKE_LATEST_TAG"
+SH
+chmod +x "$TAG_FAKE_BIN/gh"
+PATH="$TAG_FAKE_BIN:$PATH"
+export PATH
+export GITHUB_REPOSITORY="DanielMuellerIR/md-clip"
+export GITHUB_ENV="$TEST_ROOT/github-env"
+export MD_CLIP_FAKE_LATEST_TAG="v1.2.2"
+
+: > "$GITHUB_ENV"
+GITHUB_EVENT_NAME="workflow_dispatch"
+export GITHUB_EVENT_NAME
+select_release_tag "v1.2.2"
+[ "$(cat "$GITHUB_ENV")" = "RELEASE_TAG=v1.2.2" ]
+
+expect_tag_rejected_without_env() {
+  local label="$1"
+  local requested_tag="$2"
+  : > "$GITHUB_ENV"
+  if select_release_tag "$requested_tag" \
+    >"$TEST_ROOT/tag-${label}.out" 2>"$TEST_ROOT/tag-${label}.err"; then
+    echo "✗ Release-Tag-Auswahl akzeptiert $label" >&2
+    exit 1
+  fi
+  if [ -s "$GITHUB_ENV" ]; then
+    echo "✗ Release-Tag-Auswahl schreibt vor der Ablehnung von $label in GITHUB_ENV" >&2
+    exit 1
+  fi
+}
+
+expect_tag_rejected_without_env \
+  "Tooling-Newline-Injection" \
+  $'v1.2.2\nTOOLING_REVISION=refs/tags/angreifer'
+expect_tag_rejected_without_env \
+  "Release-Tag-Newline-Injection" \
+  $'v1.2.2\nRELEASE_TAG=v9.9.9'
+expect_tag_rejected_without_env "ungueltiges Tagformat" "refs/tags/v1.2.2"
+expect_tag_rejected_without_env "altes stabiles Tag" "v1.2.1"
+
+GITHUB_EVENT_NAME="workflow_run"
+export GITHUB_EVENT_NAME
+MD_CLIP_FAKE_LATEST_TAG=$'v1.2.2\nTOOLING_REVISION=refs/tags/angreifer'
+export MD_CLIP_FAKE_LATEST_TAG
+expect_tag_rejected_without_env "mehrzeiliges API-Tag" ""
+MD_CLIP_FAKE_LATEST_TAG="v1.2.2"
+export MD_CLIP_FAKE_LATEST_TAG
+: > "$GITHUB_ENV"
+select_release_tag ""
+[ "$(cat "$GITHUB_ENV")" = "RELEASE_TAG=v1.2.2" ]
+echo "✓ Release-Tag-Auswahl blockiert Newline-Überschreibungen vor GITHUB_ENV"
+
+TOOLING_CHECKOUT_LINE=$(grep -n -- '- name: Check out trusted appcast tooling' "$APPCAST_WORKFLOW" | cut -d: -f1)
+RELEASE_CHECKOUT_LINE=$(grep -n -- '- name: Check out release data' "$APPCAST_WORKFLOW" | cut -d: -f1)
+SECRET_STEP_LINE=$(grep -n -- '- name: Generate and verify signed appcast' "$APPCAST_WORKFLOW" | cut -d: -f1)
+if [ "$TOOLING_CHECKOUT_LINE" -ge "$RELEASE_CHECKOUT_LINE" ] \
+   || [ "$RELEASE_CHECKOUT_LINE" -ge "$SECRET_STEP_LINE" ]; then
+  echo "✗ Appcast-Workflow trennt Tooling, Release-Daten und Secret nicht in dieser Reihenfolge" >&2
+  exit 1
+fi
+
+FETCH_BLOCK=$(sed -n '/- name: Fetch pinned Sparkle tool without secret/,/- name: Generate and verify signed appcast/p' "$APPCAST_WORKFLOW")
+grep -Fq 'tooling/wrappers/build-app-bundled.sh' <<<"$FETCH_BLOCK"
+grep -Fq 'source tooling/wrappers/verified-cache.sh' <<<"$FETCH_BLOCK"
+if grep -Eq 'release-source/(wrappers|\.github)|source release-source' <<<"$FETCH_BLOCK"; then
+  echo "✗ Appcast-Tooling stammt weiterhin aus dem Release-Tag" >&2
+  exit 1
+fi
+
+SIGNING_BLOCK=$(sed -n '/- name: Generate and verify signed appcast/,/- name: Upload Pages artifact/p' "$APPCAST_WORKFLOW")
+grep -Fq '"$APPCAST_WORK/sparkle-dist/bin/generate_appcast"' <<<"$SIGNING_BLOCK"
+if grep -Fq 'release-source/wrappers' <<<"$SIGNING_BLOCK"; then
+  echo "✗ Signierschritt führt ein Werkzeug aus dem Release-Tag aus" >&2
+  exit 1
+fi
+echo "✓ Appcast-Tooling kommt fest gepinnt aus einer vom Release-Tag getrennten Revision"
+
+# Die folgende Funktion ist der echte Validator aus dem Workflow. Wir ziehen
+# genau diesen Block heraus und testen ihn mit einer xmllint-Attrappe; weder
+# GitHub noch ein DMG oder ein Sparkle-Schlüssel werden dabei berührt.
+APPCAST_VALIDATOR="$TEST_ROOT/appcast-validator.sh"
+awk '
+  /# BEGIN APPCAST_METADATA_VALIDATOR/ { capture=1; next }
+  /# END APPCAST_METADATA_VALIDATOR/ { capture=0 }
+  capture { sub(/^          /, ""); print }
+' "$APPCAST_WORKFLOW" > "$APPCAST_VALIDATOR"
+bash -n "$APPCAST_VALIDATOR"
+# shellcheck source=/dev/null
+source "$APPCAST_VALIDATOR"
+
+APPCAST_FAKE_BIN="$TEST_ROOT/appcast-fake-bin"
+mkdir -p "$APPCAST_FAKE_BIN"
+cat > "$APPCAST_FAKE_BIN/xmllint" <<'SH'
+#!/bin/sh
+if [ "$1" = "--noout" ]; then
+  [ "${MD_CLIP_XML_VALID:-1}" = "1" ]
+  exit
+fi
+expression="$2"
+case "$expression" in
+  'count('*'local-name()="item"'*'local-name()="enclosure"'*) printf '%s' "$MD_CLIP_XML_ENCLOSURES" ;;
+  'count('*'local-name()="item"'*) printf '%s' "$MD_CLIP_XML_ITEMS" ;;
+  *'local-name()="shortVersionString"'*) printf '%s' "$MD_CLIP_XML_SHORT_VERSION" ;;
+  *'local-name()="version"'*) printf '%s' "$MD_CLIP_XML_VERSION" ;;
+  *'/@url)'*) printf '%s' "$MD_CLIP_XML_URL" ;;
+  *) echo "unbekannter XPath: $expression" >&2; exit 64 ;;
+esac
+SH
+chmod +x "$APPCAST_FAKE_BIN/xmllint"
+PATH="$APPCAST_FAKE_BIN:$PATH"
+export PATH
+
+APPCAST_DUMMY="$TEST_ROOT/appcast.xml"
+EXPECTED_APPCAST_URL="https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg"
+: > "$APPCAST_DUMMY"
+export MD_CLIP_XML_VALID=1
+export MD_CLIP_XML_ITEMS=1
+export MD_CLIP_XML_ENCLOSURES=1
+export MD_CLIP_XML_VERSION=1.2.2
+export MD_CLIP_XML_SHORT_VERSION=1.2.2
+export MD_CLIP_XML_URL="$EXPECTED_APPCAST_URL"
+validate_appcast "$APPCAST_DUMMY" 1.2.2 1.2.2 "$EXPECTED_APPCAST_URL"
+
+expect_appcast_rejected() {
+  local label="$1"
+  if validate_appcast "$APPCAST_DUMMY" 1.2.2 1.2.2 "$EXPECTED_APPCAST_URL" \
+    >"$TEST_ROOT/appcast-${label}.out" 2>"$TEST_ROOT/appcast-${label}.err"; then
+    echo "✗ Appcast-Validator akzeptiert $label" >&2
+    exit 1
+  fi
+}
+
+MD_CLIP_XML_ITEMS=2
+expect_appcast_rejected "mehrere Einträge"
+MD_CLIP_XML_ITEMS=1
+MD_CLIP_XML_ENCLOSURES=2
+expect_appcast_rejected "mehrere Enclosures"
+MD_CLIP_XML_ENCLOSURES=1
+MD_CLIP_XML_VERSION=1.2.1
+expect_appcast_rejected "falsche Build-Version"
+MD_CLIP_XML_VERSION=1.2.2
+MD_CLIP_XML_SHORT_VERSION=1.2.1
+expect_appcast_rejected "falsche Kurzversion"
+MD_CLIP_XML_SHORT_VERSION=1.2.2
+MD_CLIP_XML_URL="https://invalid.example/md-clip-1.2.2.dmg"
+expect_appcast_rejected "falsche Enclosure-URL"
+echo "✓ Appcast verlangt genau einen passenden Eintrag mit Versionen und Release-URL"
+
+# --- Bundle: Apple-Kette, Team-ID und Bundle-ID vor Produktcode. ---
+TRUST_HELPER="$PROJECT_ROOT/wrappers/verify-bundle-trust.sh"
+VERIFY_BUNDLE="$PROJECT_ROOT/wrappers/verify-bundle.sh"
+TRUST_TEST_ROOT="$TEST_ROOT/bundle-trust"
+mkdir -p "$TRUST_TEST_ROOT/App.app/Contents" "$TRUST_TEST_ROOT/fake-bin"
+: > "$TRUST_TEST_ROOT/App.app/Contents/Info.plist"
+
+cat > "$TRUST_TEST_ROOT/fake-bin/PlistBuddy" <<'SH'
+#!/bin/sh
+printf '%s\n' "$MD_CLIP_FAKE_BUNDLE_ID"
+SH
+cat > "$TRUST_TEST_ROOT/fake-bin/codesign" <<'SH'
+#!/bin/sh
+if [ "$1" = "--verify" ]; then
+  printf '%s\n' "$@" > "$MD_CLIP_CODESIGN_CAPTURE"
+  test_requirement=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --test-requirement|-R)
+        shift
+        test_requirement="${1:-}"
+        ;;
+    esac
+    shift
+  done
+  # Ohne den wertenden Schalter muss schon der Positivtest rot werden. Das
+  # haette den wirkungslosen alten Aufruf mit --requirements erkannt.
+  [ -n "$test_requirement" ] || exit 64
+  required_identifier="identifier \"$MD_CLIP_FAKE_SIGNED_BUNDLE_ID\""
+  required_team="certificate leaf[subject.OU] = \"$MD_CLIP_FAKE_TEAM_ID\""
+  case "$test_requirement" in
+    =*"$required_identifier"*"$required_team"*) exit 0 ;;
+    *) exit 3 ;;
+  esac
+fi
+printf 'details\n' >> "$MD_CLIP_CODESIGN_DETAIL_CAPTURE"
+cat <<EOF
+Executable=$1
+Identifier=$MD_CLIP_FAKE_SIGNED_BUNDLE_ID
+Format=app bundle with Mach-O thin
+CodeDirectory v=20500 size=1 flags=0x10000(runtime)
+Authority=Developer ID Application: Test ($MD_CLIP_FAKE_TEAM_ID)
+TeamIdentifier=$MD_CLIP_FAKE_TEAM_ID
+Timestamp=2026-08-10 00:00:00 +0000
+EOF
+SH
+chmod +x "$TRUST_TEST_ROOT/fake-bin/"*
+
+export MD_CLIP_CODESIGN_CAPTURE="$TRUST_TEST_ROOT/codesign-verify.args"
+export MD_CLIP_CODESIGN_DETAIL_CAPTURE="$TRUST_TEST_ROOT/codesign-details.calls"
+export MD_CLIP_FAKE_BUNDLE_ID="io.github.danielmuellerir.md-clip"
+export MD_CLIP_FAKE_SIGNED_BUNDLE_ID="io.github.danielmuellerir.md-clip"
+export MD_CLIP_FAKE_TEAM_ID="9QSWKSR4NQ"
+# shellcheck source=../wrappers/verify-bundle-trust.sh
+source "$TRUST_HELPER"
+verify_signed_bundle_trust \
+  "$TRUST_TEST_ROOT/App.app" \
+  "$TRUST_TEST_ROOT/fake-bin/PlistBuddy" \
+  "$TRUST_TEST_ROOT/fake-bin/codesign"
+grep -Fxq -- '--test-requirement' "$MD_CLIP_CODESIGN_CAPTURE"
+grep -Fxq '=anchor apple generic and identifier "io.github.danielmuellerir.md-clip" and certificate leaf[subject.OU] = "9QSWKSR4NQ" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate 1[field.1.2.840.113635.100.6.2.6] exists' "$MD_CLIP_CODESIGN_CAPTURE"
+if grep -Fxq -- '--requirements' "$MD_CLIP_CODESIGN_CAPTURE"; then
+  echo "✗ Bundle-Vertrauen verwendet den wirkungslosen codesign-Schalter --requirements" >&2
+  exit 1
+fi
+
+# Plist-ID ist korrekt, die simulierte Signatur trägt aber eine fremde ID:
+# Die Requirement-Prüfung selbst muss mit Exit 3 abbrechen, bevor `codesign -d`
+# als nachträglicher Texttest läuft.
+: > "$MD_CLIP_CODESIGN_DETAIL_CAPTURE"
+MD_CLIP_FAKE_SIGNED_BUNDLE_ID="invalid.example.fremd-signiert"
+if verify_signed_bundle_trust \
+  "$TRUST_TEST_ROOT/App.app" \
+  "$TRUST_TEST_ROOT/fake-bin/PlistBuddy" \
+  "$TRUST_TEST_ROOT/fake-bin/codesign" >/dev/null 2>&1; then
+  echo "✗ Bundle-Requirement akzeptiert eine fremde signierte Kennung" >&2
+  exit 1
+fi
+[ ! -s "$MD_CLIP_CODESIGN_DETAIL_CAPTURE" ]
+echo "✓ Bundle-Requirement lehnt eine fremde signierte Kennung direkt ab"
+MD_CLIP_FAKE_SIGNED_BUNDLE_ID="io.github.danielmuellerir.md-clip"
+
+rm -f "$MD_CLIP_CODESIGN_CAPTURE"
+MD_CLIP_FAKE_BUNDLE_ID="invalid.example.fremd"
+if verify_signed_bundle_trust \
+  "$TRUST_TEST_ROOT/App.app" \
+  "$TRUST_TEST_ROOT/fake-bin/PlistBuddy" \
+  "$TRUST_TEST_ROOT/fake-bin/codesign" >/dev/null 2>&1; then
+  echo "✗ Bundle-Vertrauen akzeptiert eine fremde Bundle-ID" >&2
+  exit 1
+fi
+[ ! -e "$MD_CLIP_CODESIGN_CAPTURE" ]
+
+MD_CLIP_FAKE_BUNDLE_ID="io.github.danielmuellerir.md-clip"
+MD_CLIP_FAKE_TEAM_ID="ANDERETEAM"
+if verify_signed_bundle_trust \
+  "$TRUST_TEST_ROOT/App.app" \
+  "$TRUST_TEST_ROOT/fake-bin/PlistBuddy" \
+  "$TRUST_TEST_ROOT/fake-bin/codesign" >/dev/null 2>&1; then
+  echo "✗ Bundle-Vertrauen akzeptiert eine fremde Team-ID" >&2
+  exit 1
+fi
+
+TRUST_CALL_LINE=$(grep -n 'verify_signed_bundle_trust "\$APP"' "$VERIFY_BUNDLE" | cut -d: -f1)
+PRODUCT_EXEC_LINE=$(grep -n 'CLI_OUTPUT="\$("\$BUNDLED_CLI" --version)"' "$VERIFY_BUNDLE" | cut -d: -f1)
+if [ -z "$TRUST_CALL_LINE" ] || [ -z "$PRODUCT_EXEC_LINE" ] \
+   || [ "$TRUST_CALL_LINE" -ge "$PRODUCT_EXEC_LINE" ]; then
+  echo "✗ Bundle-Vertrauen steht nicht vor der Produktausführung" >&2
+  exit 1
+fi
+echo "✓ Bundle wird vor Produktcode an Apple-Kette, Team-ID und Bundle-ID gebunden"
