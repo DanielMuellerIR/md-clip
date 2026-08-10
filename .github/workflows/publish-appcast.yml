@@ -237,16 +237,25 @@ jobs:
           expected_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/md-clip-${version}.dmg"
 
           # Der Schluessel steht weder in argv noch in einer Datei oder im Log.
-          printf '%s' "$sparkle_private_key" | "$APPCAST_WORK/sparkle-dist/bin/generate_appcast" \
-            --ed-key-file - \
-            --embed-release-notes \
-            --maximum-versions 1 \
-            --maximum-deltas 0 \
-            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/" \
-            --link "https://github.com/${GITHUB_REPOSITORY}" \
-            -o "$APPCAST_WORK/site/appcast.xml" \
-            "$APPCAST_WORK/update"
+          generator_log="$APPCAST_WORK/generate-appcast.log"
+          if ! printf '%s' "$sparkle_private_key" \
+            | "$APPCAST_WORK/sparkle-dist/bin/generate_appcast" \
+              --ed-key-file - \
+              --embed-release-notes \
+              --maximum-versions 1 \
+              --maximum-deltas 0 \
+              --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/" \
+              --link "https://github.com/${GITHUB_REPOSITORY}" \
+              -o "$APPCAST_WORK/site/appcast.xml" \
+              "$APPCAST_WORK/update" \
+              2> >(tee "$generator_log" >&2); then
+            exit 1
+          fi
           unset sparkle_private_key
+          if grep -Fq 'does not match key EdDSA' "$generator_log"; then
+            echo "FEHLER: SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel der App." >&2
+            exit 1
+          fi
 
           # BEGIN APPCAST_METADATA_VALIDATOR
           validate_appcast() {
@@ -256,13 +265,15 @@ jobs:
             local expected_enclosure_url="$4"
             local item_xpath='/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"]'
             local enclosure_xpath="${item_xpath}/*[local-name()=\"enclosure\"]"
+            local version_xpath="${item_xpath}/*[local-name()=\"version\"]"
+            local short_version_xpath="${item_xpath}/*[local-name()=\"shortVersionString\"]"
             local item_count enclosure_count feed_version feed_short_version feed_url
 
             xmllint --noout "$appcast_file"
             item_count="$(xmllint --xpath "count(${item_xpath})" "$appcast_file")"
             enclosure_count="$(xmllint --xpath "count(${enclosure_xpath})" "$appcast_file")"
-            feed_version="$(xmllint --xpath "string(${enclosure_xpath}/@*[local-name()=\"version\"])" "$appcast_file")"
-            feed_short_version="$(xmllint --xpath "string(${enclosure_xpath}/@*[local-name()=\"shortVersionString\"])" "$appcast_file")"
+            feed_version="$(xmllint --xpath "string(${version_xpath})" "$appcast_file")"
+            feed_short_version="$(xmllint --xpath "string(${short_version_xpath})" "$appcast_file")"
             feed_url="$(xmllint --xpath "string(${enclosure_xpath}/@url)" "$appcast_file")"
 
             if [[ "$item_count" != "1" || "$enclosure_count" != "1" ]]; then

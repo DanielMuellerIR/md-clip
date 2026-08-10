@@ -467,6 +467,27 @@ bash -n "$APPCAST_VALIDATOR"
 # shellcheck source=/dev/null
 source "$APPCAST_VALIDATOR"
 
+# Echte Sparkle-Appcasts tragen beide Versionswerte als Kindelemente des
+# Items, nicht als Attribute des Enclosures. Der reale xmllint-Lauf verhindert,
+# dass die Attrappen unten einen falschen XPath versehentlich grün machen.
+APPCAST_REAL="$TEST_ROOT/appcast-real.xml"
+cat > "$APPCAST_REAL" <<'XML'
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <item>
+      <sparkle:version>1.2.2</sparkle:version>
+      <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
+      <enclosure url="https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg"/>
+    </item>
+  </channel>
+</rss>
+XML
+validate_appcast \
+  "$APPCAST_REAL" \
+  1.2.2 \
+  1.2.2 \
+  "https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg"
+
 APPCAST_FAKE_BIN="$TEST_ROOT/appcast-fake-bin"
 mkdir -p "$APPCAST_FAKE_BIN"
 cat > "$APPCAST_FAKE_BIN/xmllint" <<'SH'
@@ -524,6 +545,11 @@ MD_CLIP_XML_SHORT_VERSION=1.2.2
 MD_CLIP_XML_URL="https://invalid.example/md-clip-1.2.2.dmg"
 expect_appcast_rejected "falsche Enclosure-URL"
 echo "✓ Appcast verlangt genau einen passenden Eintrag mit Versionen und Release-URL"
+
+SIGNING_BLOCK=$(sed -n '/- name: Generate and verify signed appcast/,/- name: Upload Pages artifact/p' "$APPCAST_WORKFLOW")
+grep -Fq "does not match key EdDSA" <<<"$SIGNING_BLOCK"
+grep -Fq "SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel" <<<"$SIGNING_BLOCK"
+echo "✓ Appcast bricht bei einem nicht zur App passenden Sparkle-Schlüssel ab"
 
 # --- Bundle: Apple-Kette, Team-ID und Bundle-ID vor Produktcode. ---
 TRUST_HELPER="$PROJECT_ROOT/wrappers/verify-bundle-trust.sh"
