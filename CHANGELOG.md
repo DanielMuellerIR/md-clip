@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.3 — 2026-08-10
+
+Diese Version schließt die fünf Befunde des Code-Reviews vom 2026-08-09 und
+härtet den Weg vom GitHub-Release bis zum signierten Sparkle-Feed.
+
+- Der privilegierte Appcast-Lauf stammt jetzt immer aus dem Default-Branch.
+  Ein Release-Tag löst nur noch einen unprivilegierten Dispatcher aus und kann
+  weder ausführbaren Workflow-Code noch das Sparkle-Secret liefern.
+- Downloader, Sparkle-Pins und Feed-Generator kommen aus einem fest
+  eingetragenen, geprüften Tooling-Commit. Tag-Eingaben werden vor jeder
+  Weitergabe streng als einzeiliges stabiles `vMAJOR.MINOR.PATCH` geprüft.
+- Vor dem Start der mitgelieferten CLI prüft der Bundle-Guard Apples
+  Signaturkette, Team-ID und Bundle-ID als gemeinsame Designated Requirement.
+  Eine bloß gültige fremde Signatur genügt nicht mehr.
+- Der Feed wird nur veröffentlicht, wenn er genau einen Eintrag und ein Archiv
+  enthält und beide Versionsfelder sowie die Download-URL zum aktuellen
+  stabilen Release passen.
+- Die Release-Dokumentation stellt klar, dass ein Update md-clip nicht
+  automatisch neu startet und ein manueller Appcast-Lauf ausschließlich das
+  aktuelle stabile Release wiederholen darf.
+
 ## 1.2.2 — 2026-08-07
 
 Alle zehn Befunde des Code-Reviews vom 2026-08-06, jeder vor dem Fix am echten
