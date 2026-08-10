@@ -469,9 +469,14 @@ source "$APPCAST_VALIDATOR"
 
 # Echte Sparkle-Appcasts tragen beide Versionswerte als Kindelemente des
 # Items, nicht als Attribute des Enclosures. Der reale xmllint-Lauf verhindert,
-# dass die Attrappen unten einen falschen XPath versehentlich grün machen.
-APPCAST_REAL="$TEST_ROOT/appcast-real.xml"
-cat > "$APPCAST_REAL" <<'XML'
+# dass die Attrappen unten einen falschen XPath versehentlich grün machen. Auf
+# Linux ist xmllint nicht Teil des CI-Images; dort bleibt die exakte
+# Strukturprüfung des extrahierten Produktionscodes verbindlich.
+grep -Fq 'local version_xpath="${item_xpath}/*[local-name()=\"version\"]"' "$APPCAST_VALIDATOR"
+grep -Fq 'local short_version_xpath="${item_xpath}/*[local-name()=\"shortVersionString\"]"' "$APPCAST_VALIDATOR"
+if command -v xmllint >/dev/null 2>&1; then
+  APPCAST_REAL="$TEST_ROOT/appcast-real.xml"
+  cat > "$APPCAST_REAL" <<'XML'
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
     <item>
@@ -482,11 +487,12 @@ cat > "$APPCAST_REAL" <<'XML'
   </channel>
 </rss>
 XML
-validate_appcast \
-  "$APPCAST_REAL" \
-  1.2.2 \
-  1.2.2 \
-  "https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg"
+  validate_appcast \
+    "$APPCAST_REAL" \
+    1.2.2 \
+    1.2.2 \
+    "https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg"
+fi
 
 APPCAST_FAKE_BIN="$TEST_ROOT/appcast-fake-bin"
 mkdir -p "$APPCAST_FAKE_BIN"
