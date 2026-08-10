@@ -356,6 +356,10 @@ if grep -Fq 'APPCAST_WORK: ${{ runner.temp }}' "$APPCAST_WORKFLOW"; then
 fi
 grep -Fq 'APPCAST_WORK=$RUNNER_TEMP/md-clip-appcast' "$APPCAST_WORKFLOW"
 grep -Fq 'path: ${{ runner.temp }}/md-clip-appcast/site' "$APPCAST_WORKFLOW"
+if [ "$(grep -Fc -- '-R "$GITHUB_REPOSITORY"' "$APPCAST_WORKFLOW")" -ne 3 ]; then
+  echo "✗ Release-Abfragen sind nicht alle explizit an das Repository gebunden" >&2
+  exit 1
+fi
 
 # Der echte Auswahlblock aus dem Workflow läuft mit einer gh-Attrappe. Nur ein
 # strikt validiertes API-Ergebnis darf genau eine Zeile in GITHUB_ENV schreiben;

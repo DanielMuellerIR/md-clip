@@ -146,6 +146,7 @@ jobs:
           # ersetzt. Ein Prerelease oder aelteres Tag wuerde den stabilen Feed
           # deshalb unbrauchbar machen.
           release_state="$(gh release view "$RELEASE_TAG" \
+            -R "$GITHUB_REPOSITORY" \
             --json isPrerelease,isDraft \
             --jq '[.isPrerelease, .isDraft] | @tsv')"
           IFS=$'\t' read -r prerelease draft <<< "$release_state"
@@ -168,7 +169,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$APPCAST_WORK/update" "$APPCAST_WORK/site"
-          gh release download "$RELEASE_TAG" --pattern '*.dmg' --dir "$APPCAST_WORK/update"
+          gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" \
+            --pattern '*.dmg' --dir "$APPCAST_WORK/update"
 
           shopt -s nullglob
           dmgs=("$APPCAST_WORK"/update/*.dmg)
@@ -190,7 +192,8 @@ jobs:
             exit 1
           fi
 
-          gh release view "$RELEASE_TAG" --json body --jq .body > "${dmgs[0]%.dmg}.md"
+          gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" \
+            --json body --jq .body > "${dmgs[0]%.dmg}.md"
 
       - name: Fetch pinned Sparkle tool without secret
         shell: bash
