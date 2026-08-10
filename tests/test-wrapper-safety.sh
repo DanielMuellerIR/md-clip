@@ -350,6 +350,12 @@ if grep -Fq 'TOOLING_REVISION' "$APPCAST_WORKFLOW"; then
   echo "✗ Tooling-SHA bleibt über die Umgebung überschreibbar" >&2
   exit 1
 fi
+if grep -Fq 'APPCAST_WORK: ${{ runner.temp }}' "$APPCAST_WORKFLOW"; then
+  echo "✗ runner.temp steht im jobweiten env und macht den Workflow ungültig" >&2
+  exit 1
+fi
+grep -Fq 'APPCAST_WORK=$RUNNER_TEMP/md-clip-appcast' "$APPCAST_WORKFLOW"
+grep -Fq 'path: ${{ runner.temp }}/md-clip-appcast/site' "$APPCAST_WORKFLOW"
 
 # Der echte Auswahlblock aus dem Workflow läuft mit einer gh-Attrappe. Nur ein
 # strikt validiertes API-Ergebnis darf genau eine Zeile in GITHUB_ENV schreiben;

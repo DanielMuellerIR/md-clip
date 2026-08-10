@@ -42,7 +42,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     env:
       GH_TOKEN: ${{ github.token }}
-      APPCAST_WORK: ${{ runner.temp }}/md-clip-appcast
 
     steps:
       - name: Select current stable release
@@ -102,6 +101,9 @@ jobs:
           # END RELEASE_TAG_SELECTOR
 
           select_release_tag "${REQUESTED_TAG:-}"
+          # runner.temp ist erst innerhalb eines laufenden Schritts verfügbar,
+          # nicht beim Auflösen des jobweiten env-Blocks.
+          printf '%s\n' "APPCAST_WORK=$RUNNER_TEMP/md-clip-appcast" >> "$GITHUB_ENV"
 
       # Alle fremden Actions sind unveraenderlich an Commit-SHAs gebunden.
       # Dieser SHA ist absichtlich ein Literal statt einer Environment-Variable:
@@ -284,7 +286,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
-          path: ${{ env.APPCAST_WORK }}/site
+          path: ${{ runner.temp }}/md-clip-appcast/site
 
       - name: Publish appcast on GitHub Pages
         id: deployment
