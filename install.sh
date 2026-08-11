@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Setup für md-clip auf macOS und Linux.
+# install.sh — CLI direkt aus diesem Git-Clone einrichten (macOS und Linux).
 #
 # Was passiert hier:
 #   1. Prüfen, dass die Abhängigkeiten da sind (plattformabhängig).
@@ -57,12 +57,52 @@ else
   INSTALL_PREFIX="${INSTALL_PREFIX:-$HOME/.local/bin}"
 fi
 INSTALL_TARGET="$INSTALL_PREFIX/md-clip"
+ABS_MAIN="$SCRIPT_DIR/$MAIN_SCRIPT"
 
-echo "==> md-clip installieren"
+# Vor allen Abhängigkeitsprüfungen erklären, wenn die CLI bereits über die App
+# eingerichtet ist. App-Nutzer brauchen weder System-pandoc noch Swift-Helper;
+# ein später Fehler dazu würde den eigentlichen Sachverhalt verschleiern.
+check_install_target() {
+  if [ -L "$INSTALL_TARGET" ]; then
+    CURRENT_TARGET=$(readlink "$INSTALL_TARGET")
+    if [ "$CURRENT_TARGET" != "$ABS_MAIN" ] && [ -e "$INSTALL_TARGET" ]; then
+      case "$CURRENT_TARGET" in
+        */md-clip.app/Contents/Resources/bin/md-clip)
+          echo "ABBRUCH: md-clip ist bereits über die installierte App eingerichtet:"
+          echo "         $INSTALL_TARGET → $CURRENT_TARGET"
+          echo
+          echo "         ./install.sh ist nur für die CLI direkt aus diesem Git-Clone gedacht"
+          echo "         und wird für die App oder Sparkle-Updates nicht benötigt."
+          echo
+          echo "         App jetzt manuell auf Updates prüfen:"
+          echo "           md-clip --check-updates"
+          echo
+          echo "         Ziel bleibt unverändert."
+          ;;
+        *)
+          echo "FEHLER: Der Befehl md-clip gehört bereits zu einer anderen Installation:"
+          echo "        $INSTALL_TARGET → $CURRENT_TARGET"
+          echo "        Ziel bleibt unverändert."
+          ;;
+      esac
+      exit 2
+    fi
+  elif [ -e "$INSTALL_TARGET" ]; then
+    echo "FEHLER: Installationsziel ist bereits eine Datei oder ein Verzeichnis:"
+    echo "        $INSTALL_TARGET"
+    echo "        Ziel bleibt unverändert."
+    exit 2
+  fi
+}
+
+echo "==> md-clip-CLI direkt aus dem Git-Clone installieren"
 echo "    Projekt:   $SCRIPT_DIR"
 echo "    Plattform: $PLATFORM"
 echo "    Ziel:      $INSTALL_TARGET"
+echo "    App:       wird von diesem Skript nicht installiert"
 echo
+
+check_install_target
 
 # --- 1. Dependency-Check ---
 # Sammelt ALLE fehlenden Pakete und meldet sie in einem Rutsch. Wer drei
@@ -155,27 +195,10 @@ if [ ! -d "$INSTALL_PREFIX" ]; then
   esac
 fi
 
-# Absoluten Pfad zum Hauptskript bilden — der Symlink soll auch funktionieren,
-# wenn das Verzeichnis später aus einem anderen Pfad heraus aufgerufen wird.
-ABS_MAIN="$SCRIPT_DIR/$MAIN_SCRIPT"
-
 # Reguläre Dateien, Verzeichnisse und lebende fremde Symlinks gehören dem
 # Nutzer. Ersetzen dürfen wir nur unseren eigenen Symlink oder einen
 # nachweislich toten Symlink.
-if [ -L "$INSTALL_TARGET" ]; then
-  CURRENT_TARGET=$(readlink "$INSTALL_TARGET")
-  if [ "$CURRENT_TARGET" != "$ABS_MAIN" ] && [ -e "$INSTALL_TARGET" ]; then
-    echo "FEHLER: Bestehender Symlink zeigt auf eine fremde Installation:"
-    echo "        $INSTALL_TARGET → $CURRENT_TARGET"
-    echo "        Ziel bleibt unverändert."
-    exit 2
-  fi
-elif [ -e "$INSTALL_TARGET" ]; then
-  echo "FEHLER: Installationsziel ist bereits eine Datei oder ein Verzeichnis:"
-  echo "        $INSTALL_TARGET"
-  echo "        Ziel bleibt unverändert."
-  exit 2
-fi
+check_install_target
 
 # Prüfen, ob wir Schreibrechte auf das Ziel-Verzeichnis haben.
 # `-w` testet auf Schreibbarkeit aus Sicht des aktuellen Prozesses.

@@ -12,6 +12,10 @@
   nachfolgenden Vertrauensprüfungen identisch verwendet.
 - Lokale Builds binden die eingebettete CLI bytegenau an `bin/md-clip`, prüfen
   ihre Syntax und führen `--version` aus, bevor sie Erfolg melden.
+- `install.sh` erkennt einen vorhandenen CLI-Verweis in `md-clip.app` als
+  gültige App-Installation, erklärt den getrennten Quellcode-Weg und nennt
+  direkt `md-clip --check-updates`, statt die App irreführend als fremde
+  Installation zu melden.
 
 ## 1.2.3 — 2026-08-10
 

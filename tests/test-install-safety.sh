@@ -50,6 +50,12 @@ run_install() {
   INSTALL_PREFIX="$prefix" "$PROJECT_COPY/install.sh" >/dev/null 2>&1
 }
 
+run_install_with_output() {
+  local prefix="$1"
+  local output="$2"
+  INSTALL_PREFIX="$prefix" "$PROJECT_COPY/install.sh" >"$output" 2>&1
+}
+
 ABS_MAIN="$PROJECT_COPY/bin/md-clip"
 
 # Reguläre Datei: Fehler und Byteinhalt bleibt erhalten.
@@ -82,6 +88,28 @@ if run_install "$TEST_ROOT/foreign"; then
 fi
 [ "$(readlink "$TEST_ROOT/foreign/md-clip")" = "$TEST_ROOT/foreign/other" ]
 echo "✓ install-foreign-symlink bleibt erhalten"
+
+# Lebender Symlink in md-clip.app: weiterhin nicht überschreiben, aber als
+# gültige App-Installation erklären statt irreführend „fremd“ zu melden.
+APP_CLI="$TEST_ROOT/app/md-clip.app/Contents/Resources/bin/md-clip"
+APP_OUTPUT="$TEST_ROOT/app-install.out"
+mkdir -p "$(dirname "$APP_CLI")" "$TEST_ROOT/app-prefix"
+printf '#!/bin/sh\nexit 0\n' > "$APP_CLI"
+chmod +x "$APP_CLI"
+ln -s "$APP_CLI" "$TEST_ROOT/app-prefix/md-clip"
+if run_install_with_output "$TEST_ROOT/app-prefix" "$APP_OUTPUT"; then
+  echo "✗ install-app-symlink wurde als Git-Installation übernommen" >&2
+  exit 1
+fi
+[ "$(readlink "$TEST_ROOT/app-prefix/md-clip")" = "$APP_CLI" ]
+grep -Fq 'md-clip ist bereits über die installierte App eingerichtet' "$APP_OUTPUT"
+grep -Fq './install.sh ist nur für die CLI direkt aus diesem Git-Clone gedacht' "$APP_OUTPUT"
+grep -Fq 'md-clip --check-updates' "$APP_OUTPUT"
+if grep -Fq 'pandoc gefunden' "$APP_OUTPUT"; then
+  echo "✗ App-Hinweis kommt erst nach unnötigen Abhängigkeitsprüfungen" >&2
+  exit 1
+fi
+echo "✓ install-app-symlink wird verständlich als App-Installation erklärt"
 
 # Toter Symlink und eigener Symlink dürfen idempotent repariert werden.
 mkdir -p "$TEST_ROOT/dead"

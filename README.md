@@ -22,7 +22,22 @@ Ab jetzt: formatierten Text irgendwo markieren (`⌘C`), md-clip-Icon klicken, i
 
 Voraussetzung: macOS 11 oder neuer auf Apple Silicon. Eine separate Installation von Homebrew oder pandoc ist nicht erforderlich — alles Nötige ist im Programm enthalten.
 
-**Updates:** Die App prüft nach einer Konvertierung im Hintergrund höchstens einmal täglich, ob es eine neue Version gibt (Update-Framework [Sparkle](https://sparkle-project.org)). Gefundene Updates werden nur angezeigt — installiert wird ausschließlich nach Bestätigung im Dialog. Es werden keine Hardware- oder Systemprofildaten übertragen. Sofort suchen: `md-clip --check-updates` im Terminal.
+**Updates:** Dass sich md-clip nach einer Konvertierung sofort beendet, ist
+beabsichtigt. Vorher startet die App einen getrennten Sparkle-Helfer, der im
+Hintergrund weiterläuft und höchstens einmal täglich nach einer neuen Version
+sucht. Ohne Fund beendet auch er sich still; bei einem Update zeigt er den
+Sparkle-Dialog. Installiert wird nur nach Bestätigung. Eine sichtbare Suche lässt
+sich jederzeit im Terminal starten:
+
+```bash
+md-clip --check-updates
+```
+
+Dieser Befehl zeigt auch an, wenn die installierte Version aktuell ist. Nach einem
+Update startet Sparkle md-clip bewusst nicht erneut, weil ein App-Start sofort das
+Clipboard konvertieren würde. Beim nächsten Dock-Klick, Hotkey- oder CLI-Aufruf
+läuft automatisch die neue Version. Es werden keine Hardware- oder
+Systemprofildaten übertragen.
 
 ## Beispiel
 

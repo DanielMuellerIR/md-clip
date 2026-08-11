@@ -10,8 +10,9 @@
 # Warum getrennt von install.sh: Das ist das plattformübergreifende Setup für
 # den Befehl `md-clip` und läuft auch auf Linux. Der App-Weg hier ist macOS-only
 # und verlangt ein Developer-ID-Zertifikat — das gehört nicht in ein Setup, das
-# jeder ausführen soll. Die App ruft ohnehin nur die CLI auf, `install.sh` bleibt
-# also der erste Schritt.
+# jeder ausführen soll. Die App enthält ihre eigene CLI samt Abhängigkeiten;
+# `install.sh` ist der alternative Weg direkt aus dem Git-Clone und wird vor
+# oder nach dieser App-Installation nicht benötigt.
 #
 # In /Applications gehören nur Bundles mit angeheftetem Notary-Ticket, die
 # Gatekeeper akzeptiert; dieses Skript prüft das vor UND nach dem Kopieren.
