@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.4 — 2026-08-11
+
+- Der Release-Dispatcher startet nur noch für stabile Releases; ein
+  übersprungener Prerelease-Job kann den privilegierten Folgelauf nicht mehr
+  fälschlich freigeben.
+- Der Appcast-Lauf wartet auf stdout und stderr des Sparkle-Generators, lehnt
+  Schlüsselwarnungen zuverlässig ab und veröffentlicht kein Enclosure ohne
+  EdDSA-Signatur.
+- Eine ausdrücklich gesetzte Apple-Team-ID wird beim Signieren und bei allen
+  nachfolgenden Vertrauensprüfungen identisch verwendet.
+- Lokale Builds binden die eingebettete CLI bytegenau an `bin/md-clip`, prüfen
+  ihre Syntax und führen `--version` aus, bevor sie Erfolg melden.
+
 ## 1.2.3 — 2026-08-10
 
 Diese Version schließt die fünf Befunde des Code-Reviews vom 2026-08-09 und

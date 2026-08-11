@@ -236,10 +236,28 @@ jobs:
           product_version="$(grep '^VERSION=' release-source/bin/md-clip | cut -d'"' -f2)"
           expected_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/md-clip-${version}.dmg"
 
+          # BEGIN APPCAST_GENERATOR_RUNNER
+          run_appcast_generator() {
+            local generator_output
+            # Command-Substitution wartet auf die gesamte Pipeline und erfasst
+            # stdout und stderr gemeinsam. Sparkle schreibt auch sicherheits-
+            # relevante Warnungen auf stdout; eine asynchrone Prozess-
+            # substitution koennte beim anschliessenden grep noch leer sein.
+            if ! generator_output="$(printf '%s' "$sparkle_private_key" | "$@" 2>&1)"; then
+              printf '%s\n' "$generator_output" >&2
+              return 1
+            fi
+            printf '%s\n' "$generator_output" >&2
+            if grep -Fq 'does not match key EdDSA' <<<"$generator_output"; then
+              echo "FEHLER: SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel der App." >&2
+              return 1
+            fi
+          }
+          # END APPCAST_GENERATOR_RUNNER
+
           # Der Schluessel steht weder in argv noch in einer Datei oder im Log.
-          generator_log="$APPCAST_WORK/generate-appcast.log"
-          if ! printf '%s' "$sparkle_private_key" \
-            | "$APPCAST_WORK/sparkle-dist/bin/generate_appcast" \
+          run_appcast_generator \
+            "$APPCAST_WORK/sparkle-dist/bin/generate_appcast" \
               --ed-key-file - \
               --embed-release-notes \
               --maximum-versions 1 \
@@ -247,15 +265,8 @@ jobs:
               --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/" \
               --link "https://github.com/${GITHUB_REPOSITORY}" \
               -o "$APPCAST_WORK/site/appcast.xml" \
-              "$APPCAST_WORK/update" \
-              2> >(tee "$generator_log" >&2); then
-            exit 1
-          fi
+              "$APPCAST_WORK/update"
           unset sparkle_private_key
-          if grep -Fq 'does not match key EdDSA' "$generator_log"; then
-            echo "FEHLER: SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel der App." >&2
-            exit 1
-          fi
 
           # BEGIN APPCAST_METADATA_VALIDATOR
           validate_appcast() {
@@ -267,7 +278,7 @@ jobs:
             local enclosure_xpath="${item_xpath}/*[local-name()=\"enclosure\"]"
             local version_xpath="${item_xpath}/*[local-name()=\"version\"]"
             local short_version_xpath="${item_xpath}/*[local-name()=\"shortVersionString\"]"
-            local item_count enclosure_count feed_version feed_short_version feed_url
+            local item_count enclosure_count feed_version feed_short_version feed_url feed_signature
 
             xmllint --noout "$appcast_file"
             item_count="$(xmllint --xpath "count(${item_xpath})" "$appcast_file")"
@@ -275,6 +286,7 @@ jobs:
             feed_version="$(xmllint --xpath "string(${version_xpath})" "$appcast_file")"
             feed_short_version="$(xmllint --xpath "string(${short_version_xpath})" "$appcast_file")"
             feed_url="$(xmllint --xpath "string(${enclosure_xpath}/@url)" "$appcast_file")"
+            feed_signature="$(xmllint --xpath "string(${enclosure_xpath}/@*[local-name()=\"edSignature\"])" "$appcast_file")"
 
             if [[ "$item_count" != "1" || "$enclosure_count" != "1" ]]; then
               echo "FEHLER: Appcast braucht genau einen Eintrag mit genau einem Enclosure (gefunden: $item_count/$enclosure_count)." >&2
@@ -286,6 +298,10 @@ jobs:
             fi
             if [[ "$feed_url" != "$expected_enclosure_url" ]]; then
               echo "FEHLER: Appcast-URL '$feed_url' passt nicht zu '$expected_enclosure_url'." >&2
+              return 1
+            fi
+            if [[ -z "$feed_signature" ]]; then
+              echo "FEHLER: Appcast-Enclosure hat keine Sparkle-EdDSA-Signatur." >&2
               return 1
             fi
           }

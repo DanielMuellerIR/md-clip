@@ -210,7 +210,7 @@ bash "$SCRIPT_DIR/build-app-bundled.sh"
 # install-app.sh, damit Installation und Release nicht auseinanderlaufen.
 echo "==> Signiere Bundle (wrappers/sign-bundle.sh)"
 bash "$SCRIPT_DIR/sign-bundle.sh" "$APP_BUNDLE" "$IDENTITY"
-bash "$SCRIPT_DIR/verify-bundle.sh" "$APP_BUNDLE" --signed
+bash "$SCRIPT_DIR/verify-bundle.sh" "$APP_BUNDLE" --signed --team-id "$TEAM_ID"
 echo "✓ Bundle signiert"
 
 # ---------- 2b. App notarisieren ----------

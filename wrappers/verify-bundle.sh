@@ -3,30 +3,52 @@
 # Produkt, unabhängig vom Build-Weg. build.sh ruft es strukturell auf,
 # install-app.sh und sign-and-release.sh zusätzlich mit --signed.
 #
-# Aufruf: verify-bundle.sh <App-Bundle> [--signed]
+# Aufruf: verify-bundle.sh <App-Bundle> [--signed] [--team-id TEAM_ID]
 set -euo pipefail
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-  echo "Aufruf: verify-bundle.sh <App-Bundle> [--signed]" >&2
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=verify-bundle-trust.sh
+source "$SCRIPT_DIR/verify-bundle-trust.sh"
+
+if [ "$#" -lt 1 ]; then
+  echo "Aufruf: verify-bundle.sh <App-Bundle> [--signed] [--team-id TEAM_ID]" >&2
   exit 64
 fi
 
 APP="$1"
+shift
 SIGNED=0
-case "${2:-}" in
-  "") ;;
-  --signed) SIGNED=1 ;;
-  *) echo "Unbekannte Option: $2" >&2; exit 64 ;;
-esac
+EXPECTED_TEAM_ID="$DEFAULT_TEAM_ID"
+TEAM_ID_EXPLICIT=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --signed)
+      SIGNED=1
+      ;;
+    --team-id)
+      shift
+      [ "$#" -gt 0 ] || { echo "--team-id braucht einen Wert." >&2; exit 64; }
+      EXPECTED_TEAM_ID="$1"
+      TEAM_ID_EXPLICIT=1
+      ;;
+    *) echo "Unbekannte Option: $1" >&2; exit 64 ;;
+  esac
+  shift
+done
+if [ "$TEAM_ID_EXPLICIT" -eq 1 ] && [ "$SIGNED" -ne 1 ]; then
+  echo "--team-id ist nur zusammen mit --signed erlaubt." >&2
+  exit 64
+fi
+if ! [[ "$EXPECTED_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+  echo "Ungueltige Apple-Team-ID: $EXPECTED_TEAM_ID" >&2
+  exit 64
+fi
 
 INFO_PLIST="$APP/Contents/Info.plist"
 LAUNCHER="$APP/Contents/MacOS/md-clip"
 UPDATER="$APP/Contents/MacOS/md-clip-updater"
 BUNDLED_CLI="$APP/Contents/Resources/bin/md-clip"
 SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=verify-bundle-trust.sh
-source "$SCRIPT_DIR/verify-bundle-trust.sh"
 
 # ---------- Struktur ----------
 
@@ -106,7 +128,7 @@ esac
 if [ "$SIGNED" -eq 1 ]; then
   # Diese Pruefung bindet das Bundle vor jeder Ausfuehrung seines eingebetteten
   # CLI-Skripts an Apples Developer-ID-Kette, unsere Team-ID und die Bundle-ID.
-  verify_signed_bundle_trust "$APP"
+  verify_signed_bundle_trust "$APP" /usr/libexec/PlistBuddy codesign "$EXPECTED_TEAM_ID"
 
   verify_distribution_signature() {
     local executable="$1"

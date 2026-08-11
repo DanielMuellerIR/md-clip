@@ -97,7 +97,7 @@ echo "=== 2/4 Signieren (innere Binaries zuerst) ==="
 # steht zentral in wrappers/sign-bundle.sh — dieselbe Datei benutzt auch
 # der Release-Weg, damit Installation und Release nicht auseinanderlaufen.
 bash wrappers/sign-bundle.sh "$APP" "$IDENTITY"
-bash wrappers/verify-bundle.sh "$APP" --signed
+bash wrappers/verify-bundle.sh "$APP" --signed --team-id "$TEAM_ID"
 
 echo "=== 3/4 Notarisieren ==="
 # notarytool nimmt kein nacktes .app entgegen, deshalb der Umweg über ein ZIP.

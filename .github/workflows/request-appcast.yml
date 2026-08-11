@@ -6,14 +6,16 @@ name: Request Sparkle appcast
 
 on:
   release:
-    types: [published]
+    # `released` gilt nur fuer stabile Releases. `published` wuerde auch ein
+    # Prerelease starten und den nachgelagerten privilegierten Workflow trotz
+    # uebersprungenem Job als erfolgreichen Lauf erreichen lassen.
+    types: [released]
 
 permissions:
   contents: read
 
 jobs:
   request:
-    if: github.event.release.prerelease == false
     runs-on: ubuntu-latest
     steps:
       - name: Request trusted appcast run

@@ -333,8 +333,14 @@ APPCAST_REQUEST_WORKFLOW="$PROJECT_ROOT/.github/workflows/request-appcast.yml"
 grep -Fq 'workflow_run:' "$APPCAST_WORKFLOW"
 grep -Fq "github.ref_name == github.event.repository.default_branch" "$APPCAST_WORKFLOW"
 grep -Fq 'release:' "$APPCAST_REQUEST_WORKFLOW"
+grep -Fq 'types: [released]' "$APPCAST_REQUEST_WORKFLOW"
 grep -Fq 'permissions:' "$APPCAST_REQUEST_WORKFLOW"
 grep -Fq 'contents: read' "$APPCAST_REQUEST_WORKFLOW"
+if grep -Fq 'types: [published]' "$APPCAST_REQUEST_WORKFLOW" \
+   || grep -Fq 'github.event.release.prerelease' "$APPCAST_REQUEST_WORKFLOW"; then
+  echo "✗ Release-Dispatcher kann weiterhin bei einem Prerelease erfolgreich laufen" >&2
+  exit 1
+fi
 if grep -Eq 'SPARKLE_PRIVATE_KEY|environment:|pages: write|id-token: write' "$APPCAST_REQUEST_WORKFLOW"; then
   echo "✗ Unprivilegierter Release-Dispatcher besitzt Secret- oder Deployment-Zugriff" >&2
   exit 1
@@ -454,6 +460,39 @@ if grep -Fq 'release-source/wrappers' <<<"$SIGNING_BLOCK"; then
 fi
 echo "✓ Appcast-Tooling kommt fest gepinnt aus einer vom Release-Tag getrennten Revision"
 
+# Der echte Generator-Runner muss stdout und stderr vollständig abwarten. Eine
+# Sparkle-Warnung darf auch dann nicht entkommen, wenn sie verspätet auf stdout
+# erscheint und der Generator selbst mit Erfolg endet.
+APPCAST_GENERATOR_RUNNER="$TEST_ROOT/appcast-generator-runner.sh"
+awk '
+  /# BEGIN APPCAST_GENERATOR_RUNNER/ { capture=1; next }
+  /# END APPCAST_GENERATOR_RUNNER/ { capture=0 }
+  capture { sub(/^          /, ""); print }
+' "$APPCAST_WORKFLOW" > "$APPCAST_GENERATOR_RUNNER"
+bash -n "$APPCAST_GENERATOR_RUNNER"
+# shellcheck source=/dev/null
+source "$APPCAST_GENERATOR_RUNNER"
+sparkle_private_key="synthetic-test-key"
+cat > "$TEST_ROOT/generator-warning" <<'SH'
+#!/bin/sh
+cat >/dev/null
+sleep 0.1
+echo 'does not match key EdDSA'
+exit 0
+SH
+cat > "$TEST_ROOT/generator-ok" <<'SH'
+#!/bin/sh
+cat >/dev/null
+echo 'generated'
+SH
+chmod +x "$TEST_ROOT/generator-warning" "$TEST_ROOT/generator-ok"
+if run_appcast_generator "$TEST_ROOT/generator-warning" >/dev/null 2>&1; then
+  echo "✗ Generator-Runner übersieht eine verzögerte Schlüsselwarnung auf stdout" >&2
+  exit 1
+fi
+run_appcast_generator "$TEST_ROOT/generator-ok" >/dev/null 2>&1
+echo "✓ Appcast wartet auf stdout und stderr des Generators und prüft beide"
+
 # Die folgende Funktion ist der echte Validator aus dem Workflow. Wir ziehen
 # genau diesen Block heraus und testen ihn mit einer xmllint-Attrappe; weder
 # GitHub noch ein DMG oder ein Sparkle-Schlüssel werden dabei berührt.
@@ -482,7 +521,7 @@ if command -v xmllint >/dev/null 2>&1; then
     <item>
       <sparkle:version>1.2.2</sparkle:version>
       <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
-      <enclosure url="https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg"/>
+      <enclosure url="https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg" sparkle:edSignature="synthetic-signature"/>
     </item>
   </channel>
 </rss>
@@ -506,6 +545,7 @@ expression="$2"
 case "$expression" in
   'count('*'local-name()="item"'*'local-name()="enclosure"'*) printf '%s' "$MD_CLIP_XML_ENCLOSURES" ;;
   'count('*'local-name()="item"'*) printf '%s' "$MD_CLIP_XML_ITEMS" ;;
+  *'local-name()="edSignature"'*) printf '%s' "$MD_CLIP_XML_SIGNATURE" ;;
   *'local-name()="shortVersionString"'*) printf '%s' "$MD_CLIP_XML_SHORT_VERSION" ;;
   *'local-name()="version"'*) printf '%s' "$MD_CLIP_XML_VERSION" ;;
   *'/@url)'*) printf '%s' "$MD_CLIP_XML_URL" ;;
@@ -525,6 +565,7 @@ export MD_CLIP_XML_ENCLOSURES=1
 export MD_CLIP_XML_VERSION=1.2.2
 export MD_CLIP_XML_SHORT_VERSION=1.2.2
 export MD_CLIP_XML_URL="$EXPECTED_APPCAST_URL"
+export MD_CLIP_XML_SIGNATURE="synthetic-signature"
 validate_appcast "$APPCAST_DUMMY" 1.2.2 1.2.2 "$EXPECTED_APPCAST_URL"
 
 expect_appcast_rejected() {
@@ -550,7 +591,11 @@ expect_appcast_rejected "falsche Kurzversion"
 MD_CLIP_XML_SHORT_VERSION=1.2.2
 MD_CLIP_XML_URL="https://invalid.example/md-clip-1.2.2.dmg"
 expect_appcast_rejected "falsche Enclosure-URL"
-echo "✓ Appcast verlangt genau einen passenden Eintrag mit Versionen und Release-URL"
+MD_CLIP_XML_URL="$EXPECTED_APPCAST_URL"
+MD_CLIP_XML_SIGNATURE=""
+expect_appcast_rejected "fehlende EdDSA-Signatur"
+MD_CLIP_XML_SIGNATURE="synthetic-signature"
+echo "✓ Appcast verlangt genau einen passenden, signierten Release-Eintrag"
 
 SIGNING_BLOCK=$(sed -n '/- name: Generate and verify signed appcast/,/- name: Upload Pages artifact/p' "$APPCAST_WORKFLOW")
 grep -Fq "does not match key EdDSA" <<<"$SIGNING_BLOCK"
@@ -660,6 +705,19 @@ if verify_signed_bundle_trust \
   exit 1
 fi
 
+# Ein bewusst gesetztes APPLE_TEAM_ID muss bis in denselben Vertrauensanker
+# gelangen. Sonst signiert der Release-Weg mit einer ID und prüft heimlich eine
+# andere, fest eingebaute ID.
+MD_CLIP_FAKE_TEAM_ID="TEAMID1234"
+verify_signed_bundle_trust \
+  "$TRUST_TEST_ROOT/App.app" \
+  "$TRUST_TEST_ROOT/fake-bin/PlistBuddy" \
+  "$TRUST_TEST_ROOT/fake-bin/codesign" \
+  "TEAMID1234"
+grep -Fq 'certificate leaf[subject.OU] = "TEAMID1234"' "$MD_CLIP_CODESIGN_CAPTURE"
+grep -Fq -- '--team-id "$TEAM_ID"' "$PROJECT_ROOT/install-app.sh"
+grep -Fq -- '--team-id "$TEAM_ID"' "$PROJECT_ROOT/wrappers/sign-and-release.sh"
+
 TRUST_CALL_LINE=$(grep -n 'verify_signed_bundle_trust "\$APP"' "$VERIFY_BUNDLE" | cut -d: -f1)
 PRODUCT_EXEC_LINE=$(grep -n 'CLI_OUTPUT="\$("\$BUNDLED_CLI" --version)"' "$VERIFY_BUNDLE" | cut -d: -f1)
 if [ -z "$TRUST_CALL_LINE" ] || [ -z "$PRODUCT_EXEC_LINE" ] \
@@ -668,3 +726,45 @@ if [ -z "$TRUST_CALL_LINE" ] || [ -z "$PRODUCT_EXEC_LINE" ] \
   exit 1
 fi
 echo "✓ Bundle wird vor Produktcode an Apple-Kette, Team-ID und Bundle-ID gebunden"
+
+# --- Lokaler Build: nur die gerade gebaute, bytegleiche CLI ausführen. ---
+BUILD_SCRIPT="$PROJECT_ROOT/build.sh"
+BUILD_CLI_SMOKE="$TEST_ROOT/build-cli-smoke.sh"
+awk '
+  /# BEGIN TRUSTED_BUILD_CLI_SMOKE/ { capture=1; next }
+  /# END TRUSTED_BUILD_CLI_SMOKE/ { capture=0 }
+  capture { print }
+' "$BUILD_SCRIPT" > "$BUILD_CLI_SMOKE"
+bash -n "$BUILD_CLI_SMOKE"
+# shellcheck source=/dev/null
+source "$BUILD_CLI_SMOKE"
+
+SMOKE_SOURCE="$TEST_ROOT/smoke-source"
+SMOKE_BUNDLE="$TEST_ROOT/smoke-bundle"
+printf '%s\n' '#!/bin/sh' 'echo "md-clip 1.2.4"' > "$SMOKE_SOURCE"
+cp "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
+chmod +x "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
+verify_trusted_build_cli "$SMOKE_SOURCE" "$SMOKE_BUNDLE" 1.2.4
+
+printf '%s\n' '#!/bin/sh' 'echo "fremd"' > "$SMOKE_BUNDLE"
+if verify_trusted_build_cli "$SMOKE_SOURCE" "$SMOKE_BUNDLE" 1.2.4 >/dev/null 2>&1; then
+  echo "✗ Build-Smoke-Test führt eine nicht zur Quelle passende CLI aus" >&2
+  exit 1
+fi
+
+printf '%s\n' '#!/bin/sh' 'if then' > "$SMOKE_SOURCE"
+cp "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
+chmod +x "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
+if verify_trusted_build_cli "$SMOKE_SOURCE" "$SMOKE_BUNDLE" 1.2.4 >/dev/null 2>&1; then
+  echo "✗ Build-Smoke-Test akzeptiert einen Syntaxfehler" >&2
+  exit 1
+fi
+
+printf '%s\n' '#!/bin/sh' 'exit 7' > "$SMOKE_SOURCE"
+cp "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
+chmod +x "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
+if verify_trusted_build_cli "$SMOKE_SOURCE" "$SMOKE_BUNDLE" 1.2.4 >/dev/null 2>&1; then
+  echo "✗ Build-Smoke-Test übersieht eine nicht ausführbare CLI" >&2
+  exit 1
+fi
+echo "✓ Lokaler Build bindet die CLI an die Quelle und führt --version aus"
