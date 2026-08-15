@@ -18,13 +18,22 @@ on:
   # Erlaubt einen Lauf von Hand ueber die Actions-Oberflaeche.
   workflow_dispatch:
 
+# Der Testjob braucht weder Schreibzugriff noch ein dauerhaft hinterlegtes
+# Git-Credential. Das gilt auch fuer push-Laeufe auf main.
+permissions:
+  contents: read
+
 jobs:
   linux:
     name: Linux (Ubuntu)
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Unveraenderlicher Commit statt eines beweglichen Versions-Tags; derselbe
+      # gepruefte Pin wird im Appcast-Workflow verwendet.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # pandoc + perl = die Konvertierungs-Pipeline, xclip = Clipboard unter X11,
       # xvfb = X-Server ohne Bildschirm (der Runner hat keinen).
@@ -64,7 +73,7 @@ jobs:
       - name: pandoc ohne RTF-Reader wird abgelehnt
         run: ./tests/test-dependencies.sh
 
-      - name: Launcher, Release-Mount und Download-Cache
+      - name: Launcher, Release, Appcast und Bundle-Pruefung
         run: ./tests/test-wrapper-safety.sh
 
       # Rauchprobe fuer die Fehlerpfade: Ohne Clipboard-Inhalt muss md-clip mit
