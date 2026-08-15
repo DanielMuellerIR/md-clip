@@ -20,7 +20,7 @@ Ab jetzt: formatierten Text irgendwo markieren (`⌘C`), md-clip-Icon klicken, i
 
 **Falls man im Erststart-Dialog „Nicht mehr fragen" gewählt hat und sich umentscheidet:** im Terminal `defaults delete io.github.danielmuellerir.md-clip CliInstallDeclined` ausführen, dann fragt md-clip beim nächsten Start wieder.
 
-Voraussetzung: macOS 11 oder neuer auf Apple Silicon. Eine separate Installation von Homebrew oder pandoc ist nicht erforderlich — alles Nötige ist im Programm enthalten.
+Voraussetzung: macOS 14 oder neuer auf Apple Silicon. Eine separate Installation von Homebrew oder pandoc ist nicht erforderlich — alles Nötige ist im Programm enthalten.
 
 **Updates:** Dass sich md-clip nach einer Konvertierung sofort beendet, ist
 beabsichtigt. Vorher startet die App einen getrennten Sparkle-Helfer, der im

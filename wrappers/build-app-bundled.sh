@@ -29,10 +29,11 @@ APP_NAME="md-clip"
 # von PROJECT_ROOT) aus bin/md-clip abgeleitet — dieselbe Single-Source-of-
 # Truth wie in wrappers/sign-and-release.sh.
 
-# Mindest-macOS für das Bundle. 11.0 (Big Sur) ist die erste Version mit
-# nativer Apple-Silicon-Unterstützung und gleichzeitig der Cutoff, bis
-# zu dem pandoc-Universal-Binaries verfügbar sind.
-MIN_MACOS="11.0"
+# Mindest-macOS für das Bundle. Das gepinnte pandoc 3.9.0.2 trägt selbst
+# LC_BUILD_VERSION minos 14.0; ein niedrigerer Wert in Info.plist ließe die App
+# auf älteren Systemen starten, obwohl jede Konvertierung am Binary scheitert.
+# verify-bundle.sh prüft diese Grenze für alle ausführbaren Bundle-Bestandteile.
+MIN_MACOS="14.0"
 
 # Pandoc-Version. Pinning macht den Build reproduzierbar. Bei Updates
 # diese Zahl bumpen und neu bauen.
