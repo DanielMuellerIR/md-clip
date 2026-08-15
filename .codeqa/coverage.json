@@ -6,7 +6,7 @@
     "token_budget": 700000,
     "status": "active",
     "started_at": "2026-08-15T13:46:33+02:00",
-    "tokens_spent": 221948
+    "tokens_spent": 288974
   },
   "campaign_history": [],
   "scope": {
@@ -127,7 +127,20 @@
       "risk": "critical",
       "priority": 4,
       "reason": "Lieferkette, Download-Prüfsummen, Bundle-Struktur und Signaturvertrauen",
-      "state": "pending"
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260815T134633852340+0200",
+        "completed_at": "2026-08-15T14:10:34+02:00",
+        "observed_head": "50e74632dc6f6be6450392aeb71f151da388919d",
+        "content_sha256": "3959d123cb08dcd5507b177965c393195ec5a2b0b6bca710fa62a05ef094352f",
+        "file_count": 7,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Tatsächliches pandoc-Minimum macOS 14 ist in Build und README ausgewiesen; Bundle-Prüfer vergleicht LSMinimumSystemVersion fail-closed mit allen eigenen und Sparkle-Mach-O-Zielen, einschließlich alter und neuer Load-Command-Form",
+        "tests": [
+          "Alter 11.0-Build: verify-bundle Exit 65 wegen pandoc minos 14.0; neuer ./build.sh: VERIFY OK und BUILD OK mit allen eigenen Zielen 14.0; macOS- und Ubuntu-Gesamtgruppen einschließlich isolierter modern/legacy/missing-Kompatibilitätsmatrix grün"
+        ]
+      }
     },
     {
       "id": "app-install-release",
