@@ -6,7 +6,7 @@
     "token_budget": 700000,
     "status": "active",
     "started_at": "2026-08-15T13:46:33+02:00",
-    "tokens_spent": 183003
+    "tokens_spent": 221948
   },
   "campaign_history": [],
   "scope": {
@@ -77,15 +77,15 @@
       "state": "completed",
       "last_run": {
         "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:00:28+02:00",
-        "observed_head": "91ee35e5ecc4637a678ba03a1e1538d8b13b54f3",
-        "content_sha256": "421ccaf4303d0d02960e40946bda759961b6aee6369b24042eb496715410258e",
+        "completed_at": "2026-08-15T14:04:33+02:00",
+        "observed_head": "32ba81b5a19ed6f82f8f05575f2fd67e75fae77e",
+        "content_sha256": "313c7aef162db022b21c20279c743e13a0dc2f471b7eb8e7eebf413bf5c57a2c",
         "file_count": 7,
-        "review": "full",
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Quiet unterdrückt Diagnoseausgabe auch zusammen mit verbose; Positionsargumente nach -- werden abgelehnt; MSO-Fallback zählt tatsächliche Marker und wählt bei einzeiligem Word-HTML zuverlässig RTF; Attrappen prüfen macOS, X11 und Wayland",
+        "summary": "Linux-Abhängigkeitstest stellt nach dem Installer-Fix beide wl-clipboard-Befehle bereit und erreicht weiterhin gezielt den alten-pandoc-RTF-Fehler; Produktgrenze unverändert",
         "tests": [
-          "macOS: Gesamtgruppe grün, tests/run-tests.sh 17/17 und CLI-Randmatrix für macOS/X11/Wayland; Ubuntu 24.04/pandoc 3.1.3: 15/15 ohne Display, 18/18 unter Xvfb, CLI-Matrix und vier Einzelskripte grün; alter MSO-Zähler reproduzierbar Status 1 statt 0"
+          "tests/test-dependencies.sh: Produkt und Installer lehnen pandoc ohne RTF-Reader ab; vollständige macOS- und Ubuntu-Gesamtgruppen zuvor grün"
         ]
       }
     },
@@ -98,7 +98,20 @@
       "risk": "high",
       "priority": 3,
       "reason": "Installationspfad schreibt ausführbare Helfer und Symlinks in Nutzerziele",
-      "state": "pending"
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260815T134633852340+0200",
+        "completed_at": "2026-08-15T14:04:05+02:00",
+        "observed_head": "32af77e8e8f0f34bbc77a7685cb3c97dfba9b4e4",
+        "content_sha256": "07a12582cbaf0bcc765eb85a88413ca84b5cbf00e1950ccbca212b57ef68fd34",
+        "file_count": 2,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Installer verlangt für Wayland sowohl wl-paste als auch wl-copy und meldet das Paket einmal; negativer Teilinstallationsfall und erfolgreicher Linux-Weg sind abgedeckt",
+        "tests": [
+          "macOS-Gesamtgruppe grün; Ubuntu 24.04/pandoc 3.1.3: 15/15 ohne Display, 18/18 unter Xvfb und alle Einzelskripte grün; install-safety prüft fehlendes wl-copy und vollständigen Linux-Erfolg"
+        ]
+      }
     },
     {
       "id": "app-build-verification",
