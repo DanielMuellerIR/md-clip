@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "project": "md_clip",
+  "campaign": {
+    "id": "20260815T134633852340+0200",
+    "token_budget": 700000,
+    "status": "active",
+    "started_at": "2026-08-15T13:46:33+02:00"
+  },
+  "campaign_history": [],
+  "scope": {
+    "paths": [
+      ".github/workflows",
+      "assets/build-icns.sh",
+      "assets/generate-dmg-background.swift",
+      "assets/generate-icon-v2.py",
+      "bin",
+      "build.sh",
+      "helpers",
+      "install-app.sh",
+      "install.sh",
+      "lib",
+      "release.sh",
+      "tests",
+      "wrappers"
+    ],
+    "exclusions": [
+      {
+        "path": "tests/fixtures",
+        "reason": "Eingabe- und Erwartungs-Fixtures; Prüfgegenstand, keine Laufzeitlogik"
+      }
+    ]
+  },
+  "areas": [
+    {
+      "id": "core-markdown-pipeline",
+      "paths": [
+        "lib/pipeline.sh",
+        "tests/run-tests.sh",
+        "tests/compare.sh",
+        "tests/compare-file.sh",
+        "tests/compare-manual.sh"
+      ],
+      "risk": "critical",
+      "priority": 1,
+      "reason": "Zentrale Inhaltskonvertierung; jeder formatierte Clipboard-Inhalt läuft durch diese Regeln",
+      "state": "pending"
+    },
+    {
+      "id": "cli-runtime-platform",
+      "paths": [
+        "bin/md-clip",
+        "helpers/clipboard-html.swift",
+        "helpers/clipboard-rtf.swift",
+        "tests/clipboard-string.swift",
+        "tests/load-clipboard.swift",
+        "tests/test-plain-newlines.sh",
+        "tests/test-dependencies.sh"
+      ],
+      "risk": "critical",
+      "priority": 2,
+      "reason": "Clipboard-Datenintegrität, Argumentvertrag und macOS/Linux-Plattformränder",
+      "state": "pending"
+    },
+    {
+      "id": "cli-installation",
+      "paths": [
+        "install.sh",
+        "tests/test-install-safety.sh"
+      ],
+      "risk": "high",
+      "priority": 3,
+      "reason": "Installationspfad schreibt ausführbare Helfer und Symlinks in Nutzerziele",
+      "state": "pending"
+    },
+    {
+      "id": "app-build-verification",
+      "paths": [
+        "build.sh",
+        "wrappers/build-app.sh",
+        "wrappers/build-app-bundled.sh",
+        "wrappers/sign-bundle.sh",
+        "wrappers/verified-cache.sh",
+        "wrappers/verify-bundle-trust.sh",
+        "wrappers/verify-bundle.sh"
+      ],
+      "risk": "critical",
+      "priority": 4,
+      "reason": "Lieferkette, Download-Prüfsummen, Bundle-Struktur und Signaturvertrauen",
+      "state": "pending"
+    },
+    {
+      "id": "app-install-release",
+      "paths": [
+        "install-app.sh",
+        "release.sh",
+        "wrappers/sign-and-release.sh"
+      ],
+      "risk": "critical",
+      "priority": 5,
+      "reason": "Notarisierung, /Applications-Installation, DMG-Erzeugung und Cleanup",
+      "state": "pending"
+    },
+    {
+      "id": "app-runtime-update",
+      "paths": [
+        "wrappers/launcher.sh",
+        "helpers/md-clip-hud.swift",
+        "helpers/md-clip-updater.swift"
+      ],
+      "risk": "high",
+      "priority": 6,
+      "reason": "Dock-Start, privilegierte CLI-Verknüpfung, HUD und Sparkle-Laufzeit",
+      "state": "pending"
+    },
+    {
+      "id": "safety-test-harness",
+      "paths": [
+        "tests/test-wrapper-safety.sh"
+      ],
+      "risk": "high",
+      "priority": 7,
+      "reason": "Plattformübergreifende Sicherheitsregressionen für Launcher, Release, Cache und Appcast",
+      "state": "pending"
+    },
+    {
+      "id": "release-automation",
+      "paths": [
+        ".github/workflows"
+      ],
+      "risk": "critical",
+      "priority": 8,
+      "reason": "Privilegierter Appcast-Workflow mit Release-Artefakten, GitHub Pages und Sparkle-Schlüssel",
+      "state": "pending"
+    },
+    {
+      "id": "visual-assets-tooling",
+      "paths": [
+        "assets/build-icns.sh",
+        "assets/generate-dmg-background.swift",
+        "assets/generate-icon-v2.py"
+      ],
+      "risk": "low",
+      "priority": 9,
+      "reason": "Deterministische Erzeugung der App- und DMG-Bildartefakte",
+      "state": "pending"
+    }
+  ],
+  "architecture": {
+    "campaign_id": "20260815T134633852340+0200",
+    "recorded_at": "2026-08-15T13:46:34+02:00",
+    "observed_head": "c4401d4a86bb791f19979ed2ebdceb42812ff3be",
+    "summary": "Seiteneffektfreie Konvertierung in lib/pipeline.sh; CLI und macOS-Helfer kapseln Clipboard-, UI-, Build- und Release-Ränder",
+    "paradigm": "Pipeline-orientiertes Schichtenmodell mit Plattformadaptern",
+    "fit": "passt",
+    "recommendation": "Paradigma beibehalten; große Shell-Einstiegspunkte nur bereichsweise an belegten Verantwortungsgrenzen vereinfachen"
+  }
+}
