@@ -34,19 +34,18 @@ func fail(usage message: String) -> Never {
     exit(64)
 }
 
-var parsedMode: Mode?
-for argument in CommandLine.arguments.dropFirst() {
-    switch argument {
-    case "--background":
-        parsedMode = .background
-    case "--interactive":
-        parsedMode = .interactive
-    default:
-        fail(usage: "Unbekannte Option: \(argument)\nAufruf: md-clip-updater --background | --interactive")
-    }
-}
-guard let mode = parsedMode else {
+let arguments = CommandLine.arguments
+guard arguments.count == 2 else {
     fail(usage: "Aufruf: md-clip-updater --background | --interactive")
+}
+let mode: Mode
+switch arguments[1] {
+case "--background":
+    mode = .background
+case "--interactive":
+    mode = .interactive
+default:
+    fail(usage: "Unbekannte Option: \(arguments[1])\nAufruf: md-clip-updater --background | --interactive")
 }
 
 // Drossel für den Hintergrundmodus: Der Launcher startet diesen Prozess bei
