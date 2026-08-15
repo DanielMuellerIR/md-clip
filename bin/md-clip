@@ -193,7 +193,7 @@ log() {
 # vlog: Verbose-Log. Nur sichtbar mit --verbose.
 # Für Diagnose-Details (welcher Flavor, welcher Pfad).
 vlog() {
-  if [ "$VERBOSE" -eq 1 ]; then
+  if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then
     printf '[md-clip] %s\n' "$*" >&2
   fi
 }
@@ -529,7 +529,13 @@ while [ "$#" -gt 0 ]; do
       fi
       exec "$UPDATER_DIR/md-clip-updater" --interactive
       ;;
-    --) shift; break ;;
+    --)
+      shift
+      if [ "$#" -gt 0 ]; then
+        die 2 "Unerwartetes Argument: $1 (siehe --help)"
+      fi
+      break
+      ;;
     -*) die 2 "Unbekannte Option: $1 (siehe --help)" ;;
     *)  die 2 "Unerwartetes Argument: $1 (siehe --help)" ;;
   esac
@@ -632,7 +638,7 @@ try_html() {
 # diese Variante erkennen, ist der RTF-Pfad fast immer das bessere
 # Ergebnis. Heuristik:
 #   1. Office-Namespace im <html>-Tag (sehr zuverlässig), ODER
-#   2. mehr als 10 `mso-`-Marker im Body (Fallback für variantenreiche
+#   2. mindestens 10 `mso-`-Marker im Body (Fallback für variantenreiche
 #      Office-Versionen).
 # Argument: $1 = HTML-Inhalt.
 # Rückgabe: 0 wenn MSO, 1 wenn normales HTML.
@@ -649,12 +655,14 @@ is_mso_html() {
     *'name=Generator content="Microsoft'*)  return 0 ;;
   esac
 
-  # Langsamer Fallback: zähle mso-Marker. grep -c liefert die Anzahl,
-  # `|| true` verhindert Exit 1 bei 0 Treffern (set -e würde uns sonst killen).
-  # Word-Clipboard-HTML ist mehrzeilig: clipboard-html.swift gibt HTML roh mit
-  # Newlines aus. grep -c zählt die mso-Zeilen deshalb wie beabsichtigt.
-  local count
-  count=$(printf '%s' "$html" | grep -c 'mso-' 2>/dev/null || true)
+  # Fallback: tatsächliche mso-Marker zählen, nicht nur Zeilen mit Treffern.
+  # Word-HTML kann minifiziert in einer einzigen Zeile ankommen; `grep -c`
+  # lieferte dafür unabhängig von der Markerzahl nur 1 und verfehlte die
+  # Erkennung. Die Längendifferenz ist exakt vier Zeichen je entferntem
+  # ASCII-Marker und braucht keinen weiteren Prozess.
+  local without_mso count
+  without_mso="${html//mso-/}"
+  count=$(( (${#html} - ${#without_mso}) / 4 ))
   [ "${count:-0}" -ge 10 ] && return 0
 
   return 1
