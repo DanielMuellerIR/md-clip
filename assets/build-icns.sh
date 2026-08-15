@@ -8,7 +8,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MASTER="$SCRIPT_DIR/md-clip-icon-master.png"
-ICONSET="$SCRIPT_DIR/md-clip.iconset"
 OUT="$SCRIPT_DIR/md-clip.icns"
 
 if [ ! -f "$MASTER" ]; then
@@ -17,8 +16,22 @@ if [ ! -f "$MASTER" ]; then
   exit 1
 fi
 
-# Iconset-Verzeichnis frisch anlegen. iconutil erwartet die Namen exakt.
-rm -rf "$ICONSET"
+# Ein falsches Seitenverhältnis würde `sips -z` unbemerkt auf ein Quadrat
+# verzerren. Das Master-Icon ist deshalb Teil des Eingabevertrags.
+MASTER_WIDTH=$(sips -g pixelWidth "$MASTER" | awk '/pixelWidth/{print $2; exit}')
+MASTER_HEIGHT=$(sips -g pixelHeight "$MASTER" | awk '/pixelHeight/{print $2; exit}')
+if [ "$MASTER_WIDTH" != "1024" ] || [ "$MASTER_HEIGHT" != "1024" ]; then
+  echo "FEHLER: Master-Icon muss 1024×1024 Pixel groß sein (ist ${MASTER_WIDTH:-?}×${MASTER_HEIGHT:-?})." >&2
+  exit 1
+fi
+
+# Privates Zwischenverzeichnis statt eines festen Pfads unter assets/: Ein
+# abgebrochener oder paralleler Lauf kann dadurch weder fremde Dateien löschen
+# noch mit einem zweiten Lauf kollidieren. iconutil erwartet die Endung
+# `.iconset`, deshalb liegt das eigentliche Verzeichnis in einer mktemp-Hülle.
+TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/md-clip-icon.XXXXXX")
+trap 'rm -rf "$TEMP_ROOT"' EXIT INT TERM
+ICONSET="$TEMP_ROOT/md-clip.iconset"
 mkdir -p "$ICONSET"
 
 # Die zehn Größen, die Apple-Apps standardmäßig mitliefern.
@@ -46,8 +59,5 @@ done
 
 # iconutil packt das ganze iconset-Verzeichnis in eine .icns-Datei.
 iconutil --convert icns "$ICONSET" -o "$OUT"
-
-# Iconset-Zwischenverzeichnis nicht mehr nötig.
-rm -rf "$ICONSET"
 
 echo "✓ $OUT ($(du -h "$OUT" | cut -f1))"

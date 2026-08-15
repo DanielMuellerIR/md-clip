@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
-"""
-generate-icon-v2.py — Überarbeitete Variante 2 mit:
-  - Realistischerer Clipboard-Darstellung (Clip mit Loch, Schreib-Linien)
-  - Fetteres dekoratives Font für 'MD' mit Abstand zu den Konturen
-  - 3D-Hintergrund: stärkerer Verlauf + Highlight oben links + tiefer Schatten
+"""Erzeugt das finale 1024×1024-Master-Icon für md-clip.
 
-Erzeugt zwei Vorschläge mit unterschiedlichen Fonts zum Vergleich:
-  - preview-icon-2a-georgia.png   (Serif, dekorativ)
-  - preview-icon-2b-avenir.png    (Modern bold)
+Aufruf: python3 assets/generate-icon-v2.py [output.png]
+Ohne Zielpfad wird assets/md-clip-icon-master.png geschrieben.
 """
+
+import argparse
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from pathlib import Path
 
 OUT_DIR = Path(__file__).parent
 SIZE = 1024
@@ -21,9 +18,7 @@ RADIUS = 224
 TOP_BLUE = (89, 196, 230, 255)        # heller, lichter Blauton oben
 BOTTOM_BLUE = (48, 130, 192, 255)     # tieferes Blau unten
 SHADOW_BLUE = (32, 95, 145, 255)      # noch dunkler für Tiefen
-HIGHLIGHT = (255, 255, 255, 60)       # weiches Licht oben links
 WHITE = (255, 255, 255, 255)
-WHITE_SOFT = (255, 255, 255, 180)
 PAPER_LINE = (255, 255, 255, 90)      # leichte Striche für Papier-Andeutung
 
 
@@ -85,7 +80,7 @@ def draw_text_centered(draw, text, font, fill, x_center, y_center):
     draw.text(pos, text, font=font, fill=fill)
 
 
-def draw_clipboard(img, draw):
+def draw_clipboard(img):
     """Realistischeres Clipboard mit Clip-Detail und Papier-Linien.
     Gibt Koordinaten des inneren Bereichs zurück, damit der Aufrufer
     seinen MD-Text innerhalb der freien Fläche platzieren kann.
@@ -176,10 +171,9 @@ def draw_clipboard(img, draw):
     return inner
 
 
-def render_variant(font_path, font_index, label):
+def render_variant(font_path, font_index, label, output_path):
     img = base_canvas_3d()
-    draw = ImageDraw.Draw(img)
-    inner = draw_clipboard(img, draw)
+    inner = draw_clipboard(img)
     draw = ImageDraw.Draw(img)  # nach möglichem alpha_composite neu
 
     # MD-Text mit dem gewählten Font.
@@ -214,14 +208,33 @@ def render_variant(font_path, font_index, label):
 
     # Master-Bild (1024×1024); aus dem baut build-icns.sh anschließend
     # das .icns mit allen Größen-Varianten.
-    out = OUT_DIR / "md-clip-icon-master.png"
-    img.save(out)
-    print(f"✓ {out.name} ({label})")
+    img.save(output_path)
+    print(f"✓ {output_path} ({label})")
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Erzeugt das finale 1024×1024-Master-Icon für md-clip."
+    )
+    parser.add_argument(
+        "output",
+        nargs="?",
+        type=Path,
+        default=OUT_DIR / "md-clip-icon-master.png",
+        help="Ziel-PNG (Standard: assets/md-clip-icon-master.png)",
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
+    arguments = parse_arguments()
     # Avenir Next Heavy — final gewählte Variante.
-    render_variant("/System/Library/Fonts/Avenir Next.ttc", 8, "final")
+    render_variant(
+        "/System/Library/Fonts/Avenir Next.ttc",
+        8,
+        "final",
+        arguments.output,
+    )
 
-    print(f"\nIn: {OUT_DIR}")
-    print("Master-Icon: preview-icon-2-final.png")
+    print(f"\nIn: {arguments.output.parent}")
+    print(f"Master-Icon: {arguments.output.name}")
