@@ -6,7 +6,7 @@
     "token_budget": 700000,
     "status": "active",
     "started_at": "2026-08-15T13:46:33+02:00",
-    "tokens_spent": 399017
+    "tokens_spent": 454798
   },
   "campaign_history": [],
   "scope": {
@@ -200,7 +200,20 @@
       "risk": "high",
       "priority": 7,
       "reason": "Plattformübergreifende Sicherheitsregressionen für Launcher, Release, Cache und Appcast",
-      "state": "pending"
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260815T134633852340+0200",
+        "completed_at": "2026-08-15T14:23:25+02:00",
+        "observed_head": "a970ae92271b552309766427adde24d233d27e16",
+        "content_sha256": "b69240255610ae09005cc58e85376380a18abe5d7bbebadc3f2dc34efacbc33e",
+        "file_count": 1,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Zwei frühere Sicherheitsfunde sind jetzt durch funktionale Regressionen abgedeckt: unklarer DMG-Mountzustand bewahrt Image und Pfad, Bundle-Mindestversionen werden in moderner und alter Mach-O-Form gegen Info.plist geprüft. Sechs duplizierte Produktionsblock-Extraktionen sind in einer eindeutigen, syntaxprüfenden Hilfsfunktion zusammengeführt.",
+        "tests": [
+          "bash -n und tests/test-wrapper-safety.sh auf macOS grün; derselbe Wrapper-Test im Ubuntu-24.04-Container grün; zuvor komplette macOS-Matrix 17/17 plus vier test-*.sh sowie Linux 15/15 ohne Display, 18/18 unter Xvfb plus vier test-*.sh grün."
+        ]
+      }
     },
     {
       "id": "release-automation",
