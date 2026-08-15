@@ -27,9 +27,9 @@ set -euo pipefail
 TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
 IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
 
-# Profilname: Umgebung schlägt clone-lokale Git-Konfiguration, dann der
-# flottenweite Kanon. Der früher fest eingebaute Name "md-clip-notarytool"
-# existiert nicht auf jedem Mac und ließ den Lauf erst nach dem Bauen scheitern.
+# Profilname: Umgebung schlägt clone-lokale Git-Konfiguration. Einen Default
+# gibt es im öffentlichen Repo bewusst nicht; Keychain-Profile sind pro Mac
+# lokal und ein fest eingebauter Name ließe den Lauf erst nach dem Bauen scheitern.
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 if [ -z "$NOTARY_PROFILE" ]; then
   NOTARY_PROFILE="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." config --local --get mdClip.notaryProfile 2>/dev/null || true)"
@@ -135,8 +135,10 @@ fi
 APP_ZIP_DIR=""
 MOUNT_DIR=""
 MOUNT_DEVICE=""
+MOUNT_MAY_BE_ATTACHED=""
 ATTACH_PLIST=""
 
+# BEGIN RELEASE_CLEANUP
 # Aushängen mit Wiederholung: Direkt nach dem Finder-AppleScript hält das
 # System das Volume manchmal noch einen Moment fest, und ein einzelner
 # Fehlversuch würde das Device hängen lassen.
@@ -164,6 +166,7 @@ cleanup_release() {
     # niemand könnte den Mount noch gezielt lösen.
     if detach_release_mount "$MOUNT_DEVICE"; then
       MOUNT_DEVICE=""
+      MOUNT_MAY_BE_ATTACHED=""
     else
       echo "WARNUNG: Eigenes DMG-Device ließ sich nicht aushängen: $MOUNT_DEVICE" >&2
       echo "         Bitte von Hand prüfen: hdiutil info" >&2
@@ -174,8 +177,18 @@ cleanup_release() {
     ATTACH_PLIST=""
   fi
   if [ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ]; then
-    rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
-    MOUNT_DIR=""
+    if rmdir "$MOUNT_DIR" >/dev/null 2>&1; then
+      MOUNT_DIR=""
+      # Wenn kein Device ermittelt werden konnte, beweist das erfolgreiche
+      # rmdir immerhin, dass an diesem privaten Pfad nichts mehr gemountet ist.
+      if [ -z "$MOUNT_DEVICE" ]; then
+        MOUNT_MAY_BE_ATTACHED=""
+      fi
+    elif [ -n "$MOUNT_MAY_BE_ATTACHED" ] && [ -z "$MOUNT_DEVICE" ]; then
+      echo "WARNUNG: DMG-Mount konnte keinem Device zugeordnet werden; nichts wird gelöscht." >&2
+      echo "         Privater Mountpfad: $MOUNT_DIR" >&2
+      echo "         Bitte von Hand prüfen: hdiutil info" >&2
+    fi
   fi
   # Das schreibbare Zwischen-Image ist mehrere hundert MB groß und wurde im
   # regulären Weg erst nach der Konvertierung gelöscht — jeder Abbruch davor
@@ -185,11 +198,14 @@ cleanup_release() {
   # Unterlage dieses Mounts, und sie wegzuziehen hinterlässt ein kaputtes
   # Volume statt aufzuräumen. Schlug das Detach fehl, steht MOUNT_DEVICE noch —
   # dann bleibt auch das Image liegen, mitsamt der Warnung von oben.
-  if [ -n "$RW_DMG_OWNED" ] && [ -z "$MOUNT_DEVICE" ]; then
+  if [ -n "$RW_DMG_OWNED" ] \
+     && [ -z "$MOUNT_DEVICE" ] \
+     && [ -z "$MOUNT_MAY_BE_ATTACHED" ]; then
     rm -f "$RW_DMG_PATH"
     RW_DMG_OWNED=""
   fi
 }
+# END RELEASE_CLEANUP
 
 # Bei Strg-C oder `kill` reicht Aufräumen nicht: Ohne eigenes `exit` liefe das
 # Skript hinter dem Trap einfach weiter. Die Codes 130/143 sind die üblichen
@@ -295,6 +311,7 @@ RW_DMG_OWNED=1
 # Datei blockierte jeden weiteren.
 MOUNT_DIR=$(mktemp -d "$BUILD_DIR/.md-clip-mount.XXXXXX")
 ATTACH_PLIST=$(mktemp "$BUILD_DIR/.md-clip-attach.plist.XXXXXX")
+MOUNT_MAY_BE_ATTACHED=1
 hdiutil attach "$RW_DMG_PATH" \
   -mountpoint "$MOUNT_DIR" \
   -nobrowse -noverify -noautoopen -plist > "$ATTACH_PLIST"
@@ -377,6 +394,7 @@ detach_release_mount "$MOUNT_DEVICE" || {
   exit 1
 }
 MOUNT_DEVICE=""
+MOUNT_MAY_BE_ATTACHED=""
 rmdir "$MOUNT_DIR"
 MOUNT_DIR=""
 rm -f "$ATTACH_PLIST"
