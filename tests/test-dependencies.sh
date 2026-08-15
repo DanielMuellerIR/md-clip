@@ -46,6 +46,10 @@ cat > "$FAKE_BIN/wl-paste" <<'SH'
 #!/bin/sh
 exit 0
 SH
+cat > "$FAKE_BIN/wl-copy" <<'SH'
+#!/bin/sh
+exit 0
+SH
 chmod +x "$RUNTIME/"* "$FAKE_BIN/"*
 
 export PATH="$FAKE_BIN:/usr/bin:/bin"
