@@ -6,7 +6,7 @@
     "token_budget": 700000,
     "status": "active",
     "started_at": "2026-08-15T13:46:33+02:00",
-    "tokens_spent": 288974
+    "tokens_spent": 326352
   },
   "campaign_history": [],
   "scope": {
@@ -152,7 +152,20 @@
       "risk": "critical",
       "priority": 5,
       "reason": "Notarisierung, /Applications-Installation, DMG-Erzeugung und Cleanup",
-      "state": "pending"
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260815T134633852340+0200",
+        "completed_at": "2026-08-15T14:13:59+02:00",
+        "observed_head": "3c44d293b52b0b9f572ffc2359a0b18cceafbc72",
+        "content_sha256": "6a54bbf2de2c23919d27d2ef4864a2ab32d18747d38626c6856d2c8e312ce3e7",
+        "file_count": 3,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Release-Cleanup verfolgt einen möglicherweise aktiven Mount unabhängig vom geparsten Device; bei unbekanntem Zustand bleiben Mountpfad und RW-Image erhalten, bis rmdir oder gezieltes Detach das Aushängen belegt",
+        "tests": [
+          "Isolierte Cleanup-Simulation bewahrt Image und Pfad bei unbekanntem Device und räumt nach belegtem rmdir auf; macOS- und Ubuntu-Gesamtgruppen grün; keine realen Signing-, Notary- oder Mount-Läufe"
+        ]
+      }
     },
     {
       "id": "app-runtime-update",
