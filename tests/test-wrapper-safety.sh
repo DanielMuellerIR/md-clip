@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sicherheitsregressionen für Launcher, Release-Mount und Download-Cache.
+# Sicherheitsregressionen für Launcher, Release, Appcast und Bundle-Prüfung.
 
 set -euo pipefail
 
@@ -7,6 +7,33 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$TESTS_DIR")"
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
+
+# Mehrere Prüfungen führen exakt den markierten Funktionsblock aus dem
+# Produktionscode mit Attrappen aus. Die Marker müssen eindeutig sein: Bei
+# einem fehlenden oder doppelten Marker wäre sonst unbemerkt nur ein Teil des
+# tatsächlichen Codes im Test gelandet.
+extract_shell_block() {
+  local source="$1"
+  local marker="$2"
+  local destination="$3"
+  local strip_workflow_indent="${4:-0}"
+
+  awk \
+    -v begin_marker="# BEGIN $marker" \
+    -v end_marker="# END $marker" \
+    -v strip_indent="$strip_workflow_indent" '
+      index($0, begin_marker) { begin_count++; capture=1; next }
+      index($0, end_marker) { end_count++; capture=0; next }
+      capture {
+        if (strip_indent) sub(/^          /, "")
+        print
+      }
+      END {
+        if (begin_count != 1 || end_count != 1) exit 65
+      }
+    ' "$source" > "$destination"
+  bash -n "$destination"
+}
 
 # --- Launcher: Pfade sind Umgebung, niemals AppleScript-Quelltext. ---
 mkdir -p "$TEST_ROOT/fake-bin" "$TEST_ROOT/capture"
@@ -169,7 +196,8 @@ echo "✓ Release-Skript löst ausschließlich das eigene attach-Device"
 # Cleanup nur bei ausgehängtem Device löschen, nach der regulären Löschung
 # wieder abgeben.
 grep -Fxq 'RW_DMG_OWNED=1' "$RELEASE_SCRIPT"
-grep -Fq 'if [ -n "$RW_DMG_OWNED" ] && [ -z "$MOUNT_DEVICE" ]; then' "$RELEASE_SCRIPT"
+grep -Fq 'if [ -n "$RW_DMG_OWNED" ] \' "$RELEASE_SCRIPT"
+grep -Fq '&& [ -z "$MOUNT_MAY_BE_ATTACHED" ]; then' "$RELEASE_SCRIPT"
 # Die Übernahme muss NACH der Erzeugung stehen, sonst räumt der Cleanup ein
 # fremdes Image ab, das dort schon lag.
 CREATE_LINE=$(grep -n '^hdiutil create' "$RELEASE_SCRIPT" | head -1 | cut -d: -f1)
@@ -179,6 +207,43 @@ if [ -z "$CREATE_LINE" ] || [ -z "$OWNED_LINE" ] || [ "$OWNED_LINE" -lt "$CREATE
   exit 1
 fi
 echo "✓ Release-Skript räumt sein schreibbares Zwischen-Image auch bei Abbruch weg"
+
+# Schlägt nach einem erfolgreichen attach nur die Plist-Auswertung fehl, ist
+# das Device unbekannt, der private Mount kann aber noch aktiv sein. In diesem
+# Zustand dürfen weder seine Image-Unterlage noch der Pfad vergessen werden.
+RELEASE_CLEANUP_BLOCK="$TEST_ROOT/release-cleanup.sh"
+extract_shell_block "$RELEASE_SCRIPT" RELEASE_CLEANUP "$RELEASE_CLEANUP_BLOCK"
+# shellcheck source=/dev/null
+source "$RELEASE_CLEANUP_BLOCK"
+
+RELEASE_CLEANUP_ROOT="$TEST_ROOT/release-cleanup-state"
+MOUNT_DIR="$RELEASE_CLEANUP_ROOT/mount"
+RW_DMG_PATH="$RELEASE_CLEANUP_ROOT/intermediate.dmg"
+mkdir -p "$MOUNT_DIR"
+printf 'simulierter aktiver Mount\n' > "$MOUNT_DIR/inhalt"
+printf 'image\n' > "$RW_DMG_PATH"
+APP_ZIP_DIR=""
+ATTACH_PLIST=""
+MOUNT_DEVICE=""
+MOUNT_MAY_BE_ATTACHED=1
+RW_DMG_OWNED=1
+
+cleanup_release 2> "$RELEASE_CLEANUP_ROOT/unknown-device.err"
+[ -f "$RW_DMG_PATH" ]
+[ -n "$MOUNT_DIR" ]
+[ -n "$MOUNT_MAY_BE_ATTACHED" ]
+grep -Fq 'DMG-Mount konnte keinem Device zugeordnet werden' \
+  "$RELEASE_CLEANUP_ROOT/unknown-device.err"
+
+# Ist der Pfad danach nachweislich leer und rmdir gelingt, darf der Cleanup
+# den unklaren Zustand auflösen und das eigene Zwischen-Image entfernen.
+rm -f "$MOUNT_DIR/inhalt"
+cleanup_release
+[ ! -e "$RW_DMG_PATH" ]
+[ -z "$MOUNT_DIR" ]
+[ -z "$MOUNT_MAY_BE_ATTACHED" ]
+[ -z "$RW_DMG_OWNED" ]
+echo "✓ Release-Cleanup bewahrt ein Image bei unbekanntem Mountzustand"
 
 # --- Release: die Plist-Vorlage muss wirklich eindeutige Pfade liefern. ---
 # Darwins mktemp ersetzt die X-Kette nur am ENDE der Vorlage. Stünde noch ein
@@ -371,12 +436,7 @@ fi
 # strikt validiertes API-Ergebnis darf genau eine Zeile in GITHUB_ENV schreiben;
 # manuelle Eingaben sind lediglich eine zu bestätigende Erwartung.
 TAG_SELECTOR="$TEST_ROOT/release-tag-selector.sh"
-awk '
-  /# BEGIN RELEASE_TAG_SELECTOR/ { capture=1; next }
-  /# END RELEASE_TAG_SELECTOR/ { capture=0 }
-  capture { sub(/^          /, ""); print }
-' "$APPCAST_WORKFLOW" > "$TAG_SELECTOR"
-bash -n "$TAG_SELECTOR"
+extract_shell_block "$APPCAST_WORKFLOW" RELEASE_TAG_SELECTOR "$TAG_SELECTOR" 1
 # shellcheck source=/dev/null
 source "$TAG_SELECTOR"
 
@@ -464,12 +524,7 @@ echo "✓ Appcast-Tooling kommt fest gepinnt aus einer vom Release-Tag getrennte
 # Sparkle-Warnung darf auch dann nicht entkommen, wenn sie verspätet auf stdout
 # erscheint und der Generator selbst mit Erfolg endet.
 APPCAST_GENERATOR_RUNNER="$TEST_ROOT/appcast-generator-runner.sh"
-awk '
-  /# BEGIN APPCAST_GENERATOR_RUNNER/ { capture=1; next }
-  /# END APPCAST_GENERATOR_RUNNER/ { capture=0 }
-  capture { sub(/^          /, ""); print }
-' "$APPCAST_WORKFLOW" > "$APPCAST_GENERATOR_RUNNER"
-bash -n "$APPCAST_GENERATOR_RUNNER"
+extract_shell_block "$APPCAST_WORKFLOW" APPCAST_GENERATOR_RUNNER "$APPCAST_GENERATOR_RUNNER" 1
 # shellcheck source=/dev/null
 source "$APPCAST_GENERATOR_RUNNER"
 sparkle_private_key="synthetic-test-key"
@@ -497,12 +552,7 @@ echo "✓ Appcast wartet auf stdout und stderr des Generators und prüft beide"
 # genau diesen Block heraus und testen ihn mit einer xmllint-Attrappe; weder
 # GitHub noch ein DMG oder ein Sparkle-Schlüssel werden dabei berührt.
 APPCAST_VALIDATOR="$TEST_ROOT/appcast-validator.sh"
-awk '
-  /# BEGIN APPCAST_METADATA_VALIDATOR/ { capture=1; next }
-  /# END APPCAST_METADATA_VALIDATOR/ { capture=0 }
-  capture { sub(/^          /, ""); print }
-' "$APPCAST_WORKFLOW" > "$APPCAST_VALIDATOR"
-bash -n "$APPCAST_VALIDATOR"
+extract_shell_block "$APPCAST_WORKFLOW" APPCAST_METADATA_VALIDATOR "$APPCAST_VALIDATOR" 1
 # shellcheck source=/dev/null
 source "$APPCAST_VALIDATOR"
 
@@ -727,15 +777,53 @@ if [ -z "$TRUST_CALL_LINE" ] || [ -z "$PRODUCT_EXEC_LINE" ] \
 fi
 echo "✓ Bundle wird vor Produktcode an Apple-Kette, Team-ID und Bundle-ID gebunden"
 
+# --- Bundle: Info.plist darf keine ältere Kompatibilität versprechen als Code. ---
+# Der echte Prüfer liest sowohl LC_BUILD_VERSION/minos als auch die ältere
+# LC_VERSION_MIN_MACOSX/version-Form aus vtool. Der isolierte Test hält die
+# numerische Grenze fest, ohne auf Linux ein Mach-O-Binary zu benötigen.
+COMPATIBILITY_CHECK="$TEST_ROOT/macos-compatibility-check.sh"
+extract_shell_block "$VERIFY_BUNDLE" MACOS_COMPATIBILITY_CHECK "$COMPATIBILITY_CHECK"
+# shellcheck source=/dev/null
+source "$COMPATIBILITY_CHECK"
+
+cat > "$TRUST_TEST_ROOT/fake-bin/vtool" <<'SH'
+#!/bin/sh
+case "${MD_CLIP_FAKE_VTOOL_STYLE:-modern}" in
+  modern)
+    printf '      cmd LC_BUILD_VERSION\n    minos %s\n' "$MD_CLIP_FAKE_MINOS"
+    ;;
+  legacy)
+    printf '      cmd LC_VERSION_MIN_MACOSX\n  version %s\n' "$MD_CLIP_FAKE_MINOS"
+    ;;
+  missing)
+    printf 'kein Load Command\n'
+    ;;
+esac
+SH
+chmod +x "$TRUST_TEST_ROOT/fake-bin/vtool"
+PATH="$TRUST_TEST_ROOT/fake-bin:$PATH"
+export PATH
+
+MD_CLIP_FAKE_VTOOL_STYLE=modern MD_CLIP_FAKE_MINOS=14.0 \
+  verify_macos_compatibility 14.0 "Test-Binary" "$TRUST_TEST_ROOT/dummy"
+MD_CLIP_FAKE_VTOOL_STYLE=legacy MD_CLIP_FAKE_MINOS=10.13 \
+  verify_macos_compatibility 14.0 "Test-Binary" "$TRUST_TEST_ROOT/dummy"
+if MD_CLIP_FAKE_VTOOL_STYLE=modern MD_CLIP_FAKE_MINOS=14.1 \
+  verify_macos_compatibility 14.0 "Test-Binary" "$TRUST_TEST_ROOT/dummy" >/dev/null 2>&1; then
+  echo "✗ Bundle-Prüfer akzeptiert ein Binary oberhalb von LSMinimumSystemVersion" >&2
+  exit 1
+fi
+if MD_CLIP_FAKE_VTOOL_STYLE=missing MD_CLIP_FAKE_MINOS=14.0 \
+  verify_macos_compatibility 14.0 "Test-Binary" "$TRUST_TEST_ROOT/dummy" >/dev/null 2>&1; then
+  echo "✗ Bundle-Prüfer akzeptiert ein Binary ohne lesbare Mindestversion" >&2
+  exit 1
+fi
+echo "✓ Bundle-Kompatibilität deckt Info.plist und alle Mach-O-Ziele"
+
 # --- Lokaler Build: nur die gerade gebaute, bytegleiche CLI ausführen. ---
 BUILD_SCRIPT="$PROJECT_ROOT/build.sh"
 BUILD_CLI_SMOKE="$TEST_ROOT/build-cli-smoke.sh"
-awk '
-  /# BEGIN TRUSTED_BUILD_CLI_SMOKE/ { capture=1; next }
-  /# END TRUSTED_BUILD_CLI_SMOKE/ { capture=0 }
-  capture { print }
-' "$BUILD_SCRIPT" > "$BUILD_CLI_SMOKE"
-bash -n "$BUILD_CLI_SMOKE"
+extract_shell_block "$BUILD_SCRIPT" TRUSTED_BUILD_CLI_SMOKE "$BUILD_CLI_SMOKE"
 # shellcheck source=/dev/null
 source "$BUILD_CLI_SMOKE"
 
