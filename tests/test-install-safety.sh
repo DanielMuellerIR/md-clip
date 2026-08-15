@@ -19,7 +19,7 @@ cp "$PROJECT_ROOT/helpers/clipboard-rtf.swift" "$PROJECT_COPY/helpers/clipboard-
 
 cat > "$FAKE_BIN/uname" <<'SH'
 #!/bin/sh
-echo Darwin
+printf '%s\n' "${MD_CLIP_TEST_UNAME:-Darwin}"
 SH
 cat > "$FAKE_BIN/pandoc" <<'SH'
 #!/bin/sh
@@ -41,6 +41,14 @@ while [ "$#" -gt 0 ]; do
 done
 printf '#!/bin/sh\nexit 0\n' > "$output"
 chmod +x "$output"
+SH
+cat > "$FAKE_BIN/xclip" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat > "$FAKE_BIN/wl-paste" <<'SH'
+#!/bin/sh
+exit 0
 SH
 chmod +x "$FAKE_BIN/"*
 export PATH="$FAKE_BIN:/usr/bin:/bin"
@@ -110,6 +118,29 @@ if grep -Fq 'pandoc gefunden' "$APP_OUTPUT"; then
   exit 1
 fi
 echo "✓ install-app-symlink wird verständlich als App-Installation erklärt"
+
+# Linux braucht beide Hälften von wl-clipboard: wl-paste zum Lesen und
+# wl-copy für --replace. Eine Teilinstallation darf nicht erst im Produkt
+# auffallen. Danach ergänzt die Attrappe wl-copy und belegt den Erfolgsweg.
+LINUX_PREFIX="$TEST_ROOT/linux-prefix"
+LINUX_OUTPUT="$TEST_ROOT/linux-install.out"
+mkdir -p "$LINUX_PREFIX"
+if MD_CLIP_TEST_UNAME=Linux run_install_with_output "$LINUX_PREFIX" "$LINUX_OUTPUT"; then
+  echo "✗ install-linux akzeptiert Wayland ohne wl-copy" >&2
+  exit 1
+fi
+grep -Fq 'wl-clipboard (Wayland-Sitzungen; wl-paste + wl-copy)' "$LINUX_OUTPUT"
+[ ! -e "$LINUX_PREFIX/md-clip" ]
+echo "✓ install-linux lehnt wl-clipboard ohne wl-copy ab"
+
+cat > "$FAKE_BIN/wl-copy" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$FAKE_BIN/wl-copy"
+MD_CLIP_TEST_UNAME=Linux run_install "$LINUX_PREFIX"
+[ "$(readlink "$LINUX_PREFIX/md-clip")" = "$ABS_MAIN" ]
+echo "✓ install-linux prüft X11- und beide Wayland-Werkzeuge"
 
 # Toter Symlink und eigener Symlink dürfen idempotent repariert werden.
 mkdir -p "$TEST_ROOT/dead"

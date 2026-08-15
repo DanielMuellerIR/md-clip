@@ -115,8 +115,10 @@ if [ "$PLATFORM" = "linux" ]; then
   # Beide Clipboard-Werkzeuge empfehlen, nicht nur das der aktuellen Sitzung:
   # Beim Wechsel zwischen X11- und Wayland-Sitzung (Login-Bildschirm) soll
   # md-clip weiter laufen, ohne dass man nachinstallieren muss.
-  command -v xclip    >/dev/null 2>&1 || missing+=("xclip (X11-Sitzungen)")
-  command -v wl-paste >/dev/null 2>&1 || missing+=("wl-clipboard (Wayland-Sitzungen)")
+  command -v xclip >/dev/null 2>&1 || missing+=("xclip (X11-Sitzungen)")
+  if ! command -v wl-paste >/dev/null 2>&1 || ! command -v wl-copy >/dev/null 2>&1; then
+    missing+=("wl-clipboard (Wayland-Sitzungen; wl-paste + wl-copy)")
+  fi
 fi
 
 if [ "${#missing[@]}" -gt 0 ]; then
