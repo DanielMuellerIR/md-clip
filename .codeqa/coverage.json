@@ -6,7 +6,7 @@
     "token_budget": 700000,
     "status": "active",
     "started_at": "2026-08-15T13:46:33+02:00",
-    "tokens_spent": 326352
+    "tokens_spent": 399017
   },
   "campaign_history": [],
   "scope": {
@@ -177,7 +177,20 @@
       "risk": "high",
       "priority": 6,
       "reason": "Dock-Start, privilegierte CLI-Verknüpfung, HUD und Sparkle-Laufzeit",
-      "state": "pending"
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260815T134633852340+0200",
+        "completed_at": "2026-08-15T14:20:28+02:00",
+        "observed_head": "1ba26a3160e3af36225c21b9d5d2d121d32e3595",
+        "content_sha256": "72381151401b9d05ca73167717f31cbe71369d5276f94dbc1d07721348d49ee3",
+        "file_count": 3,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Updater-Helfer akzeptiert jetzt genau eine dokumentierte Betriebsart; widersprüchliche oder doppelte Argumente enden vor AppKit/Sparkle mit Exit 64. Launcher, HUD und Sparkle-Delegate-Lebenszyklus vollständig geprüft; keine weitere belegbare Vereinfachung nötig.",
+        "tests": [
+          "Altparser aus HEAD akzeptiert --background --interactive; neuer echter Bundle-Helfer: fehlend/doppelt/unbekannt jeweils Exit 64; ./build.sh BUILD/VERIFY OK; macOS 17/17 plus vier test-*.sh; Ubuntu 24.04 mit pandoc 3.1.3: 15/15 ohne Display, 18/18 unter Xvfb plus vier test-*.sh."
+        ]
+      }
     },
     {
       "id": "safety-test-harness",
