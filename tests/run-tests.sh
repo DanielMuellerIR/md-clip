@@ -333,6 +333,38 @@ else
   FAILED=$((FAILED + 1))
 fi
 
+# --- Test 10c: Fortsetzungszeilen von Markdown-Sonderlisten ---
+# Der Zieldialekt `markdown` kann neben Dezimal- auch alphabetische, römische
+# und Definitionslisten schreiben. tidy_markdown muss deren Inhalts-Einrückung
+# als Listen-Container erkennen. Sonst gelten die vier eingerückten Spalten der
+# Fortsetzungszeile fälschlich als Code und sichtbare \#-/\|-Escapes bleiben
+# stehen. GFM und CommonMark verwenden diese Marker nicht, deshalb prüft dieser
+# Fall bewusst den Dialekt, in dem der Fehler auftreten kann.
+special_lists_input='<ol type="a"><li><p>eins<br>mitte # raute | pipe</p></li></ol><dl><dt>Begriff</dt><dd><p>eins<br>mitte # raute | pipe</p></dd></dl>'
+special_lists_actual=$(
+  PANDOC_OPTS=(-f html -t markdown-raw_html --wrap=none)
+  printf '%s' "$special_lists_input" | convert_html
+)
+special_lists_ast=$(printf '%s\n' "$special_lists_actual" | pandoc -f markdown -t native)
+# Direkte Gegenprobe für denselben Marker an der zweiten Verwendungsstelle:
+# Ein Hard-Break direkt vor einem Listenpunkt ist nur Layout und muss weg.
+special_list_break_actual=$(printf 'Text\\\na.  Punkt\n' | tidy_markdown)
+
+TOTAL=$((TOTAL + 1))
+if [ "$(printf '%s\n' "$special_lists_actual" | grep -Fc 'mitte # raute | pipe')" -eq 2 ] \
+  && ! printf '%s\n' "$special_lists_actual" | grep -Eq '\\[#|]' \
+  && printf '%s' "$special_lists_ast" | grep -q 'OrderedList' \
+  && printf '%s' "$special_lists_ast" | grep -q 'DefinitionList' \
+  && ! printf '%s' "$special_lists_ast" | grep -q 'CodeBlock' \
+  && [ "$special_list_break_actual" = $'Text\na.  Punkt' ]; then
+  echo "✓ markdown-listenfortsetzung (Escapes entfernt, Struktur erhalten)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ markdown-listenfortsetzung"
+  printf '%s\n' "$special_lists_actual" | sed 's/^/    /'
+  FAILED=$((FAILED + 1))
+fi
+
 echo
 echo "==> Clipboard-Roundtrip-Tests"
 #

@@ -135,6 +135,13 @@ tidy_markdown() {
     $text =~ s/\n\z//;
     my @lines = split(/\n/, $text, -1);
 
+    # Alle Listenmarker, die pandoc in den unterstützten Zieldialekten
+    # ausgeben kann. Dieselbe Grammatik muss sowohl die Code-Erkennung als
+    # auch den Schutz einer Raute am Anfang eines Listenpunkts verwenden:
+    # Driften die beiden Stellen auseinander, gilt eine eingerückte
+    # Fortsetzungszeile fälschlich als Code und wird nicht aufgeräumt.
+    my $list_marker = qr/(?:[-*+:~]|\d{1,9}[.)]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])/;
+
     # Blockquote-Marker abschneiden. Innerhalb eines Zitats gelten dieselben
     # Regeln, nur eben hinter dem "> ".
     sub quote_prefix {
@@ -298,8 +305,8 @@ tidy_markdown() {
             }
         }
 
-        if ($body =~ /^[ \t]*([-*+]|\d{1,9}[.)])([ \t]+)/) {
-            push @item_indents, $indent + length($1) + length($2);
+        if ($body =~ /^[ \t]*($list_marker)([ \t]+)/) {
+            push @item_indents, $indent + length($1) + indent_width($2);
         }
     }
 
@@ -352,7 +359,7 @@ tidy_markdown() {
             my $next_body   = substr($lines[$i + 1], length($next_prefix));
             if ($next_body =~ /^[ \t]*$/) {
                 $drop = 1;                        # Umbruch vor einer Leerzeile
-            } elsif ($next_body =~ /^[ \t]*(?:[-*+] |\d{1,9}[.)] )/) {
+            } elsif ($next_body =~ /^[ \t]*$list_marker[ \t]+/) {
                 $drop = 1;                        # Umbruch vor einem Listenpunkt
             }
         }
@@ -420,8 +427,7 @@ tidy_markdown() {
             # Im Zweifel lieber einen Marker zu viel erkennen: dann bleibt ein
             # überzähliger Backslash stehen (sichtbarer Schönheitsfehler), statt
             # dass sich die Dokumentstruktur ändert.
-            my ($marker) =
-                $rest =~ /^((?:(?:[-*+:~]|\d{1,9}[.)]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])[ \t]+)+)/;
+            my ($marker) = $rest =~ /^((?:$list_marker[ \t]+)+)/;
             $marker = defined($marker) ? $marker : q{};
             my $tail = substr($rest, length($marker));
 
