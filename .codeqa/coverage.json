@@ -6,7 +6,7 @@
     "token_budget": 700000,
     "status": "active",
     "started_at": "2026-08-15T13:46:33+02:00",
-    "tokens_spent": 454798
+    "tokens_spent": 477347
   },
   "campaign_history": [],
   "scope": {
@@ -223,7 +223,20 @@
       "risk": "critical",
       "priority": 8,
       "reason": "Privilegierter Appcast-Workflow mit Release-Artefakten, GitHub Pages und Sparkle-Schlüssel",
-      "state": "pending"
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260815T134633852340+0200",
+        "completed_at": "2026-08-15T14:25:31+02:00",
+        "observed_head": "73744ef3705f6d3c73d90cecff60be868ffa5fb4",
+        "content_sha256": "806b289f206b3d34e9881ab99002057df965e99e826ab59ba2fd43566d16a3ce",
+        "file_count": 3,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Linux-CI auf expliziten contents:read-Zugriff begrenzt, Checkout-Credentials nicht persistiert und actions/checkout vom beweglichen Tag auf denselben geprüften Commit wie im Appcast-Workflow gepinnt. Privilegierter Appcast-Workflow und unprivilegierter Release-Dispatcher vollständig geprüft; Vertrauenszonentrennung bleibt schlüssig.",
+        "tests": [
+          "Ruby YAML-Parser: alle drei Workflow-Dateien gültig; tests/test-wrapper-safety.sh auf macOS grün und prüft extrahierte Release-Tag-Auswahl, Generator-Runner und Appcast-Validator; komplette Linux-CI-Befehle derselben Kampagne zuvor im Ubuntu-24.04-Container grün (15/15 ohne Display, 18/18 unter Xvfb plus vier Einzelskripte)."
+        ]
+      }
     },
     {
       "id": "visual-assets-tooling",
