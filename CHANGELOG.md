@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.2.5 — 2026-08-16
+
+- Die Markdown-Nachbearbeitung unterscheidet Listenmarker jetzt nach dem
+  gewählten Zieldialekt. Gewöhnlicher Text wie `a. Text` oder `: Text` nach
+  einem harten Zeilenumbruch wird dadurch nicht mehr als Liste oder
+  eingerückter Code fehlgedeutet; echte Umbrüche und Code-Inhalt bleiben
+  erhalten.
+- Alphabetische, römische und Definitionslisten im Ziel `markdown` behalten
+  weiterhin ihre Struktur, ohne die engeren Regeln von GFM und CommonMark zu
+  verändern.
+- Der Linux-Installer prüft für Wayland beide benötigten Programme
+  (`wl-paste` und `wl-copy`) und meldet eine unvollständige Installation vor
+  jeder Änderung am Installationsziel.
+- Der Sparkle-Helfer akzeptiert genau einen dokumentierten Modus und lehnt
+  fehlende, doppelte oder widersprüchliche Argumente mit Exit-Code 64 ab.
+- Die App weist nun macOS 14 als tatsächliche Mindestversion aus. Der
+  Bundle-Prüfer vergleicht diese Angabe mit allen eigenen Helfern, pandoc und
+  den ausgelieferten Sparkle-Programmen.
+- Der Release-Lauf bewahrt bei einem unklaren DMG-Mountzustand das
+  Zwischen-Image, statt möglicherweise die Unterlage eines noch aktiven
+  Mounts zu löschen.
+- Linux-CI, Build-, Release- und Sicherheitstests prüfen die gehärteten
+  Grenzen jetzt direkt; die Icon-Werkzeuge arbeiten in privaten temporären
+  Verzeichnissen und lehnen nicht quadratische Vorlagen ab.
+
 ## 1.2.4 — 2026-08-11
 
 - Der Release-Dispatcher startet nur noch für stabile Releases; ein
