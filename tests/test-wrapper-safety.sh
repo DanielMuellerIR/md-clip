@@ -36,6 +36,7 @@ extract_shell_block() {
 }
 
 # --- Launcher: Pfade sind Umgebung, niemals AppleScript-Quelltext. ---
+MD_CLIP_HOST_PATH="$PATH"
 mkdir -p "$TEST_ROOT/fake-bin" "$TEST_ROOT/capture"
 cat > "$TEST_ROOT/fake-bin/osascript" <<'SH'
 #!/bin/sh
@@ -363,6 +364,50 @@ set -e
 grep -Fxq -- '--replace' "$UPDATE_ROOT/capture/cli-args"
 grep -Fxq 'cli-zuerst' "$UPDATE_ROOT/capture/order"
 echo "✓ Launcher konvertiert zuerst und reicht den CLI-Exit-Status durch"
+
+# --- Updater: genau ein eindeutiger Modus. ---
+# Der Testmodus schließt AppKit und Sparkle beim Kompilieren aus, führt aber
+# denselben Swift-Parser aus wie das Bundle-Programm. Damit sind nicht nur die
+# Launcher-Argumente, sondern auch die Ablehnung mehrdeutiger Aufrufe dauerhaft
+# repositoryweit geprüft.
+UPDATER_MODE_SOURCE="$PROJECT_ROOT/helpers/md-clip-updater.swift"
+UPDATER_MODE_BINARY="$TEST_ROOT/md-clip-updater-mode-test"
+SWIFTC=$(PATH="$MD_CLIP_HOST_PATH" command -v swiftc || true)
+if [ -z "$SWIFTC" ]; then
+  echo "✗ Swift-Compiler für den Updater-Modustest fehlt" >&2
+  exit 1
+fi
+PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" -D MD_CLIP_UPDATER_MODE_TEST \
+  "$UPDATER_MODE_SOURCE" -o "$UPDATER_MODE_BINARY"
+
+[ "$("$UPDATER_MODE_BINARY" --background)" = '--background' ]
+[ "$("$UPDATER_MODE_BINARY" --interactive)" = '--interactive' ]
+
+assert_updater_mode_rejected() {
+  local label="$1"
+  shift
+  local stdout="$TEST_ROOT/updater-$label.out"
+  local stderr="$TEST_ROOT/updater-$label.err"
+  local status
+
+  set +e
+  "$UPDATER_MODE_BINARY" "$@" > "$stdout" 2> "$stderr"
+  status=$?
+  set -e
+  if [ "$status" -ne 64 ]; then
+    echo "✗ Updater akzeptiert $label oder meldet falschen Exit $status" >&2
+    exit 1
+  fi
+  [ ! -s "$stdout" ]
+  grep -Fq 'Aufruf: md-clip-updater --background | --interactive' "$stderr"
+}
+
+assert_updater_mode_rejected fehlenden-modus
+assert_updater_mode_rejected doppelten-modus --background --background
+assert_updater_mode_rejected widersprüchliche-modi --background --interactive
+assert_updater_mode_rejected unbekannten-modus --unbekannt
+assert_updater_mode_rejected zusätzliches-argument --background --unbekannt
+echo "✓ Updater akzeptiert genau einen bekannten Modus"
 
 # --- Erfolgsmeldung: HUD-Helfer zuerst, osascript nur als Fallback. ---
 # Vertrag in bin/md-clip (Befunde 2026-08-06: osascript-Meldungen laufen
@@ -779,15 +824,20 @@ echo "✓ Bundle wird vor Produktcode an Apple-Kette, Team-ID und Bundle-ID gebu
 
 # --- Bundle: Info.plist darf keine ältere Kompatibilität versprechen als Code. ---
 # Der echte Prüfer liest sowohl LC_BUILD_VERSION/minos als auch die ältere
-# LC_VERSION_MIN_MACOSX/version-Form aus vtool. Der isolierte Test hält die
-# numerische Grenze fest, ohne auf Linux ein Mach-O-Binary zu benötigen.
-COMPATIBILITY_CHECK="$TEST_ROOT/macos-compatibility-check.sh"
-extract_shell_block "$VERIFY_BUNDLE" MACOS_COMPATIBILITY_CHECK "$COMPATIBILITY_CHECK"
-# shellcheck source=/dev/null
-source "$COMPATIBILITY_CHECK"
+# LC_VERSION_MIN_MACOSX/version-Form aus vtool. Der isolierte Test führt den
+# vollständigen markierten Produktionsblock aus und zeichnet jedes Ziel auf;
+# dadurch fällt auch ein künftig aus der Schleife entferntes Binary auf.
+APP="$TRUST_TEST_ROOT/compatibility/md-clip.app"
+UPDATER="$APP/Contents/MacOS/md-clip-updater"
+SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+MINIMUM_SYSTEM_VERSION=14.0
+MD_CLIP_VTOOL_CAPTURE="$TRUST_TEST_ROOT/vtool-targets"
+MD_CLIP_FAKE_MINOS=14.0
+export MD_CLIP_VTOOL_CAPTURE MD_CLIP_FAKE_MINOS
 
 cat > "$TRUST_TEST_ROOT/fake-bin/vtool" <<'SH'
 #!/bin/sh
+printf '%s\n' "${2:-}" >> "$MD_CLIP_VTOOL_CAPTURE"
 case "${MD_CLIP_FAKE_VTOOL_STYLE:-modern}" in
   modern)
     printf '      cmd LC_BUILD_VERSION\n    minos %s\n' "$MD_CLIP_FAKE_MINOS"
@@ -803,6 +853,28 @@ SH
 chmod +x "$TRUST_TEST_ROOT/fake-bin/vtool"
 PATH="$TRUST_TEST_ROOT/fake-bin:$PATH"
 export PATH
+
+COMPATIBILITY_CHECK="$TEST_ROOT/macos-compatibility-check.sh"
+extract_shell_block "$VERIFY_BUNDLE" MACOS_COMPATIBILITY_CHECK "$COMPATIBILITY_CHECK"
+# shellcheck source=/dev/null
+source "$COMPATIBILITY_CHECK"
+
+EXPECTED_VTOOL_TARGETS="$TRUST_TEST_ROOT/expected-vtool-targets"
+printf '%s\n' \
+  "$UPDATER" \
+  "$APP/Contents/MacOS/md-clip-hud" \
+  "$APP/Contents/Resources/bin/clipboard-html" \
+  "$APP/Contents/Resources/bin/clipboard-rtf" \
+  "$APP/Contents/Resources/bin/pandoc" \
+  "$SPARKLE_FRAMEWORK/Versions/B/Sparkle" \
+  "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate" \
+  "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater" \
+  > "$EXPECTED_VTOOL_TARGETS"
+if ! cmp -s "$EXPECTED_VTOOL_TARGETS" "$MD_CLIP_VTOOL_CAPTURE"; then
+  echo "✗ Bundle-Kompatibilitätsprüfung erreicht nicht alle Mach-O-Ziele" >&2
+  diff "$EXPECTED_VTOOL_TARGETS" "$MD_CLIP_VTOOL_CAPTURE" >&2 || true
+  exit 1
+fi
 
 MD_CLIP_FAKE_VTOOL_STYLE=modern MD_CLIP_FAKE_MINOS=14.0 \
   verify_macos_compatibility 14.0 "Test-Binary" "$TRUST_TEST_ROOT/dummy"

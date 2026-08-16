@@ -50,6 +50,10 @@ cat > "$FAKE_BIN/wl-paste" <<'SH'
 #!/bin/sh
 exit 0
 SH
+cat > "$FAKE_BIN/wl-copy" <<'SH'
+#!/bin/sh
+exit 0
+SH
 chmod +x "$FAKE_BIN/"*
 export PATH="$FAKE_BIN:/usr/bin:/bin"
 
@@ -119,26 +123,69 @@ if grep -Fq 'pandoc gefunden' "$APP_OUTPUT"; then
 fi
 echo "✓ install-app-symlink wird verständlich als App-Installation erklärt"
 
-# Linux braucht beide Hälften von wl-clipboard: wl-paste zum Lesen und
-# wl-copy für --replace. Eine Teilinstallation darf nicht erst im Produkt
-# auffallen. Danach ergänzt die Attrappe wl-copy und belegt den Erfolgsweg.
-LINUX_PREFIX="$TEST_ROOT/linux-prefix"
-LINUX_OUTPUT="$TEST_ROOT/linux-install.out"
-mkdir -p "$LINUX_PREFIX"
-if MD_CLIP_TEST_UNAME=Linux run_install_with_output "$LINUX_PREFIX" "$LINUX_OUTPUT"; then
-  echo "✗ install-linux akzeptiert Wayland ohne wl-copy" >&2
-  exit 1
-fi
-grep -Fq 'wl-clipboard (Wayland-Sitzungen; wl-paste + wl-copy)' "$LINUX_OUTPUT"
-[ ! -e "$LINUX_PREFIX/md-clip" ]
-echo "✓ install-linux lehnt wl-clipboard ohne wl-copy ab"
+# Für die Linux-Fälle reicht ein Attrappen-Verzeichnis vor dem System-PATH
+# nicht: Auf einem CI-Runner könnte das vermeintlich fehlende Werkzeug unter
+# /usr/bin liegen. Jeder Fall erhält deshalb einen abgeschlossenen PATH mit nur
+# den ausdrücklich zugelassenen Programmen.
+prepare_linux_path() {
+  local destination="$1"
+  shift
+  local tool source
 
-cat > "$FAKE_BIN/wl-copy" <<'SH'
-#!/bin/sh
-exit 0
-SH
-chmod +x "$FAKE_BIN/wl-copy"
-MD_CLIP_TEST_UNAME=Linux run_install "$LINUX_PREFIX"
+  mkdir -p "$destination"
+  for tool in bash chmod dirname grep head ln perl; do
+    source=$(command -v "$tool")
+    ln -s "$source" "$destination/$tool"
+  done
+  ln -s "$FAKE_BIN/uname" "$destination/uname"
+  ln -s "$FAKE_BIN/pandoc" "$destination/pandoc"
+  for tool in "$@"; do
+    ln -s "$FAKE_BIN/$tool" "$destination/$tool"
+  done
+}
+
+assert_linux_dependency_missing() {
+  local missing_tool="$1"
+  local expected_message="$2"
+  local case_root="$TEST_ROOT/linux-missing-$missing_tool"
+  local case_bin="$case_root/bin"
+  local prefix="$case_root/prefix"
+  local output="$case_root/install.out"
+  local available=()
+  local tool
+
+  mkdir -p "$prefix"
+  printf 'unverändert\n' > "$prefix/sentinel"
+  for tool in xclip wl-paste wl-copy; do
+    [ "$tool" = "$missing_tool" ] || available+=("$tool")
+  done
+  prepare_linux_path "$case_bin" "${available[@]}"
+
+  if (
+    export PATH="$case_bin"
+    MD_CLIP_TEST_UNAME=Linux run_install_with_output "$prefix" "$output"
+  ); then
+    echo "✗ install-linux akzeptiert fehlendes $missing_tool" >&2
+    exit 1
+  fi
+  grep -Fq "$expected_message" "$output"
+  [ ! -e "$prefix/md-clip" ]
+  grep -Fxq 'unverändert' "$prefix/sentinel"
+  echo "✓ install-linux lehnt fehlendes $missing_tool ab"
+}
+
+assert_linux_dependency_missing xclip 'xclip (X11-Sitzungen)'
+assert_linux_dependency_missing wl-paste 'wl-clipboard (Wayland-Sitzungen; wl-paste + wl-copy)'
+assert_linux_dependency_missing wl-copy 'wl-clipboard (Wayland-Sitzungen; wl-paste + wl-copy)'
+
+LINUX_PREFIX="$TEST_ROOT/linux-complete/prefix"
+LINUX_BIN="$TEST_ROOT/linux-complete/bin"
+mkdir -p "$LINUX_PREFIX"
+prepare_linux_path "$LINUX_BIN" xclip wl-paste wl-copy
+(
+  export PATH="$LINUX_BIN"
+  MD_CLIP_TEST_UNAME=Linux run_install "$LINUX_PREFIX"
+)
 [ "$(readlink "$LINUX_PREFIX/md-clip")" = "$ABS_MAIN" ]
 echo "✓ install-linux prüft X11- und beide Wayland-Werkzeuge"
 

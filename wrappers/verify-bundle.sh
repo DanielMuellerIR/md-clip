@@ -106,6 +106,8 @@ fi
 
 # ---------- macOS-Kompatibilität ----------
 
+MINIMUM_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO_PLIST" 2>/dev/null || true)"
+
 # BEGIN MACOS_COMPATIBILITY_CHECK
 macos_version_at_most() {
   local actual="$1"
@@ -165,17 +167,42 @@ verify_macos_compatibility() {
     fi
   done <<< "$minimums"
 }
-# END MACOS_COMPATIBILITY_CHECK
 
-MINIMUM_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO_PLIST" 2>/dev/null || true)"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "Updater-Helfer" "$UPDATER"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "HUD-Helfer" "$APP/Contents/MacOS/md-clip-hud"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "HTML-Helper" "$APP/Contents/Resources/bin/clipboard-html"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "RTF-Helper" "$APP/Contents/Resources/bin/clipboard-rtf"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "pandoc" "$APP/Contents/Resources/bin/pandoc"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "Sparkle-Framework" "$SPARKLE_FRAMEWORK/Versions/B/Sparkle"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "Sparkle-Autoupdate" "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
-verify_macos_compatibility "$MINIMUM_SYSTEM_VERSION" "Sparkle-Updater" "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"
+# Eine zentrale Zielmenge verhindert, dass Produkt und Regressionstest
+# unterschiedliche Bundle-Bestandteile prüfen. Der markierte Block enthält
+# bewusst auch den Aufruf: Der Test führt damit genau dieselbe Schleife aus.
+verify_all_macos_compatibility() {
+  local declared="$1"
+  local labels=(
+    "Updater-Helfer"
+    "HUD-Helfer"
+    "HTML-Helper"
+    "RTF-Helper"
+    "pandoc"
+    "Sparkle-Framework"
+    "Sparkle-Autoupdate"
+    "Sparkle-Updater"
+  )
+  local binaries=(
+    "$UPDATER"
+    "$APP/Contents/MacOS/md-clip-hud"
+    "$APP/Contents/Resources/bin/clipboard-html"
+    "$APP/Contents/Resources/bin/clipboard-rtf"
+    "$APP/Contents/Resources/bin/pandoc"
+    "$SPARKLE_FRAMEWORK/Versions/B/Sparkle"
+    "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"
+  )
+  local index
+
+  for index in "${!labels[@]}"; do
+    verify_macos_compatibility \
+      "$declared" "${labels[$index]}" "${binaries[$index]}"
+  done
+}
+
+verify_all_macos_compatibility "$MINIMUM_SYSTEM_VERSION"
+# END MACOS_COMPATIBILITY_CHECK
 
 # ---------- Update-Konfiguration ----------
 

@@ -70,6 +70,7 @@ fi
 
 # Die produktive Pipeline wird direkt geladen; nur der plattformspezifische
 # RTF-Adapter bleibt im Test-Runner.
+TO=gfm
 PANDOC_OPTS=(-f html -t gfm-raw_html --wrap=none)
 # shellcheck source=../lib/pipeline.sh
 source "$PROJECT_ROOT/lib/pipeline.sh"
@@ -311,6 +312,7 @@ run_test "escaped-markers (überzählige Backslashes weg)" \
 # Erwartungsdatei, die den Marker festschreiben müsste.
 roman_input='<ol type="i" start="4"><li># tief</li></ol>'
 roman_actual=$(
+  TO=markdown
   PANDOC_OPTS=(-f html -t markdown-raw_html --wrap=none)
   printf '%s' "$roman_input" | convert_html
 )
@@ -342,13 +344,15 @@ fi
 # Fall bewusst den Dialekt, in dem der Fehler auftreten kann.
 special_lists_input='<ol type="a"><li><p>eins<br>mitte # raute | pipe</p></li></ol><dl><dt>Begriff</dt><dd><p>eins<br>mitte # raute | pipe</p></dd></dl>'
 special_lists_actual=$(
+  TO=markdown
   PANDOC_OPTS=(-f html -t markdown-raw_html --wrap=none)
   printf '%s' "$special_lists_input" | convert_html
 )
 special_lists_ast=$(printf '%s\n' "$special_lists_actual" | pandoc -f markdown -t native)
-# Direkte Gegenprobe für denselben Marker an der zweiten Verwendungsstelle:
-# Ein Hard-Break direkt vor einem Listenpunkt ist nur Layout und muss weg.
-special_list_break_actual=$(printf 'Text\\\na.  Punkt\n' | tidy_markdown)
+# Direkte Gegenprobe für denselben Marker an der Hard-Break-Regel: Hinter
+# einem echten Umbruch ist `a.` Teil desselben Absatzes und kein belegter
+# Listenblock. Der Umbruch muss deshalb als zwei Leerzeichen erhalten bleiben.
+special_list_break_actual=$(printf 'Text\\\na.  Punkt\n' | tidy_markdown markdown)
 
 TOTAL=$((TOTAL + 1))
 if [ "$(printf '%s\n' "$special_lists_actual" | grep -Fc 'mitte # raute | pipe')" -eq 2 ] \
@@ -356,7 +360,7 @@ if [ "$(printf '%s\n' "$special_lists_actual" | grep -Fc 'mitte # raute | pipe')
   && printf '%s' "$special_lists_ast" | grep -q 'OrderedList' \
   && printf '%s' "$special_lists_ast" | grep -q 'DefinitionList' \
   && ! printf '%s' "$special_lists_ast" | grep -q 'CodeBlock' \
-  && [ "$special_list_break_actual" = $'Text\na.  Punkt' ]; then
+  && [ "$special_list_break_actual" = $'Text  \na.  Punkt' ]; then
   echo "✓ markdown-listenfortsetzung (Escapes entfernt, Struktur erhalten)"
   PASSED=$((PASSED + 1))
 else
@@ -364,6 +368,55 @@ else
   printf '%s\n' "$special_lists_actual" | sed 's/^/    /'
   FAILED=$((FAILED + 1))
 fi
+
+# --- Test 10d: Marker-Grammatik gehört zum Zieldialekt und Blockkontext ---
+# Derselbe HTML-Absatz muss in allen drei Zielen einen echten LineBreak behalten:
+# `a.` direkt hinter `<br>` ist normaler Absatztext, auch wenn pandoc-Markdown
+# alphabetische Listen grundsätzlich kennt. Außerdem darf `: ordinary` vor
+# eingerücktem Code keinen falschen Listencontainer öffnen. Die positiven
+# Listen-ASTs stellen sicher, dass die engere Erkennung echte Listen weiter
+# schützt.
+for target_format in gfm markdown commonmark; do
+  hardbreak_actual=$(
+    TO="$target_format"
+    PANDOC_OPTS=(-f html -t "${target_format}-raw_html" --wrap=none)
+    printf '%s' '<p>vorne<br>a. Text</p>' | convert_html
+  )
+  hardbreak_ast=$(printf '%s\n' "$hardbreak_actual" | pandoc -f "$target_format" -t native)
+
+  marker_code_actual=$(
+    TO="$target_format"
+    PANDOC_OPTS=(-f html -t "${target_format}-raw_html" --wrap=none)
+    printf '<p>: ordinary</p><pre><code>\\# keep\\\n\\- keep</code></pre>' | convert_html
+  )
+  marker_code_ast=$(printf '%s\n' "$marker_code_actual" | pandoc -f "$target_format" -t native)
+
+  positive_list_actual=$(
+    TO="$target_format"
+    PANDOC_OPTS=(-f html -t "${target_format}-raw_html" --wrap=none)
+    printf '%s' '<ul><li><p>eins<br>mitte # raute | pipe</p></li></ul><ol><li>zwei</li></ol>' \
+      | convert_html
+  )
+  positive_list_ast=$(printf '%s\n' "$positive_list_actual" | pandoc -f "$target_format" -t native)
+
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$hardbreak_ast" | grep -q 'LineBreak' \
+    && ! printf '%s' "$hardbreak_ast" | grep -q 'SoftBreak' \
+    && printf '%s\n' "$marker_code_actual" | grep -Fxq '    \# keep\' \
+    && printf '%s\n' "$marker_code_actual" | grep -Fxq '    \- keep' \
+    && printf '%s' "$marker_code_ast" | grep -q 'CodeBlock' \
+    && printf '%s' "$positive_list_ast" | grep -q 'BulletList' \
+    && printf '%s' "$positive_list_ast" | grep -q 'OrderedList' \
+    && ! printf '%s' "$positive_list_ast" | grep -q 'CodeBlock'; then
+    echo "✓ $target_format-markerkontext (Hard-Break, Code und Listenstruktur)"
+    PASSED=$((PASSED + 1))
+  else
+    echo "✗ $target_format-markerkontext"
+    printf '%s\n' "$hardbreak_ast" "$marker_code_actual" "$positive_list_ast" \
+      | sed 's/^/    /'
+    FAILED=$((FAILED + 1))
+  fi
+done
 
 echo
 echo "==> Clipboard-Roundtrip-Tests"

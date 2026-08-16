@@ -126,21 +126,35 @@ unwrap_list_paragraphs() {
 # ~~~) genauso wie eingerückte (vier Leerzeichen) — und alle Aufräumregeln
 # überspringen sie.
 tidy_markdown() {
+  local target_format="${1:-${TO:-gfm}}"
+  case "$target_format" in
+    gfm|markdown|commonmark) ;;
+    *)
+      printf 'tidy_markdown: unbekanntes Zielformat: %s\n' "$target_format" >&2
+      return 2
+      ;;
+  esac
+
   perl -e '
     use strict;
     use warnings;
 
+    my $target_format = shift @ARGV;
     my $text = do { local $/; <STDIN> };
     my $trailing_newline = ($text =~ /\n\z/) ? 1 : 0;
     $text =~ s/\n\z//;
     my @lines = split(/\n/, $text, -1);
 
-    # Alle Listenmarker, die pandoc in den unterstützten Zieldialekten
-    # ausgeben kann. Dieselbe Grammatik muss sowohl die Code-Erkennung als
-    # auch den Schutz einer Raute am Anfang eines Listenpunkts verwenden:
-    # Driften die beiden Stellen auseinander, gilt eine eingerückte
-    # Fortsetzungszeile fälschlich als Code und wird nicht aufgeräumt.
-    my $list_marker = qr/(?:[-*+:~]|\d{1,9}[.)]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])/;
+    # GFM und CommonMark kennen an dieser Stelle nur normale Bullet- und
+    # Dezimalmarker. Alphabetische/römische sowie Definitionslisten sind
+    # pandoc-Markdown-Erweiterungen und dürfen in den anderen Zieldialekten
+    # keinen gewöhnlichen Text zum Listencontainer machen.
+    my $base_list_marker = qr/(?:[-*+]|\d{1,9}[.)])/;
+    my $markdown_special_marker =
+        qr/(?:[:~]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])/;
+    my $list_marker = $target_format eq q{markdown}
+        ? qr/(?:$base_list_marker|$markdown_special_marker)/
+        : $base_list_marker;
 
     # Blockquote-Marker abschneiden. Innerhalb eines Zitats gelten dieselben
     # Regeln, nur eben hinter dem "> ".
@@ -306,7 +320,56 @@ tidy_markdown() {
         }
 
         if ($body =~ /^[ \t]*($list_marker)([ \t]+)/) {
-            push @item_indents, $indent + length($1) + indent_width($2);
+            my ($marker, $gap) = ($1, $2);
+            my $proven_list_item = 1;
+
+            if ($target_format eq q{markdown}
+                && $marker =~ /^$markdown_special_marker$/) {
+                my $previous_body = q{};
+                my $same_quote = 0;
+                if ($i > 0) {
+                    my $previous_prefix = quote_prefix($lines[$i - 1]);
+                    $previous_body = substr(
+                        $lines[$i - 1], length($previous_prefix)
+                    );
+                    $same_quote = $previous_prefix eq $prefix;
+                }
+
+                # Nach einem pandoc-Hard-Break gehört die nächste Zeile noch
+                # zum selben Absatz. Ein dort stehendes `a.`/`iv.` ist deshalb
+                # kein neuer Listenblock. Echte Sonderlisten beginnen dagegen
+                # am Blockanfang oder setzen einen schon laufenden Block fort.
+                $proven_list_item = 0
+                    if $i > 0 && $same_quote && has_break($previous_body);
+
+                # `:` und `~` brauchen davor eine nichtleere Term-Zeile. Pandoc
+                # setzt zwischen Term und Marker je nach Inhalt eine Leerzeile;
+                # die überspringen wir, einen Hard-Break innerhalb desselben
+                # Absatzes dagegen nicht.
+                if ($marker eq q{:} || $marker eq q{~}) {
+                    my $term_index = $i - 1;
+                    my $term_body;
+                    while ($term_index >= 0) {
+                        my $term_prefix = quote_prefix($lines[$term_index]);
+                        last if $term_prefix ne $prefix;
+                        my $candidate = substr(
+                            $lines[$term_index], length($term_prefix)
+                        );
+                        if ($candidate !~ /^[ \t]*$/) {
+                            $term_body = $candidate;
+                            last;
+                        }
+                        $term_index--;
+                    }
+                    $proven_list_item = 0
+                        if !defined($term_body) || has_break($term_body);
+                }
+            }
+
+            if ($proven_list_item) {
+                push @item_indents,
+                    $indent + length($marker) + indent_width($gap);
+            }
         }
     }
 
@@ -359,7 +422,11 @@ tidy_markdown() {
             my $next_body   = substr($lines[$i + 1], length($next_prefix));
             if ($next_body =~ /^[ \t]*$/) {
                 $drop = 1;                        # Umbruch vor einer Leerzeile
-            } elsif ($next_body =~ /^[ \t]*$list_marker[ \t]+/) {
+            # Die Markdown-Sondermarker reichen hier nicht als Beleg: Direkt
+            # hinter dem Hard-Break sind sie Teil desselben Absatzes (`a. Text`)
+            # und dürfen den echten Umbruch nicht verlieren. Die seit Projekt-
+            # beginn unterstützte Bullet-/Dezimallisten-Heuristik bleibt eng.
+            } elsif ($next_body =~ /^[ \t]*$base_list_marker[ \t]+/) {
                 $drop = 1;                        # Umbruch vor einem Listenpunkt
             }
         }
@@ -457,7 +524,7 @@ tidy_markdown() {
 
     print join("\n", @out);
     print "\n" if $trailing_newline;
-  '
+  ' "$target_format"
 }
 
 pandoc_supports_rtf() {
@@ -473,7 +540,7 @@ convert_html() {
     | clean_html \
     | fill_empty_html_links \
     | pandoc "${PANDOC_OPTS[@]}" \
-    | tidy_markdown
+    | tidy_markdown "${TO:-gfm}"
 }
 
 convert_rtf() {
@@ -486,5 +553,5 @@ convert_rtf() {
     | clean_html \
     | fill_empty_html_links \
     | pandoc "${PANDOC_OPTS[@]}" \
-    | tidy_markdown
+    | tidy_markdown "${TO:-gfm}"
 }

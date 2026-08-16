@@ -21,8 +21,11 @@
 // Einspielen startet Sparkle die Host-App normalerweise neu — hier bewusst
 // nicht, siehe updaterShouldRelaunchApplication(_:) unten.
 
+import Foundation
+#if !MD_CLIP_UPDATER_MODE_TEST
 import AppKit
 import Sparkle
+#endif
 
 enum Mode {
     case background
@@ -34,20 +37,32 @@ func fail(usage message: String) -> Never {
     exit(64)
 }
 
-let arguments = CommandLine.arguments
-guard arguments.count == 2 else {
-    fail(usage: "Aufruf: md-clip-updater --background | --interactive")
-}
-let mode: Mode
-switch arguments[1] {
-case "--background":
-    mode = .background
-case "--interactive":
-    mode = .interactive
-default:
-    fail(usage: "Unbekannte Option: \(arguments[1])\nAufruf: md-clip-updater --background | --interactive")
+func parseMode(arguments: [String]) -> Mode {
+    guard arguments.count == 2 else {
+        fail(usage: "Aufruf: md-clip-updater --background | --interactive")
+    }
+    switch arguments[1] {
+    case "--background":
+        return .background
+    case "--interactive":
+        return .interactive
+    default:
+        fail(usage: "Unbekannte Option: \(arguments[1])\nAufruf: md-clip-updater --background | --interactive")
+    }
 }
 
+let mode = parseMode(arguments: CommandLine.arguments)
+
+#if MD_CLIP_UPDATER_MODE_TEST
+// Sparkle-freier Programmeinstieg für den repositoryweiten Vertragstest. Er
+// kompiliert und durchläuft denselben Parser wie das ausgelieferte Programm.
+switch mode {
+case .background:
+    print("--background")
+case .interactive:
+    print("--interactive")
+}
+#else
 // Drossel für den Hintergrundmodus: Der Launcher startet diesen Prozess bei
 // jedem Doppelklick auf die App. Damit daraus nicht bei jeder Konvertierung
 // ein Feed-Abruf wird, merken wir uns den letzten Hintergrund-Check selbst —
@@ -155,3 +170,4 @@ application.setActivationPolicy(.accessory)
 let appDelegate = AppDelegate(mode: mode)
 application.delegate = appDelegate
 application.run()
+#endif
