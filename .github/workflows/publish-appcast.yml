@@ -111,7 +111,7 @@ jobs:
       - name: Check out trusted appcast tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: 3946c521914dff93e92b1603647c1d763357fb44
+          ref: 02d3b1fb48cff7513402f4a721eda0bac525b324
           path: tooling
           persist-credentials: false
 
@@ -128,7 +128,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$(git -C tooling rev-parse HEAD)" != "3946c521914dff93e92b1603647c1d763357fb44" ]]; then
+          if [[ "$(git -C tooling rev-parse HEAD)" != "02d3b1fb48cff7513402f4a721eda0bac525b324" ]]; then
             echo "FEHLER: Tooling-Checkout entspricht nicht dem freigegebenen Commit." >&2
             exit 1
           fi
@@ -218,6 +218,8 @@ jobs:
           tar -x -C "$APPCAST_WORK/sparkle-dist" \
             -f "$APPCAST_WORK/sparkle-dist.tar.xz" ./bin/generate_appcast
           test -x "$APPCAST_WORK/sparkle-dist/bin/generate_appcast"
+          swiftc tooling/helpers/verify-sparkle-signature.swift \
+            -o "$APPCAST_WORK/verify-sparkle-signature"
 
       - name: Generate and verify signed appcast
         shell: bash
@@ -312,6 +314,75 @@ jobs:
             "$version" \
             "$product_version" \
             "$expected_url"
+
+          # Die Generator-Warnung oben ist nur eine Zusatzdiagnose. Der
+          # eigentliche Vertrauensnachweis prüft die DMG-Bytes kryptografisch
+          # gegen SUPublicEDKey aus genau der App, die im Release-DMG liegt.
+          shopt -s nullglob
+          dmgs=("$APPCAST_WORK"/update/*.dmg)
+          if (( ${#dmgs[@]} != 1 )); then
+            echo "FEHLER: Release-Verzeichnis enthält nicht genau ein DMG." >&2
+            exit 1
+          fi
+
+          mount_dir="$(mktemp -d "$APPCAST_WORK/.release-mount.XXXXXX")"
+          attach_plist="$(mktemp "$APPCAST_WORK/.release-attach.plist.XXXXXX")"
+          mount_device=""
+          cleanup_release_mount() {
+            local attempt
+            if [[ -n "$mount_device" ]]; then
+              for attempt in 1 2 3; do
+                if hdiutil detach "$mount_device" >/dev/null 2>&1; then
+                  mount_device=""
+                  break
+                fi
+                sleep 2
+              done
+            fi
+            if [[ -n "$mount_device" ]]; then
+              echo "WARNUNG: Release-DMG blieb auf $mount_device eingehängt." >&2
+              return 0
+            fi
+            rmdir "$mount_dir" >/dev/null 2>&1 || true
+            rm -f "$attach_plist"
+          }
+          trap cleanup_release_mount EXIT
+
+          hdiutil attach "${dmgs[0]}" \
+            -readonly -nobrowse -noverify -noautoopen \
+            -mountpoint "$mount_dir" -plist > "$attach_plist"
+
+          index=0
+          while device=$(/usr/libexec/PlistBuddy \
+            -c "Print :system-entities:$index:dev-entry" "$attach_plist" 2>/dev/null); do
+            candidate_mount=$(/usr/libexec/PlistBuddy \
+              -c "Print :system-entities:$index:mount-point" "$attach_plist" 2>/dev/null || true)
+            if [[ "$candidate_mount" == "$mount_dir" ]]; then
+              mount_device="$device"
+              break
+            fi
+            index=$((index + 1))
+          done
+          if [[ -z "$mount_device" ]]; then
+            echo "FEHLER: Device des Release-DMGs nicht gefunden." >&2
+            exit 1
+          fi
+
+          app_bundles=("$mount_dir"/*.app)
+          if (( ${#app_bundles[@]} != 1 )); then
+            echo "FEHLER: Release-DMG muss genau ein App-Bundle enthalten." >&2
+            exit 1
+          fi
+          public_key=$(/usr/libexec/PlistBuddy \
+            -c 'Print :SUPublicEDKey' "${app_bundles[0]}/Contents/Info.plist")
+          feed_signature=$(xmllint --xpath \
+            'string(/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"]/*[local-name()="enclosure"]/@*[local-name()="edSignature"])' \
+            "$APPCAST_WORK/site/appcast.xml")
+          "$APPCAST_WORK/verify-sparkle-signature" \
+            "$public_key" "$feed_signature" "${dmgs[0]}"
+
+          cleanup_release_mount
+          trap - EXIT
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5

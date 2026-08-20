@@ -195,15 +195,18 @@ printf '%s' "$html" | wl-copy --type text/html                  # Wayland
 
 ## Dock-App (macOS)
 
-Damit du nicht jedes Mal das Terminal öffnen musst, liegt im Ordner `wrappers/` ein Bauskript für eine Mini-App. Einmal ausführen:
+`build.sh` erzeugt die vollständige App mit eingebettetem pandoc und den
+Clipboard-Helfern:
 
 ```bash
-./wrappers/build-app.sh
+./build.sh
 ```
 
-Das erzeugt `wrappers/md-clip.app`. Diese App ziehst du ins Dock. Ein Klick darauf konvertiert das Clipboard und zeigt eine Benachrichtigung.
-
-Eigenes Icon zuweisen: Rechtsklick auf die App → **Informationen** → ein Bild auf das kleine App-Symbol oben links ziehen.
+Das Ergebnis liegt unter `build/md-clip.app`. Der lokale Build ist unsigniert
+und bleibt deshalb im Build-Verzeichnis; eine Version für `/Applications`
+entsteht ausschließlich über `install-app.sh`, das Signatur, Notarisierung und
+Gatekeeper vor dem Installieren prüft. Ein Klick auf die App konvertiert das
+Clipboard und zeigt das projektweit mitgelieferte Icon und Erfolgs-HUD.
 
 ### Bauen, installieren, Release
 
@@ -261,7 +264,10 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
 ## Was nicht funktioniert
 
 - **Code-Blöcke** kommen meist als 4-Leerzeichen-Einrückung statt als ` ``` `-Fence. Beides ist gültiges Markdown und wird von allen Renderern korrekt erkannt.
-- **Sprach-Annotation** für Code-Blöcke geht verloren — die meisten Quellen liefern sie ohnehin nicht mit.
+- **Automatische Spracherkennung für Code-Blöcke** findet nicht statt.
+  Sprach-Annotationen bleiben erhalten, wenn die Quelle sie am
+  `<code>`-Element mitliefert; fehlt die Angabe im Clipboard, ergänzt md-clip
+  sie nicht durch Raten.
 - **Zeilenumbrüche innerhalb eines Absatzes** werden als zwei Leerzeichen am Zeilenende geschrieben — das ist in Markdown ein harter Umbruch, aber unsichtbar. Ein Editor, der beim Speichern Leerzeichen am Zeilenende entfernt, löscht damit den Umbruch. Die Alternative wäre ein sichtbarer `\` am Zeilenende; die ist bewusst nicht gewählt.
 - **Bilder** werden weggelassen. Nur Text wird konvertiert.
 - **Microsoft-Word-Dokumente mit komplexer Bild-Einbettung**: Bilder werden nicht extrahiert (keine `![]()`-Referenzen). Der Text und Tabellen-Inhalt kommt sauber raus, Bildplätze aber leer.
@@ -275,6 +281,13 @@ bash tests/test-install-safety.sh
 bash tests/test-dependencies.sh
 bash tests/test-wrapper-safety.sh
 ```
+
+Voraussetzungen sind pandoc, perl und ein Clipboard-Werkzeug (macOS: `pbpaste`;
+Linux: `xclip` oder `wl-clipboard`). `test-wrapper-safety.sh` prüft zusätzlich
+den Argumentvertrag des Updaters und braucht dafür `swiftc`. Der Updater gehört
+nur zum macOS-Bundle: dort ist der Compiler mit den Xcode-Kommandozeilenwerkzeugen
+vorhanden und der Test verbindlich, auf Linux überspringt er diesen einen Block
+mit einer sichtbaren Meldung.
 
 Die Fixture-Tests brauchen nur pandoc und perl und laufen überall. Die Clipboard-Roundtrip-Tests brauchen ein echtes Clipboard und überspringen sich sichtbar, wo keines erreichbar ist (etwa in einem Container). Unter Linux holt man sie mit einem unsichtbaren X-Server dazu:
 

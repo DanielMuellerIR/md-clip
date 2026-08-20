@@ -112,7 +112,7 @@ decide_cli_action() {
 # Passwort-Dialog: In diesem Zeitfenster kann dort eine reguläre Datei oder ein
 # lebender fremder Symlink entstehen, und dieser Schritt läuft als root.
 install_cli() {
-  BUNDLE_CLI="$BUNDLE_CLI" SYSTEM_CLI="$SYSTEM_CLI" osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+  if BUNDLE_CLI="$BUNDLE_CLI" SYSTEM_CLI="$SYSTEM_CLI" osascript <<'APPLESCRIPT' >/dev/null 2>&1; then
 set bundleCli to system attribute "BUNDLE_CLI"
 set systemCli to system attribute "SYSTEM_CLI"
 set target to quoted form of systemCli
@@ -131,6 +131,16 @@ set commandText to "/bin/mkdir -p \"$(/usr/bin/dirname " & target & ")\"" & ¬
   " && /bin/ln -s " & quoted form of bundleCli & " " & target
 do shell script commandText with administrator privileges
 APPLESCRIPT
+    return 0
+  fi
+
+  osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+tell application "System Events"
+  activate
+  display dialog "Der Kommandozeilen-Befehl konnte nicht in /usr/local/bin eingerichtet werden. Die Clipboard-Konvertierung läuft trotzdem weiter." buttons {"OK"} default button "OK" with title "md-clip" with icon caution
+end tell
+APPLESCRIPT
+  return 1
 }
 
 # Zeigt den Erststart-Dialog (CLI installieren?) und gibt die Wahl des
@@ -198,7 +208,7 @@ launcher_main() {
       answer="$(ask_install)"
       case "$answer" in
         "Ja, einrichten")
-          install_cli
+          install_cli || true
           ;;
         "Nicht mehr fragen")
           defaults write "$BUNDLE_ID" CliInstallDeclined -bool true

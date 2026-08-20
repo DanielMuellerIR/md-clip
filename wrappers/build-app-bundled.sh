@@ -10,7 +10,7 @@
 #
 # Voraussetzungen:
 #   - swiftc (Xcode Command Line Tools)
-#   - curl, unzip, lipo (alle macOS-Bordmittel)
+#   - curl, unzip, tar, codesign, ditto und shasum (macOS-Bordmittel)
 #   - Internet-Zugang für pandoc-Download
 #
 # Output: build/md-clip.app
@@ -59,7 +59,11 @@ source "$SCRIPT_DIR/verified-cache.sh"
 # Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth,
 # identisch zu wrappers/sign-and-release.sh. Landet unten im Info.plist als
 # CFBundleShortVersionString/CFBundleVersion.
-APP_VERSION=$(grep '^VERSION=' "$PROJECT_ROOT/bin/md-clip" | head -1 | cut -d'"' -f2)
+APP_VERSION=$(awk -F'"' '/^VERSION=/{print $2; exit}' "$PROJECT_ROOT/bin/md-clip")
+if [ -z "$APP_VERSION" ]; then
+  echo "FEHLER: VERSION fehlt oder ist nicht in Anführungszeichen gesetzt: bin/md-clip." >&2
+  exit 65
+fi
 
 BUILD_DIR="$PROJECT_ROOT/build"
 CACHE_DIR="$BUILD_DIR/cache"

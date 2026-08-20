@@ -17,6 +17,10 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
+TEST_RUNTIME=$(mktemp -d)
+trap 'rm -rf "$TEST_RUNTIME"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # --- Argument-Check ---
 if [ $# -ne 1 ]; then
@@ -37,23 +41,21 @@ abs="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 ext="${file##*.}"
 ext="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
 
-# --- Loader-Helper bei Bedarf kompilieren ---
+# --- Loader-Helper im privaten Testverzeichnis kompilieren ---
 LOADER_SRC="tests/load-clipboard.swift"
-LOADER_BIN="tests/load-clipboard"
-if [ ! -x "$LOADER_BIN" ] || [ "$LOADER_SRC" -nt "$LOADER_BIN" ]; then
-  echo "==> Kompiliere $LOADER_SRC"
-  swiftc "$LOADER_SRC" -o "$LOADER_BIN"
-fi
+LOADER_BIN="$TEST_RUNTIME/load-clipboard"
+echo "==> Kompiliere $LOADER_SRC"
+swiftc "$LOADER_SRC" -o "$LOADER_BIN"
 
 # --- Datei mit dem passenden Flavor aufs Clipboard laden ---
 case "$ext" in
   rtf)
     echo "==> Lade $file als public.rtf"
-    ./"$LOADER_BIN" "public.rtf" "$abs"
+    "$LOADER_BIN" "public.rtf" "$abs"
     ;;
   html|htm)
     echo "==> Lade $file als public.html"
-    ./"$LOADER_BIN" "public.html" "$abs"
+    "$LOADER_BIN" "public.html" "$abs"
     ;;
   txt)
     echo "==> Lade $file als Plain Text (via pbcopy)"

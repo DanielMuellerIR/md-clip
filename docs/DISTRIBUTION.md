@@ -4,13 +4,12 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 2026-08-07)
+## Status (Stand: 2026-08-20)
 
-- Quellstand: **v1.2.2, unveröffentlicht**. Zuletzt veröffentlicht: **v1.2.1
-  am 2026-08-06** (zusammen mit v1.2.0 am selben Tag; der Zwischenstand v1.1.2
-  ging in v1.2.0 auf). Der Sparkle-Update-Weg ist einmal komplett im Ernstfall
-  durchlaufen: Eine installierte v1.2.0 hat v1.2.1 über den Feed gefunden,
-  geladen, die Signatur geprüft und sich selbst ausgetauscht.
+- Aktuelle Produktversion im Quellcode und jüngster Git-Tag: **v1.2.6 vom
+  2026-08-20**. Der Sparkle-Update-Weg ist vollständig belegt: Eine
+  installierte App lädt ein signiertes DMG, prüft es und tauscht sich ohne
+  ungefragten Neustart aus.
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
 - **Stufe B — Signieren und notarisieren.** ✅ Erledigt.
@@ -20,14 +19,12 @@ einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
   Drag-Anleitung). ✅ Erledigt in v1.0.3.
 - **pandoc-Würdigung + Lizenz-Klarstellung in README, pandoc-Version
   in `--version`-Output.** ✅ Erledigt in v1.0.3.
-- Zuletzt dokumentierte veröffentlichte Version: **v1.0.3** als signiertes,
-  notarisiertes DMG unter
-  [github.com/DanielMuellerIR/md-clip/releases](https://github.com/DanielMuellerIR/md-clip/releases).
 - **Sparkle-Auto-Update** (Framework im Bundle, Updater-Helfer,
   Appcast-Workflow). ✅ Erledigt in v1.2.0 — Details in
   [SPARKLE-RELEASE.md](SPARKLE-RELEASE.md).
-- **Stufe C — GitHub Action für automatisierte Releases.** ⏳ Nächste
-  Session.
+- **Stufe C — GitHub Action für automatisierte DMG-Releases.** ⏳ Geplant.
+  Appcast-Erzeugung und Veröffentlichung laufen bereits getrennt und
+  abgesichert über GitHub Actions.
 
 ### Was in v1.0.3 dazukam
 
@@ -248,14 +245,18 @@ ohne Sicherheits-Warnung. Erfüllt mit v1.0.1.
    bestimmen; fehlt beides, bricht der Lauf sofort ab.
 2. Sanity-Checks: Identität + Profil vorhanden?
 3. Stufe A aufrufen → frisches Bundle bauen
-4. Innere Binaries (pandoc, clipboard-html, clipboard-rtf) einzeln signieren
-   mit `--options runtime --timestamp`
-5. App-Bundle signieren mit `--options runtime --timestamp --deep`
-6. App notarisieren, Ticket anheften, mit `spctl --type execute` prüfen
-7. DMG via `hdiutil create` erzeugen, DMG ebenfalls signieren
-8. `xcrun notarytool submit --keychain-profile "$NOTARY_PROFILE" --wait`
-9. `xcrun stapler staple` heftet das Notarization-Ticket ans DMG
-10. `xcrun stapler validate` + `spctl --assess --type open` auf dem DMG
+4. `wrappers/sign-bundle.sh` signiert von innen nach außen: pandoc, beide
+   Clipboard-Helfer, Updater- und HUD-Helfer, Sparkles Autoupdate-Programm,
+   Updater-App, Framework und zuletzt das App-Bundle. Jeder Aufruf nutzt
+   `--options runtime --timestamp`; `--deep` dient nur der anschließenden
+   Prüfung und wird nicht zum Signieren verwendet.
+5. `wrappers/verify-bundle.sh --signed` prüft alle Signaturen, Team-ID,
+   Bundle-ID, Laufzeitziele und Update-Konfiguration.
+6. App notarisieren, Ticket anheften, mit `spctl --type execute` prüfen.
+7. DMG erzeugen und signieren.
+8. DMG per `notarytool` notarisieren und das Ticket anheften.
+9. `stapler validate` und `spctl --assess --type open` prüfen das DMG; erst
+   danach erhält es den endgültigen Release-Dateinamen.
 
 Dauer: Build ~30 s, Notarization typisch 2–3 min. Insgesamt ~4 min.
 
@@ -278,9 +279,9 @@ Dauer: Build ~30 s, Notarization typisch 2–3 min. Insgesamt ~4 min.
 
 ---
 
-## Stufe C — GitHub Action für Tag-Releases (⏳ nächste Session)
+## Stufe C — GitHub Action für Tag-Releases (⏳ geplant)
 
-Sobald jemand `git tag v1.0.2 && git push --tags` macht, soll automatisch
+Sobald jemand einen neuen stabilen Tag veröffentlicht, soll automatisch
 ein signiertes + notarisiertes DMG gebaut und als Release-Asset hochgeladen
 werden. Damit ist „Release rausgeben" ein einziger Tag-Push, keine lokale
 Maschine mehr nötig.
@@ -325,10 +326,12 @@ jobs:
           TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
         run: |
-          xcrun notarytool store-credentials "ci-notarytool" \
+          # Ohne Passwortschalter: Das Shell-Builtin schreibt das Secret über
+          # stdin; es erscheint weder in argv noch in der Prozessliste.
+          printf '%s\n' "$NOTARY_PASSWORD" | \
+            xcrun notarytool store-credentials "ci-notarytool" \
             --apple-id "$APPLE_ID" \
-            --team-id  "$TEAM_ID" \
-            --password "$NOTARY_PASSWORD"
+            --team-id  "$TEAM_ID"
 
       # Der Profilname muss beim Release-Skript ankommen, sonst bricht es
       # vor dem Bauen ab.
@@ -403,66 +406,27 @@ Schlüsselbundverwaltung öffnen (`open /Applications/Utilities/Keychain\ Access
 3. **`.github/workflows/release.yml` schreiben** nach Skizze oben.
 4. **Lokal trockenlaufen lassen**, soweit möglich: jeden einzelnen Step
    manuell durchgehen, prüfen, dass keine Surprises kommen.
-5. **Test-Tag pushen**, z.B. `git tag v1.0.3-rc1 && git push --tags`,
+5. **Test-Tag pushen**, z.B. `git tag v1.2.6-rc1 && git push --tags`,
    Workflow-Run beobachten, Logs debuggen.
 6. **Funktionierenden Workflow als regulär markieren**, Test-Release
    löschen, echte Version taggen.
-7. **README aktualisieren** mit Hinweis, dass neue Versionen per Tag-Push
-   gebaut werden (für künftige Mitwirkende relevant).
+7. **`docs/DISTRIBUTION.md` aktualisieren** und den belegten Ablauf festhalten.
 
 ---
 
-## Onboarding für eine neue Claude-Session
+## Einstieg für die nächste Arbeitssitzung
 
-Dieser Prompt allein reicht, um eine frische Session in den Stand zu
-versetzen, an dem wir gerade aufgehört haben:
+Der aktuelle Produktstand steht in `bin/md-clip` und `CHANGELOG.md`.
+`AGENTS.md` hält die dauerhaft verbindlichen Plattform-, Pipeline-, Test- und
+Release-Regeln fest. Für Distribution sind anschließend diese beiden
+Dokumente maßgeblich:
 
-> Wir arbeiten am Projekt **md-clip** (GitHub: `DanielMuellerIR/md-clip`,
-> Projektverzeichnis lokal klonen).
->
-> Das Tool konvertiert macOS-Clipboard-Inhalt (HTML / RTF aus Browsern,
-> Word, TextEdit usw.) zu Markdown. Es gibt ein Bash-Hauptskript
-> (`bin/md-clip`), zwei Swift-Helper für NSPasteboard-Zugriff
-> (`helpers/clipboard-html.swift`, `helpers/clipboard-rtf.swift`) und ein
-> macOS-App-Bundle mit eingebettetem pandoc, das per signiertem +
-> notarisiertem DMG ausgeliefert wird.
->
-> Erst diese Dokumente lesen, damit du den Kontext kennst, bevor du was
-> tust:
->
-> 1. `docs/DISTRIBUTION.md` — Status der drei Distribution-Stufen, Apple-
->    Credentials (Team-ID `9QSWKSR4NQ`, Apple-ID nur beim einmaligen
->    `store-credentials`, Profilname aus `NOTARY_PROFILE` bzw.
->    `git config mdClip.notaryProfile`), kompletter Plan für **Stufe C**
->    inkl. Workflow-Skelett und den sechs benötigten GitHub-Secrets.
-> 2. `docs/ENCODING.md` — Locale- und Encoding-Stolpersteine. Wichtigster
->    Punkt: alle Bash-Skripte exportieren oben `LC_ALL=en_US.UTF-8`, NIE
->    `LC_ALL=C` inline für pbcopy/pbpaste — das war ein Selbstbetrug, der
->    den Clipboard-Inhalt für alle anderen Apps verfälscht hat.
-> 3. `README.md` — was Nutzer zu sehen bekommen.
-> 4. `~/.claude/CLAUDE.md` (privat) — globale Verhaltensregeln, u.a.:
->    knapp antworten, Code für Anfänger kommentieren, bei Passwörter-im-
->    Terminal warnen + History-Cleanup anleiten, bei Komponenten-Upgrades
->    Output-Diffs zeigen statt nur „Tests grün" zu melden, in öffentlichen
->    Dokumenten keine umgangssprachlichen oder wertenden Bezeichnungen
->    für Nutzergruppen.
->
-> Aktueller Stand:
-> - **v1.0.3** als signiertes + notarisiertes DMG auf GitHub veröffent-
->   licht. DMG hat Installations-Layout mit Hintergrundbild und
->   Applications-Symlink. Erststart-Dialog für CLI-Installation
->   erkennt jetzt dangling Symlinks und warnt, wenn das Bundle aus
->   einem nicht-dauerhaften Ort (DMG-Mount, Downloads) gestartet wird.
->   pandoc ist in README und `--version` sichtbar gewürdigt; Lizenz-
->   Trennung (md-clip MIT, gebundeltes pandoc GPL v2+) klargestellt.
-> - **Stufe C** ist der nächste Schritt: GitHub Action, die bei Tag-Push
->   automatisch baut, signiert, notarisiert, das DMG als Release-Asset
->   hochlädt.
-> - Das Developer-ID-Zertifikat liegt in meinem Login-Keychain
->   (`security find-identity -v -p codesigning` listet es).
->
-> Schaue dir die genannten Docs an, dann sag mir, wie du Stufe C angehen
-> würdest und welche Infos / Geheimnisse du von mir brauchst.
+1. `docs/DISTRIBUTION.md` für App-Bau, Signatur, Notarisierung und den noch
+   geplanten automatischen DMG-Release.
+2. `docs/SPARKLE-RELEASE.md` für Schlüssel, Appcast und den bereits
+   implementierten Update-Weg.
 
-Die nächste Session sollte mit diesem Prompt ohne Rückfragen weitermachen
-können.
+Offen ist weiterhin Stufe C: Ein Workflow soll ein signiertes und
+notarisiertes DMG aus einem stabilen Tag bauen und als Release-Artefakt
+veröffentlichen. Die getrennten Workflows `request-appcast.yml` und
+`publish-appcast.yml` übernehmen danach bereits die sichere Feed-Erzeugung.

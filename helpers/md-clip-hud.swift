@@ -34,7 +34,6 @@ let message = arguments[1]
 /// Prozess. Alles läuft auf dem Hauptthread der App-Laufzeit.
 final class HUDDelegate: NSObject, NSApplicationDelegate {
     private let text: String
-    private var panel: NSPanel?
 
     init(text: String) {
         self.text = text
@@ -96,7 +95,6 @@ final class HUDDelegate: NSObject, NSApplicationDelegate {
         // orderFrontRegardless, weil die App nie „aktiv" wird (.accessory,
         // nonactivating) — ein normales orderFront käme sonst nie nach vorn.
         hud.orderFrontRegardless()
-        panel = hud
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18

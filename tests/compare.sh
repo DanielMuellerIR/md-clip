@@ -24,6 +24,11 @@ CAPTURES_DIR="$PROJECT_ROOT/tests/captures"
 mkdir -p "$CAPTURES_DIR"
 cd "$PROJECT_ROOT"
 
+# Den ursprünglichen Plain-Text immer festhalten. Auch compare-file.sh gibt
+# einen Dateinamen vor; im manuellen AppleMD-Vergleich brauchen wir trotzdem
+# den Ausgangsinhalt, um einen ausgebliebenen Kurzbefehl zu erkennen.
+plain="$(pbpaste)"
+
 # --- 1. Dateinamen-Basis bestimmen ---
 # Wenn das Skript von compare-file.sh aufgerufen wird, kann dort eine
 # stabile Basis (= Dateiname ohne Endung) per Env-Variable vorgegeben
@@ -33,7 +38,6 @@ if [ -n "${BASENAME_OVERRIDE:-}" ]; then
   base="$BASENAME_OVERRIDE"
 else
   # Sonst: aus dem Klartext-Clipboard ableiten.
-  plain="$(pbpaste)"
   if [ -z "$plain" ]; then
     echo "Clipboard ist leer — nichts zu vergleichen." >&2
     exit 1
@@ -79,6 +83,11 @@ echo
 
 # --- 3. HTML-Flavor sichern ---
 HTML_HELPER="$PROJECT_ROOT/helpers/clipboard-html"
+if [ ! -x "$HTML_HELPER" ]; then
+  echo "HTML-Helper nicht gebaut: $HTML_HELPER" >&2
+  echo "Bitte zuerst ./install.sh ausführen." >&2
+  exit 2
+fi
 if html="$("$HTML_HELPER" 2>/dev/null)"; then
   printf '%s' "$html" > "$CAPTURES_DIR/${base}.html"
   printf '✓ HTML    → %s.html (%d Bytes)\n' "$base" "$(wc -c < "$CAPTURES_DIR/${base}.html")"
@@ -92,6 +101,11 @@ fi
 # dem Clipboard liegt (z.B. TextEdit mit Bildern). Der Helper greift
 # direkt auf den .rtf-Flavor in NSPasteboard zu.
 RTF_HELPER="$PROJECT_ROOT/helpers/clipboard-rtf"
+if [ ! -x "$RTF_HELPER" ]; then
+  echo "RTF-Helper nicht gebaut: $RTF_HELPER" >&2
+  echo "Bitte zuerst ./install.sh ausführen." >&2
+  exit 2
+fi
 if rtf="$("$RTF_HELPER" 2>/dev/null)"; then
   printf '%s' "$rtf" > "$CAPTURES_DIR/${base}.rtf"
   printf '✓ RTF     → %s.rtf (%d Bytes)\n' "$base" "$(wc -c < "$CAPTURES_DIR/${base}.rtf")"

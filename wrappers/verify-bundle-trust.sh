@@ -46,11 +46,3 @@ verify_signed_bundle_trust() {
     return 65
   fi
 }
-
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  if [ "$#" -ne 1 ]; then
-    echo "Aufruf: verify-bundle-trust.sh <App-Bundle>" >&2
-    exit 64
-  fi
-  verify_signed_bundle_trust "$1"
-fi

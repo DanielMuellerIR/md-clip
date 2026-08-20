@@ -112,9 +112,9 @@
 
 ## Verzeichnisstruktur
 
-<!-- directory-structure: generated -->
 - [AGENTS.md](AGENTS.md) — Projektprofil, Arbeitsregeln und dieses Datei-Verzeichnis.
 - [README.md](README.md) — Projekt-Einstieg und Nutzerdokumentation.
+- [todo.md](todo.md) — offene Punkte, die eine Person von Hand erledigen muss.
 - [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) — Projektdokumentation.
 - [docs/ENCODING.md](docs/ENCODING.md) — Projektdokumentation.
 - [docs/SPARKLE-RELEASE.md](docs/SPARKLE-RELEASE.md) — Sparkle-Updates bauen, signieren und veröffentlichen.
@@ -124,8 +124,6 @@
 - `docs/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `helpers/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `lib/` — gemeinsame, seiteneffektfreie Konvertierungs-Pipeline.
-- `spike/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `tasks/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `tests/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 - `wrappers/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
-<!-- /directory-structure -->

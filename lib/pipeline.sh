@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Gemeinsame, seiteneffektfreie Konvertierungs-Pipeline für Produkt und Tests.
-# Aufrufer setzen PANDOC_OPTS und stellen die plattformspezifische Funktion
-# rtf_to_html bereit. Beim Sourcen wird weder Clipboard noch Dateisystem berührt.
+# Aufrufer übergeben das Zielformat als Argument an convert_html/convert_rtf und
+# stellen die plattformspezifische Funktion rtf_to_html bereit. Beim Sourcen wird
+# weder Clipboard noch Dateisystem berührt.
+#
+# Das Zielformat wird bewusst NUR EINMAL übergeben: pandoc-Optionen und die
+# Grammatik der Nachbearbeitung (tidy_markdown) leiten sich beide daraus ab.
+# Vorher waren das zwei unabhängige Zustände — `PANDOC_OPTS` und `TO` —, die
+# auseinanderlaufen konnten: pandoc schrieb dann etwa eine alphabetische
+# markdown-Liste, während tidy_markdown sie als GFM aufräumte und deren
+# Schutz-Backslashes stehen ließ (Review-Fund 2026-08-17).
 
 preprocess_claude_desktop() {
   perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs' \
@@ -11,8 +19,18 @@ preprocess_claude_desktop() {
           $block =~ s{</?div[^>]*>}{}g;
           $block;
         }gse' \
-    | perl -0pe 's/\s+style="[^"]*"//g' \
-    | perl -0pe 's/\s+data-[a-z-]+="[^"]*"//g'
+    | perl -0pe '
+        # Claude-Desktop-Attribute nur aus echten HTML-Tags entfernen. Eine
+        # globale Ersetzung traf bisher auch Fließtext und maskiertes HTML in
+        # Code-Beispielen. pre-/code-INHALTE bleiben deshalb roh; deren
+        # öffnende Tags werden weiter bereinigt, weil etwa ein style-Attribut
+        # am <pre> pandocs Sprachklasse am <code> verdeckt.
+        s{(<[^>]+>)}{
+          my $tag = $1;
+          $tag =~ s/\s+(?:style|data-[a-z-]+)="[^"]*"//gi;
+          $tag;
+        }gise
+      '
 }
 
 preprocess_google_classroom() {
@@ -23,8 +41,14 @@ preprocess_google_classroom() {
         my $title = ($inner =~ m{class="[^"]*\bmvRF3b\b[^"]*">(.*?)</div>}s) ? $1 : "";
         $title =~ s/<[^>]+>//g;
         $title =~ s/^\s+|\s+$//g;
-        $href =~ s/[?&]authuser=[^&]*//;
-        $href =~ s/[?&]$//;
+        # Den Google-Kontowähler entfernen, ohne Fragment oder folgende
+        # Query-Parameter zu verlieren. Bei `?authuser=0&x=1` muss das `?`
+        # für den verbleibenden Parameter stehen bleiben.
+        $href =~ s{&amp;}{&}gi;
+        $href =~ s{([?&])authuser=[^&#]*&}{$1}g;
+        $href =~ s{[?&]authuser=[^&#]*}{}g;
+        $href =~ s{\?&}{?}g;
+        $href =~ s{[?&](?=#|$)}{}g;
         $title ne ""
           ? "<li data-md-clip-classroom=\"1\"><a href=\"$href\">$title</a></li>"
           : "<a href=\"$href\"></a>";
@@ -92,18 +116,72 @@ rtf_fix_escaped_newlines() {
 
 flatten_layout_tables() {
   perl -0pe '
-    s{<colgroup[^>]*>.*?</colgroup>}{}gs;
-    s{<col[^/]*/?>}{}g;
-    s{</?table[^>]*>}{}gs;
-    s{</?t(?:body|head|foot)[^>]*>}{}gs;
-    s{</?tr[^>]*>}{}gs;
-    s{<t[dh][^>]*>}{<p>}gs;
-    s{</t[dh]>}{</p>}gs;
+    my $cursor = 0;
+
+    while (1) {
+      pos($_) = $cursor;
+      last unless m{<table\b[^>]*>}ig;
+
+      my ($start, $after_open) = ($-[0], $+[0]);
+      my $depth = 1;
+      my $end;
+      pos($_) = $after_open;
+
+      while (m{</?table\b[^>]*>}ig) {
+        my ($tag, $tag_end) = ($&, $+[0]);
+        if ($tag =~ m{^</}i) {
+          $depth--;
+          if ($depth == 0) {
+            $end = $tag_end;
+            last;
+          }
+        } else {
+          $depth++;
+        }
+      }
+
+      # Kaputtes HTML nicht durch eine halb angewandte Reparatur verschlimmern.
+      last unless defined $end;
+
+      my $table = substr($_, $start, $end - $start);
+      my $inside = substr($table, index($table, q{>}) + 1);
+      $inside =~ s{</table>\s*\z}{}i;
+
+      my $nested = $inside =~ /<table\b/i;
+      my $has_heading = $inside =~ /<th\b/i;
+      my $has_multi_cell_row = 0;
+      while ($inside =~ m{<tr\b[^>]*>(.*?)</tr>}gis) {
+        my $row = $1;
+        my $cells = () = $row =~ /<t[dh]\b/gi;
+        $has_multi_cell_row = 1 if $cells >= 2;
+      }
+
+      # Nur Layout-Tabellen plätten: verschachtelte Konstrukte sowie
+      # einspaltige Tabellen ohne Kopfzelle. Echte Datenmatrizen bleiben für
+      # pandoc als Tabelle erhalten, damit Zeilen und Spalten nicht zerfallen.
+      if ($nested || (!$has_heading && !$has_multi_cell_row)) {
+        my $replacement = $table;
+        $replacement =~ s{<colgroup\b[^>]*>.*?</colgroup>}{}gis;
+        $replacement =~ s{</?colgroup\b[^>]*>}{}gi;
+        $replacement =~ s{<col\b[^>]*>}{}gi;
+        $replacement =~ s{</?table\b[^>]*>}{}gi;
+        $replacement =~ s{</?t(?:body|head|foot)\b[^>]*>}{}gi;
+        $replacement =~ s{</?tr\b[^>]*>}{}gi;
+        $replacement =~ s{<t[dh]\b[^>]*>}{<p>}gi;
+        $replacement =~ s{</t[dh]>}{</p>}gi;
+        substr($_, $start, $end - $start, $replacement);
+        $cursor = $start + length($replacement);
+      } else {
+        $cursor = $end;
+      }
+    }
   '
 }
 
 unwrap_list_paragraphs() {
-  perl -0pe 's{<li([^>]*)>\s*<p[^>]*>([^<]*)</p>\s*</li>}{<li$1>$2</li>}gs'
+  perl -0pe '
+    s{<li([^>]*)>\s*<p[^>]*>((?:(?!<p\b|</p>).)*)</p>\s*</li>}{<li$1>$2</li>}gis
+  '
 }
 
 # tidy_markdown: Räumt pandocs Markdown-Ausgabe auf. Das ist die einzige
@@ -126,7 +204,7 @@ unwrap_list_paragraphs() {
 # ~~~) genauso wie eingerückte (vier Leerzeichen) — und alle Aufräumregeln
 # überspringen sie.
 tidy_markdown() {
-  local target_format="${1:-${TO:-gfm}}"
+  local target_format="${1:-gfm}"
   case "$target_format" in
     gfm|markdown|commonmark) ;;
     *)
@@ -150,6 +228,10 @@ tidy_markdown() {
     # pandoc-Markdown-Erweiterungen und dürfen in den anderen Zieldialekten
     # keinen gewöhnlichen Text zum Listencontainer machen.
     my $base_list_marker = qr/(?:[-*+]|\d{1,9}[.)])/;
+    # Nur `1.`/`1)` kann aus einem laufenden Absatz heraus einen neuen
+    # geordneten Listenblock beginnen. Weitere Zahlen sind erst dann
+    # Listenpunkte, wenn Durchlauf 1 ihren Listenkontext belegt hat.
+    my $block_list_marker = qr/(?:[-*+]|1[.)])/;
     my $markdown_special_marker =
         qr/(?:[:~]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])/;
     my $list_marker = $target_format eq q{markdown}
@@ -161,6 +243,30 @@ tidy_markdown() {
     sub quote_prefix {
         my ($line) = @_;
         return ($line =~ /^((?: {0,3}>[ ]?)+)/) ? $1 : q{};
+    }
+
+    # Zitattiefe = Anzahl der `>`. Zwei Zeilen desselben Zitats haben nicht
+    # unbedingt denselben Präfix-Text: pandoc schreibt die Leerzeile als `>`
+    # und die Textzeile als `> Text`. Verglichen wird deshalb die Tiefe.
+    sub quote_depth {
+        my ($prefix) = @_;
+        return scalar(() = $prefix =~ />/g);
+    }
+
+    # Die Term-Zeile über einem Definitionsmarker: die nächste nichtleere Zeile
+    # derselben Zitattiefe oberhalb von $i. Leerzeilen des Zitats werden
+    # übersprungen, ein Wechsel der Tiefe beendet die Suche.
+    sub term_above {
+        my ($i, $depth, $lines_ref) = @_;
+        my $index = $i - 1;
+        while ($index >= 0) {
+            my $prefix = quote_prefix($lines_ref->[$index]);
+            last if quote_depth($prefix) != $depth;
+            my $candidate = substr($lines_ref->[$index], length($prefix));
+            return $candidate if $candidate !~ /^[ \t]*$/;
+            $index--;
+        }
+        return undef;
     }
 
     # Einrückung in Spalten. Ein Tab zählt wie vier Leerzeichen.
@@ -274,10 +380,15 @@ tidy_markdown() {
 
     # ---- Durchlauf 1: Code-Zeilen markieren ----
     my @is_code = map { 0 } @lines;
+    # Zeilen, die nachweislich ein Listenpunkt sind. Durchlauf 2b braucht
+    # dieselbe Auskunft wie Durchlauf 1 — sonst behandelt der eine `b.  zwei`
+    # als Listenpunkt und der andere als Absatztext (Review-Fund 2026-08-17).
+    my @is_list_item = map { 0 } @lines;
     my $fence_char;                 # undef = kein offener Zaun
     my $fence_len    = 0;
     my $fence_indent = 0;
     my @item_indents = ();          # Inhalts-Einrückung offener Listenpunkte
+    my @item_markers = ();          # Marker-Einrückung derselben Punkte
 
     for my $i (0 .. $#lines) {
         my $prefix = quote_prefix($lines[$i]);
@@ -296,9 +407,17 @@ tidy_markdown() {
         next if $body =~ /^[ \t]*$/;   # Leerzeilen schließen keinen Container
 
         my $indent = indent_width($body);
+        # Steht diese Zeile auf der Marker-Spalte eines noch offenen Punktes,
+        # ist sie dessen Geschwister — also selbst ein Listenpunkt, auch wenn
+        # die Vorzeile mit einem Hard-Break endet. Vor dem Schließen unten
+        # ermitteln, denn genau dieser Punkt wird dabei zugeklappt.
+        my $sibling_of_open_item = grep { $_ == $indent } @item_markers;
         # Die Zeile verlässt jeden Listenpunkt, dessen Inhalt weiter rechts
         # beginnt — dessen Einrückung zählt danach nicht mehr als Container.
-        pop @item_indents while @item_indents && $indent < $item_indents[-1];
+        while (@item_indents && $indent < $item_indents[-1]) {
+            pop @item_indents;
+            pop @item_markers;
+        }
         my $container = @item_indents ? $item_indents[-1] : 0;
 
         # Vier Spalten jenseits des Containers: eingerückter Code-Block.
@@ -322,53 +441,55 @@ tidy_markdown() {
         if ($body =~ /^[ \t]*($list_marker)([ \t]+)/) {
             my ($marker, $gap) = ($1, $2);
             my $proven_list_item = 1;
+            my $depth = quote_depth($prefix);
+
+            # Dokumentanfang oder Leerzeile derselben Zitattiefe beginnen
+            # einen neuen Block. Dezimalmarker >1 dürfen dort eine Liste
+            # starten, aber keinen laufenden Absatz unterbrechen.
+            my $block_start = ($i == 0);
+            if (!$block_start) {
+                my $previous_prefix = quote_prefix($lines[$i - 1]);
+                my $previous_body = substr(
+                    $lines[$i - 1], length($previous_prefix)
+                );
+                $block_start = quote_depth($previous_prefix) == $depth
+                    && $previous_body =~ /^[ \t]*$/;
+            }
+
+            if ($marker =~ /^\d{1,9}[.)]$/ && $marker !~ /^1[.)]$/) {
+                $proven_list_item = $block_start || $sibling_of_open_item;
+            }
 
             if ($target_format eq q{markdown}
                 && $marker =~ /^$markdown_special_marker$/) {
-                my $previous_body = q{};
-                my $same_quote = 0;
-                if ($i > 0) {
-                    my $previous_prefix = quote_prefix($lines[$i - 1]);
-                    $previous_body = substr(
-                        $lines[$i - 1], length($previous_prefix)
-                    );
-                    $same_quote = $previous_prefix eq $prefix;
-                }
-
-                # Nach einem pandoc-Hard-Break gehört die nächste Zeile noch
-                # zum selben Absatz. Ein dort stehendes `a.`/`iv.` ist deshalb
-                # kein neuer Listenblock. Echte Sonderlisten beginnen dagegen
-                # am Blockanfang oder setzen einen schon laufenden Block fort.
-                $proven_list_item = 0
-                    if $i > 0 && $same_quote && has_break($previous_body);
-
-                # `:` und `~` brauchen davor eine nichtleere Term-Zeile. Pandoc
-                # setzt zwischen Term und Marker je nach Inhalt eine Leerzeile;
-                # die überspringen wir, einen Hard-Break innerhalb desselben
-                # Absatzes dagegen nicht.
+                # Steht direkt darüber eine Leerzeile derselben Zitattiefe?
+                # Dann eröffnet der Marker einen neuen Block. Die Tiefe wird
+                # gezählt und nicht bytegleich verglichen: pandoc schreibt die
+                # Leerzeile eines Zitats als `>`, die Textzeilen als `> Text`
+                # (Review-Fund 2026-08-17).
                 if ($marker eq q{:} || $marker eq q{~}) {
-                    my $term_index = $i - 1;
-                    my $term_body;
-                    while ($term_index >= 0) {
-                        my $term_prefix = quote_prefix($lines[$term_index]);
-                        last if $term_prefix ne $prefix;
-                        my $candidate = substr(
-                            $lines[$term_index], length($term_prefix)
-                        );
-                        if ($candidate !~ /^[ \t]*$/) {
-                            $term_body = $candidate;
-                            last;
-                        }
-                        $term_index--;
-                    }
-                    $proven_list_item = 0
-                        if !defined($term_body) || has_break($term_body);
+                    # Ein Definitionsmarker steht bei pandoc IMMER hinter einer
+                    # Leerzeile, und darüber muss ein Term stehen. Beides
+                    # zusammen trennt die echte Definitionsliste sauber vom
+                    # Absatz `Begriff\` + `: Text`, der nur so aussieht. Die
+                    # frühere Regel „Term darf keinen Hard-Break haben" verwarf
+                    # dagegen eine echte Liste, deren Term auf `<br>` endet.
+                    $proven_list_item = $block_start
+                        && defined(term_above($i, $depth, \@lines));
+                } else {
+                    # Alphabetische und römische Marker: entweder Blockanfang
+                    # oder Geschwister eines schon offenen Punktes. Nur Letzteres
+                    # erkennt den zweiten Punkt `b.` einer engen Liste, dessen
+                    # Vorzeile mit einem Hard-Break endet.
+                    $proven_list_item = $block_start || $sibling_of_open_item;
                 }
             }
 
             if ($proven_list_item) {
+                $is_list_item[$i] = 1;
                 push @item_indents,
                     $indent + length($marker) + indent_width($gap);
+                push @item_markers, $indent;
             }
         }
     }
@@ -422,11 +543,15 @@ tidy_markdown() {
             my $next_body   = substr($lines[$i + 1], length($next_prefix));
             if ($next_body =~ /^[ \t]*$/) {
                 $drop = 1;                        # Umbruch vor einer Leerzeile
-            # Die Markdown-Sondermarker reichen hier nicht als Beleg: Direkt
-            # hinter dem Hard-Break sind sie Teil desselben Absatzes (`a. Text`)
-            # und dürfen den echten Umbruch nicht verlieren. Die seit Projekt-
+            # Ein Markdown-Sondermarker allein reicht hier nicht als Beleg:
+            # Direkt hinter dem Hard-Break ist er Teil desselben Absatzes
+            # (`a. Text`) und darf den echten Umbruch nicht verlieren. Deshalb
+            # gilt derselbe Nachweis wie in Durchlauf 1 (`@is_list_item`) —
+            # sonst behielte der zweite Punkt einer engen Sonderliste einen
+            # reinen Layout-Umbruch (Review-Fund 2026-08-17). Die seit Projekt-
             # beginn unterstützte Bullet-/Dezimallisten-Heuristik bleibt eng.
-            } elsif ($next_body =~ /^[ \t]*$base_list_marker[ \t]+/) {
+            } elsif ($next_body =~ /^[ \t]*$block_list_marker[ \t]+/
+                     || $is_list_item[$i + 1]) {
                 $drop = 1;                        # Umbruch vor einem Listenpunkt
             }
         }
@@ -531,7 +656,38 @@ pandoc_supports_rtf() {
   pandoc --list-input-formats 2>/dev/null | grep -Fxq 'rtf'
 }
 
+# Der einzige pandoc-Aufruf der HTML→Markdown-Strecke. Beide Konvertierungen
+# gehen hier durch, damit die Optionen nur an einer Stelle stehen:
+#   -f html            : HTML als Eingabeformat.
+#   -t <ziel>-raw_html : Ziel-Markdown ohne raw_html-Extension — nicht
+#                        abbildbare HTML-Tags werden verworfen statt
+#                        durchgereicht.
+#   --wrap=none        : kein Auto-Umbruch bei ~78 Zeichen.
+#   --sandbox          : eingebettete Frames/Ressourcen dürfen beim reinen
+#                        Clipboard-Konvertieren keinen Netzabruf auslösen.
+# Entscheidend ist, dass `-t` und tidy_markdown dasselbe `$target_format`
+# benutzen; ein zweiter, getrennt gesetzter Zustand darf es nicht geben.
+# Deshalb ist das hier eine Funktion und keine zweimal hingeschriebene
+# Optionsliste: Wer die Optionen ändert, ändert sie für beide Wege zugleich.
+run_pandoc() {
+  local target_format="${1:-gfm}"
+  pandoc -f html -t "${target_format}-raw_html" --wrap=none --sandbox
+}
+
+# Pandoc schreibt auch für HTML ohne darstellbaren Inhalt ein Schluss-LF.
+# Der Filter puffert nur die fertige Markdown-Ausgabe und meldet whitespace-only
+# als Fehler, damit der Auto-Pfad auf den vorhandenen Plain-Text zurückfallen
+# kann und --replace niemals unbemerkt das Clipboard leert.
+require_nonempty_markdown() {
+  perl -0e '
+    my $text = do { local $/; <STDIN> };
+    print $text;
+    exit($text =~ /\S/ ? 0 : 1);
+  '
+}
+
 convert_html() {
+  local target_format="${1:-gfm}"
   if declare -F vlog >/dev/null 2>&1; then
     vlog "Pfad: HTML → pandoc"
   fi
@@ -539,11 +695,13 @@ convert_html() {
     | preprocess_google_classroom \
     | clean_html \
     | fill_empty_html_links \
-    | pandoc "${PANDOC_OPTS[@]}" \
-    | tidy_markdown "${TO:-gfm}"
+    | run_pandoc "$target_format" \
+    | tidy_markdown "$target_format" \
+    | require_nonempty_markdown
 }
 
 convert_rtf() {
+  local target_format="${1:-gfm}"
   if declare -F vlog >/dev/null 2>&1; then
     vlog "Pfad: RTF → HTML → flatten → pandoc → tidy"
   fi
@@ -552,6 +710,7 @@ convert_rtf() {
     | unwrap_list_paragraphs \
     | clean_html \
     | fill_empty_html_links \
-    | pandoc "${PANDOC_OPTS[@]}" \
-    | tidy_markdown "${TO:-gfm}"
+    | run_pandoc "$target_format" \
+    | tidy_markdown "$target_format" \
+    | require_nonempty_markdown
 }

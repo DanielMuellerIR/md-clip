@@ -5,7 +5,7 @@ getappt sind. Jede ist mit einem echten Symptom dokumentiert, das wir
 gesehen haben — wer das hier liest, soll dieselben Fehler nicht zweimal
 machen müssen.
 
-Fallen 1–4 stammen aus der macOS-Entwicklung, Fallen 5–6 kamen mit dem
+Fallen 1–5 stammen aus der macOS-Entwicklung, Fallen 6–7 kamen mit dem
 Linux-Port dazu (2026-07-16).
 
 ## TL;DR
@@ -14,7 +14,7 @@ Linux-Port dazu (2026-07-16).
   global eine UTF-8-Locale.** Auf macOS `LC_ALL=en_US.UTF-8` (oder eine
   andere `<lang>.UTF-8`) — das funktioniert für `pandoc`/`perl`/`sed`
   ebenso wie für `pbcopy`/`pbpaste`. **Auf Linux dagegen `C.UTF-8`**,
-  siehe Falle 5.
+  siehe Falle 6.
 - **Verwende KEINEN Inline-Override** wie `LC_ALL=C pbcopy` oder
   `LC_ALL=C pbpaste`. Das *wirkt* in trivialen Roundtrip-Tests korrekt,
   korrumpiert aber das Clipboard für jede andere App.
@@ -22,7 +22,7 @@ Linux-Port dazu (2026-07-16).
   z.B. via `NSPasteboard.string(forType: .string)` in einem Swift-Helper.
   Niemals via `pbpaste`, das den Bug verstecken kann.
 - **Auf Linux ist das Clipboard nicht automatisch UTF-8:** Firefox legt
-  HTML als UTF-16 ab, Chromium als UTF-8. Siehe Falle 6.
+  HTML als UTF-16 ab, Chromium als UTF-8. Siehe Falle 7.
 
 ## Falle 1: pbcopy/pbpaste haben einen bizarren Locale-Bug
 
@@ -226,7 +226,7 @@ verwenden.
 Falls wir mal Umlaut-Roundtrip in einer RTF-Fixture brauchen, kommt der
 Test-Input aus TextEdit (per Hand), nicht aus `textutil HTML→RTF`.
 
-## Falle 5: `en_US.UTF-8` existiert auf Linux oft gar nicht
+## Falle 6: `en_US.UTF-8` existiert auf Linux oft gar nicht
 
 ### Symptom
 
@@ -268,7 +268,7 @@ else
 fi
 ```
 
-## Falle 6: Firefox legt HTML als UTF-16 aufs Linux-Clipboard
+## Falle 7: Firefox legt HTML als UTF-16 aufs Linux-Clipboard
 
 ### Symptom
 
@@ -321,7 +321,7 @@ explizit nicht `pbpaste` ist — der Symmetrie-Bias ist gebrochen.
 Auf Linux läuft derselbe Roundtrip über `xclip` bzw. `wl-copy`/`wl-paste`
 (auch hier bewusst die plattformeigenen Werkzeuge, nicht md-clips eigene
 Funktionen — sonst hübe sich ein Fehler auf beiden Seiten gegenseitig auf).
-Dazu kommt `utf16-html-clipboard` für Falle 6: Der Test erzeugt die
+Dazu kommt `utf16-html-clipboard` für Falle 7: Der Test erzeugt die
 UTF-16-Variante mit `iconv` selbst, statt einen echten Firefox zu starten
 — es geht um die **Bytes** auf dem Clipboard, und die sind so exakt
 reproduzierbar, headless und in CI.

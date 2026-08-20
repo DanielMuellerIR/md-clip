@@ -90,19 +90,31 @@ final class UpdaterCoordinator: NSObject, SPUUpdaterDelegate, SPUStandardUserDri
     /// Wahr, sobald Sparkle einen Update-Dialog anzeigt. Solange der Nutzer
     /// dort noch entscheidet, darf der Prozess sich nicht beenden.
     private var updateDialogVisible = false
+    private var dialogDeadline: DispatchWorkItem?
+    private let maximumDialogLifetime: TimeInterval = 30 * 60
 
     func standardUserDriverWillHandleShowingUpdate(
         _ handleShowingUpdate: Bool,
         forUpdate update: SUAppcastItem,
         state: SPUUserUpdateState
     ) {
+        guard handleShowingUpdate else { return }
         updateDialogVisible = true
+        dialogDeadline?.cancel()
+        let deadline = DispatchWorkItem { NSApp.terminate(nil) }
+        dialogDeadline = deadline
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + maximumDialogLifetime,
+            execute: deadline
+        )
     }
 
     func standardUserDriverWillFinishUpdateSession() {
         // Der Nutzer hat den Update-Dialog abgeschlossen (installieren,
         // überspringen, später erinnern). Bei einer Installation übernimmt
         // ab hier Sparkles Autoupdate-Programm; dieser Prozess kann weg.
+        dialogDeadline?.cancel()
+        dialogDeadline = nil
         DispatchQueue.main.async { NSApp.terminate(nil) }
     }
 

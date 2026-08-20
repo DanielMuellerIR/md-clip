@@ -4,9 +4,9 @@
 set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$TESTS_DIR")"
-TEST_ROOT=$(mktemp -d)
-trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
+# shellcheck source=lib/test-helpers.sh
+source "$TESTS_DIR/lib/test-helpers.sh"
+init_test_environment "$TESTS_DIR"
 
 # Mehrere Prüfungen führen exakt den markierten Funktionsblock aus dem
 # Produktionscode mit Attrappen aus. Die Marker müssen eindeutig sein: Bei
@@ -40,6 +40,14 @@ MD_CLIP_HOST_PATH="$PATH"
 mkdir -p "$TEST_ROOT/fake-bin" "$TEST_ROOT/capture"
 cat > "$TEST_ROOT/fake-bin/osascript" <<'SH'
 #!/bin/sh
+if [ "${MD_CLIP_OSASCRIPT_FAIL_INSTALL:-0}" = "1" ]; then
+  if [ -n "${BUNDLE_CLI:-}" ]; then
+    cat > "$MD_CLIP_CAPTURE/source"
+    exit 7
+  fi
+  cat > "$MD_CLIP_CAPTURE/error-source"
+  exit 0
+fi
 printf '%s' "$BUNDLE_CLI" > "$MD_CLIP_CAPTURE/bundle"
 printf '%s' "$SYSTEM_CLI" > "$MD_CLIP_CAPTURE/system"
 cat > "$MD_CLIP_CAPTURE/source"
@@ -63,6 +71,16 @@ if grep -Fq "$BUNDLE_CLI" "$TEST_ROOT/capture/source"; then
   exit 1
 fi
 echo "✓ Launcher übergibt problematische Pfade nur als Daten"
+
+export MD_CLIP_OSASCRIPT_FAIL_INSTALL=1
+if install_cli; then
+  echo "✗ Launcher meldet eine fehlgeschlagene CLI-Installation als Erfolg" >&2
+  exit 1
+fi
+grep -Fq 'display dialog "Der Kommandozeilen-Befehl konnte nicht' \
+  "$TEST_ROOT/capture/error-source"
+unset MD_CLIP_OSASCRIPT_FAIL_INSTALL
+echo "✓ Launcher zeigt einen Fehler der privilegierten CLI-Installation an"
 
 # --- Launcher: der privilegierte Schritt prüft das Ziel selbst. ---
 # decide_cli_action prüft das Ziel VOR dem Passwort-Dialog; in diesem
@@ -180,6 +198,9 @@ echo "✓ Launcher verlinkt nur auf freies oder totes Ziel, nie mit -f"
 
 # --- Release: nur privater Mountpoint und von attach gemeldetes Device. ---
 RELEASE_SCRIPT="$PROJECT_ROOT/wrappers/sign-and-release.sh"
+NOTARY_HELPER="$PROJECT_ROOT/wrappers/notarization.sh"
+# shellcheck source=../wrappers/notarization.sh
+source "$NOTARY_HELPER"
 grep -Fq 'mktemp -d "$BUILD_DIR/.md-clip-mount.XXXXXX"' "$RELEASE_SCRIPT"
 grep -Fq -- '-plist > "$ATTACH_PLIST"' "$RELEASE_SCRIPT"
 grep -Fq 'detach_release_mount "$MOUNT_DEVICE"' "$RELEASE_SCRIPT"
@@ -189,6 +210,31 @@ if grep -Eq 'hdiutil detach "/Volumes|hdiutil detach "\$MOUNT_DIR"|hdiutil detac
   exit 1
 fi
 echo "✓ Release-Skript löst ausschließlich das eigene attach-Device"
+
+# Die Zuordnung selbst läuft gegen den echten Funktionsblock. Der erste
+# Plist-Eintrag ist absichtlich nur ein Präfixtreffer; ausschließlich der
+# zweite, exakt passende Mountpoint darf sein Device liefern.
+DEVICE_SELECTOR="$TEST_ROOT/device-for-mountpoint.sh"
+extract_shell_block "$RELEASE_SCRIPT" DEVICE_FOR_MOUNTPOINT "$DEVICE_SELECTOR"
+# shellcheck source=/dev/null
+source "$DEVICE_SELECTOR"
+cat > "$TEST_ROOT/fake-bin/PlistBuddy-device" <<'SH'
+#!/bin/sh
+case "$2" in
+  *:0:dev-entry) printf '/dev/disk-prefix\n' ;;
+  *:0:mount-point) printf '/private/md-clip-mount-other\n' ;;
+  *:1:dev-entry) printf '/dev/disk-exact\n' ;;
+  *:1:mount-point) printf '/private/md-clip-mount\n' ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$TEST_ROOT/fake-bin/PlistBuddy-device"
+SELECTED_DEVICE=$(device_for_mountpoint \
+  "$TEST_ROOT/attach.plist" \
+  /private/md-clip-mount \
+  "$TEST_ROOT/fake-bin/PlistBuddy-device")
+[ "$SELECTED_DEVICE" = /dev/disk-exact ]
+echo "✓ Release ordnet nur den exakt passenden Mountpoint seinem Device zu"
 
 # --- Release: das schreibbare Zwischen-Image hängt am Cleanup. ---
 # Es ist mehrere hundert MB groß und wurde früher erst im Erfolgsweg gelöscht;
@@ -220,17 +266,21 @@ source "$RELEASE_CLEANUP_BLOCK"
 RELEASE_CLEANUP_ROOT="$TEST_ROOT/release-cleanup-state"
 MOUNT_DIR="$RELEASE_CLEANUP_ROOT/mount"
 RW_DMG_PATH="$RELEASE_CLEANUP_ROOT/intermediate.dmg"
+PENDING_DMG_PATH="$RELEASE_CLEANUP_ROOT/pending.dmg"
 mkdir -p "$MOUNT_DIR"
 printf 'simulierter aktiver Mount\n' > "$MOUNT_DIR/inhalt"
 printf 'image\n' > "$RW_DMG_PATH"
-APP_ZIP_DIR=""
+printf 'noch nicht geprüft\n' > "$PENDING_DMG_PATH"
+NOTARY_APP_ZIP_DIR=""
 ATTACH_PLIST=""
 MOUNT_DEVICE=""
 MOUNT_MAY_BE_ATTACHED=1
 RW_DMG_OWNED=1
+PENDING_DMG_OWNED=1
 
 cleanup_release 2> "$RELEASE_CLEANUP_ROOT/unknown-device.err"
 [ -f "$RW_DMG_PATH" ]
+[ ! -e "$PENDING_DMG_PATH" ]
 [ -n "$MOUNT_DIR" ]
 [ -n "$MOUNT_MAY_BE_ATTACHED" ]
 grep -Fq 'DMG-Mount konnte keinem Device zugeordnet werden' \
@@ -244,7 +294,72 @@ cleanup_release
 [ -z "$MOUNT_DIR" ]
 [ -z "$MOUNT_MAY_BE_ATTACHED" ]
 [ -z "$RW_DMG_OWNED" ]
+[ -z "$PENDING_DMG_OWNED" ]
 echo "✓ Release-Cleanup bewahrt ein Image bei unbekanntem Mountzustand"
+
+# Der öffentliche Release-Name darf erst nach allen Prüfungen entstehen.
+PENDING_CONVERT_LINE=$(grep -n -- '-o "$PENDING_DMG_PATH"' "$RELEASE_SCRIPT" | cut -d: -f1)
+GATEKEEPER_LINE=$(grep -n 'spctl --assess --type open' "$RELEASE_SCRIPT" | cut -d: -f1)
+PUBLISH_LINE=$(grep -n '^mv "$PENDING_DMG_PATH" "$DMG_PATH"$' "$RELEASE_SCRIPT" | cut -d: -f1)
+if [ -z "$PENDING_CONVERT_LINE" ] || [ -z "$GATEKEEPER_LINE" ] || [ -z "$PUBLISH_LINE" ] \
+   || [ "$PENDING_CONVERT_LINE" -ge "$GATEKEEPER_LINE" ] \
+   || [ "$GATEKEEPER_LINE" -ge "$PUBLISH_LINE" ]; then
+  echo "✗ Release veröffentlicht das DMG vor Abschluss aller Prüfungen" >&2
+  exit 1
+fi
+grep -Fq 'rm -f "$PENDING_DMG_PATH"' "$RELEASE_CLEANUP_BLOCK"
+echo "✓ Release veröffentlicht nur ein vollständig geprüftes DMG"
+
+# Nur der belegte sporadische Keychain-Fehler wird wiederholt. Andere Fehler
+# bleiben im Log sichtbar und brechen sofort ab.
+NOTARY_CHECK="$TEST_ROOT/notary-profile-check.sh"
+extract_shell_block "$NOTARY_HELPER" NOTARY_PROFILE_CHECK "$NOTARY_CHECK"
+# shellcheck source=/dev/null
+source "$NOTARY_CHECK"
+cat > "$TEST_ROOT/fake-bin/xcrun" <<'SH'
+#!/bin/sh
+count_file="$MD_CLIP_NOTARY_COUNT"
+count=$(cat "$count_file" 2>/dev/null || printf 0)
+count=$((count + 1))
+printf '%s\n' "$count" > "$count_file"
+case "${MD_CLIP_NOTARY_MODE:-fatal}" in
+  transient)
+    if [ "$count" -lt 3 ]; then
+      echo 'No Keychain password item found' >&2
+      exit 1
+    fi
+    ;;
+  fatal)
+    echo 'The network connection was lost' >&2
+    exit 1
+    ;;
+esac
+SH
+cat > "$TEST_ROOT/fake-bin/sleep" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$TEST_ROOT/fake-bin/xcrun" "$TEST_ROOT/fake-bin/sleep"
+export MD_CLIP_NOTARY_COUNT="$TEST_ROOT/notary-count"
+if MD_CLIP_NOTARY_MODE=fatal notary_profile_works \
+  testprofil \
+  >"$TEST_ROOT/notary-fatal.out" 2>"$TEST_ROOT/notary-fatal.err"; then
+  echo "✗ Notary-Profilcheck ignoriert einen Netzwerkfehler" >&2
+  exit 1
+fi
+[ "$(cat "$MD_CLIP_NOTARY_COUNT")" = 1 ]
+grep -Fq 'network connection was lost' "$TEST_ROOT/notary-fatal.err"
+rm -f "$MD_CLIP_NOTARY_COUNT"
+MD_CLIP_NOTARY_MODE=transient notary_profile_works testprofil
+[ "$(cat "$MD_CLIP_NOTARY_COUNT")" = 3 ]
+rm -f "$TEST_ROOT/fake-bin/xcrun" "$TEST_ROOT/fake-bin/sleep"
+hash -r
+echo "✓ Notary-Profilcheck wiederholt nur den belegten Keychain-Fehler"
+grep -Fq 'source wrappers/notarization.sh' "$PROJECT_ROOT/install-app.sh"
+grep -Fq 'source "$SCRIPT_DIR/notarization.sh"' "$RELEASE_SCRIPT"
+grep -Fq 'notarize_app_bundle "$APP" "$NOTARY_PROFILE"' "$PROJECT_ROOT/install-app.sh"
+grep -Fq 'notarize_app_bundle "$APP_BUNDLE" "$NOTARY_PROFILE"' "$RELEASE_SCRIPT"
+echo "✓ Installation und Release verwenden dieselbe Notarisierungslogik"
 
 # --- Release: die Plist-Vorlage muss wirklich eindeutige Pfade liefern. ---
 # Darwins mktemp ersetzt die X-Kette nur am ENDE der Vorlage. Stünde noch ein
@@ -373,10 +488,23 @@ echo "✓ Launcher konvertiert zuerst und reicht den CLI-Exit-Status durch"
 UPDATER_MODE_SOURCE="$PROJECT_ROOT/helpers/md-clip-updater.swift"
 UPDATER_MODE_BINARY="$TEST_ROOT/md-clip-updater-mode-test"
 SWIFTC=$(PATH="$MD_CLIP_HOST_PATH" command -v swiftc || true)
+# Der Updater ist ein reiner macOS-Bestandteil (Sparkle, App-Bundle). Auf macOS
+# gehört swiftc mit den Xcode-Kommandozeilenwerkzeugen zur Grundausstattung —
+# fehlt er dort, ist das ein Fehler. Auf Linux gibt es weder Updater noch
+# Swift-Toolchain: dort wird der Block sichtbar übersprungen, statt die in der
+# README dokumentierte Testfolge scheitern zu lassen (Review-Fund 2026-08-17).
+UPDATER_MODE_SKIPPED=0
 if [ -z "$SWIFTC" ]; then
-  echo "✗ Swift-Compiler für den Updater-Modustest fehlt" >&2
-  exit 1
+  if [ "$(uname -s)" = "Darwin" ]; then
+    echo "✗ Swift-Compiler für den Updater-Modustest fehlt" >&2
+    exit 1
+  fi
+  UPDATER_MODE_SKIPPED=1
+  echo "⚠ Updater-Modustest übersprungen: kein swiftc auf $(uname -s)." >&2
+  echo "  Der Updater ist macOS-only; sein Argumentvertrag wird dort geprüft." >&2
 fi
+
+if [ "$UPDATER_MODE_SKIPPED" -eq 0 ]; then
 PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" -D MD_CLIP_UPDATER_MODE_TEST \
   "$UPDATER_MODE_SOURCE" -o "$UPDATER_MODE_BINARY"
 
@@ -408,6 +536,36 @@ assert_updater_mode_rejected widersprüchliche-modi --background --interactive
 assert_updater_mode_rejected unbekannten-modus --unbekannt
 assert_updater_mode_rejected zusätzliches-argument --background --unbekannt
 echo "✓ Updater akzeptiert genau einen bekannten Modus"
+fi   # Ende des swiftc-Blocks
+
+grep -Fq 'private let maximumDialogLifetime: TimeInterval = 30 * 60' "$UPDATER_MODE_SOURCE"
+grep -Fq 'DispatchQueue.main.asyncAfter(' "$UPDATER_MODE_SOURCE"
+grep -Fq 'dialogDeadline?.cancel()' "$UPDATER_MODE_SOURCE"
+echo "✓ Updater beendet auch einen unbeantworteten Sparkle-Dialog nach 30 Minuten"
+
+# RFC-8032-Testvektor 1 signiert eine leere Datei. Damit prüft derselbe
+# CryptoKit-Helfer wie im Appcast-Workflow einen gültigen und einen
+# manipulierten Signaturwert, ohne einen privaten Projektschlüssel zu laden.
+if [ "$(uname -s)" = "Darwin" ] && [ -n "$SWIFTC" ]; then
+  SPARKLE_VERIFIER="$TEST_ROOT/verify-sparkle-signature"
+  PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" \
+    "$PROJECT_ROOT/helpers/verify-sparkle-signature.swift" \
+    -o "$SPARKLE_VERIFIER"
+  SPARKLE_PUBLIC_KEY='11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo='
+  SPARKLE_SIGNATURE='5VZDAMNgrHKQhuLMgG6CioSHfx645dl02HPgZSJJAVVfuIIVkKM7rMYeOXAc+bRr0lv18FlbviRlUUFDjnoQCw=='
+  SPARKLE_EMPTY_FILE="$TEST_ROOT/sparkle-empty"
+  : > "$SPARKLE_EMPTY_FILE"
+  "$SPARKLE_VERIFIER" "$SPARKLE_PUBLIC_KEY" "$SPARKLE_SIGNATURE" "$SPARKLE_EMPTY_FILE"
+  BAD_SPARKLE_SIGNATURE="4${SPARKLE_SIGNATURE#?}"
+  if "$SPARKLE_VERIFIER" "$SPARKLE_PUBLIC_KEY" "$BAD_SPARKLE_SIGNATURE" "$SPARKLE_EMPTY_FILE" \
+    >/dev/null 2>&1; then
+    echo "✗ Sparkle-Signaturhelfer akzeptiert manipulierte Bytes" >&2
+    exit 1
+  fi
+  echo "✓ Sparkle-Signaturhelfer prüft Ed25519 kryptografisch"
+else
+  echo "⚠ Sparkle-Signaturtest übersprungen: CryptoKit-Helfer ist macOS-only." >&2
+fi
 
 # --- Erfolgsmeldung: HUD-Helfer zuerst, osascript nur als Fallback. ---
 # Vertrag in bin/md-clip (Befunde 2026-08-06: osascript-Meldungen laufen
@@ -459,7 +617,7 @@ if grep -Fq 'release:' "$APPCAST_WORKFLOW"; then
   echo "✗ Privilegierter Appcast-Workflow wird weiterhin aus dem Release-Tag geladen" >&2
   exit 1
 fi
-TOOLING_SHA="3946c521914dff93e92b1603647c1d763357fb44"
+TOOLING_SHA="02d3b1fb48cff7513402f4a721eda0bac525b324"
 grep -Fq "ref: $TOOLING_SHA" "$APPCAST_WORKFLOW"
 grep -Fq "!= \"$TOOLING_SHA\"" "$APPCAST_WORKFLOW"
 if grep -Fq 'TOOLING_REVISION' "$APPCAST_WORKFLOW"; then
@@ -540,10 +698,22 @@ select_release_tag ""
 [ "$(cat "$GITHUB_ENV")" = "RELEASE_TAG=v1.2.2" ]
 echo "✓ Release-Tag-Auswahl blockiert Newline-Überschreibungen vor GITHUB_ENV"
 
-TOOLING_CHECKOUT_LINE=$(grep -n -- '- name: Check out trusted appcast tooling' "$APPCAST_WORKFLOW" | cut -d: -f1)
-RELEASE_CHECKOUT_LINE=$(grep -n -- '- name: Check out release data' "$APPCAST_WORKFLOW" | cut -d: -f1)
-SECRET_STEP_LINE=$(grep -n -- '- name: Generate and verify signed appcast' "$APPCAST_WORKFLOW" | cut -d: -f1)
-if [ "$TOOLING_CHECKOUT_LINE" -ge "$RELEASE_CHECKOUT_LINE" ] \
+workflow_step_line() {
+  local name="$1"
+  local matches count
+  matches=$(grep -nF -- "- name: $name" "$APPCAST_WORKFLOW" || true)
+  count=$(printf '%s\n' "$matches" | awk 'NF { count++ } END { print count + 0 }')
+  if [ "$count" -ne 1 ]; then
+    echo "✗ Appcast-Workflow braucht genau einen Schritt '$name' (gefunden: $count)" >&2
+    return 1
+  fi
+  printf '%s\n' "$matches" | head -1 | cut -d: -f1
+}
+TOOLING_CHECKOUT_LINE=$(workflow_step_line 'Check out trusted appcast tooling')
+RELEASE_CHECKOUT_LINE=$(workflow_step_line 'Check out release data')
+SECRET_STEP_LINE=$(workflow_step_line 'Generate and verify signed appcast')
+if [ -z "$TOOLING_CHECKOUT_LINE" ] || [ -z "$RELEASE_CHECKOUT_LINE" ] || [ -z "$SECRET_STEP_LINE" ] \
+   || [ "$TOOLING_CHECKOUT_LINE" -ge "$RELEASE_CHECKOUT_LINE" ] \
    || [ "$RELEASE_CHECKOUT_LINE" -ge "$SECRET_STEP_LINE" ]; then
   echo "✗ Appcast-Workflow trennt Tooling, Release-Daten und Secret nicht in dieser Reihenfolge" >&2
   exit 1
@@ -552,6 +722,7 @@ fi
 FETCH_BLOCK=$(sed -n '/- name: Fetch pinned Sparkle tool without secret/,/- name: Generate and verify signed appcast/p' "$APPCAST_WORKFLOW")
 grep -Fq 'tooling/wrappers/build-app-bundled.sh' <<<"$FETCH_BLOCK"
 grep -Fq 'source tooling/wrappers/verified-cache.sh' <<<"$FETCH_BLOCK"
+grep -Fq 'swiftc tooling/helpers/verify-sparkle-signature.swift' <<<"$FETCH_BLOCK"
 if grep -Eq 'release-source/(wrappers|\.github)|source release-source' <<<"$FETCH_BLOCK"; then
   echo "✗ Appcast-Tooling stammt weiterhin aus dem Release-Tag" >&2
   exit 1
@@ -626,6 +797,8 @@ XML
     1.2.2 \
     1.2.2 \
     "https://github.com/DanielMuellerIR/md-clip/releases/download/v1.2.2/md-clip-1.2.2.dmg"
+else
+  echo "⚠ Reale Appcast-XPath-Prüfung übersprungen: xmllint fehlt auf $(uname -s)." >&2
 fi
 
 APPCAST_FAKE_BIN="$TEST_ROOT/appcast-fake-bin"
@@ -692,10 +865,12 @@ expect_appcast_rejected "fehlende EdDSA-Signatur"
 MD_CLIP_XML_SIGNATURE="synthetic-signature"
 echo "✓ Appcast verlangt genau einen passenden, signierten Release-Eintrag"
 
-SIGNING_BLOCK=$(sed -n '/- name: Generate and verify signed appcast/,/- name: Upload Pages artifact/p' "$APPCAST_WORKFLOW")
 grep -Fq "does not match key EdDSA" <<<"$SIGNING_BLOCK"
 grep -Fq "SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel" <<<"$SIGNING_BLOCK"
-echo "✓ Appcast bricht bei einem nicht zur App passenden Sparkle-Schlüssel ab"
+grep -Fq -- "-c 'Print :SUPublicEDKey'" <<<"$SIGNING_BLOCK"
+grep -Fq '"$APPCAST_WORK/verify-sparkle-signature"' <<<"$SIGNING_BLOCK"
+grep -Fq '"$public_key" "$feed_signature" "${dmgs[0]}"' <<<"$SIGNING_BLOCK"
+echo "✓ Appcast prüft die Signatur gegen den Schlüssel im Release-Bundle"
 
 # --- Bundle: Apple-Kette, Team-ID und Bundle-ID vor Produktcode. ---
 TRUST_HELPER="$PROJECT_ROOT/wrappers/verify-bundle-trust.sh"
@@ -822,6 +997,45 @@ if [ -z "$TRUST_CALL_LINE" ] || [ -z "$PRODUCT_EXEC_LINE" ] \
 fi
 echo "✓ Bundle wird vor Produktcode an Apple-Kette, Team-ID und Bundle-ID gebunden"
 
+# Auch ein toter XPC-Symlink ist unerlaubter Bundle-Inhalt. `-e` allein folgt
+# dem Ziel und würde ihn übersehen; der minimale Bundle-Aufbau muss bereits an
+# der Strukturprüfung scheitern, bevor otool oder Produktcode laufen.
+XPC_TEST_APP="$TEST_ROOT/dead-xpc/md-clip.app"
+mkdir -p \
+  "$XPC_TEST_APP/Contents/MacOS" \
+  "$XPC_TEST_APP/Contents/Resources/bin" \
+  "$XPC_TEST_APP/Contents/Resources/Licenses" \
+  "$XPC_TEST_APP/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+: > "$XPC_TEST_APP/Contents/Info.plist"
+for executable in \
+  "$XPC_TEST_APP/Contents/MacOS/md-clip" \
+  "$XPC_TEST_APP/Contents/MacOS/md-clip-updater" \
+  "$XPC_TEST_APP/Contents/MacOS/md-clip-hud" \
+  "$XPC_TEST_APP/Contents/Resources/bin/md-clip" \
+  "$XPC_TEST_APP/Contents/Resources/bin/pipeline.sh" \
+  "$XPC_TEST_APP/Contents/Resources/bin/pandoc" \
+  "$XPC_TEST_APP/Contents/Resources/bin/clipboard-html" \
+  "$XPC_TEST_APP/Contents/Resources/bin/clipboard-rtf" \
+  "$XPC_TEST_APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"; do
+  : > "$executable"
+  chmod +x "$executable"
+done
+for license in pandoc-COPYRIGHT.txt Sparkle-LICENSE.txt README.txt; do
+  printf 'Lizenz\n' > "$XPC_TEST_APP/Contents/Resources/Licenses/$license"
+done
+ln -s "$TEST_ROOT/nicht-vorhanden" \
+  "$XPC_TEST_APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+if bash "$VERIFY_BUNDLE" "$XPC_TEST_APP" \
+  >"$TEST_ROOT/dead-xpc.out" 2>"$TEST_ROOT/dead-xpc.err"; then
+  echo "✗ Bundle-Prüfer akzeptiert einen toten XPCServices-Symlink" >&2
+  exit 1
+fi
+grep -Fq 'Sparkles XPC-Dienste sind noch im Bundle' "$TEST_ROOT/dead-xpc.err"
+
+grep -Fq 'verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-html" "HTML-Helfer"' "$VERIFY_BUNDLE"
+grep -Fq 'verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-rtf" "RTF-Helfer"' "$VERIFY_BUNDLE"
+echo "✓ Bundle-Prüfer erfasst tote XPC-Symlinks und beide Clipboard-Helfer"
+
 # --- Bundle: Info.plist darf keine ältere Kompatibilität versprechen als Code. ---
 # Der echte Prüfer liest sowohl LC_BUILD_VERSION/minos als auch die ältere
 # LC_VERSION_MIN_MACOSX/version-Form aus vtool. Der isolierte Test führt den
@@ -906,11 +1120,14 @@ cp "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
 chmod +x "$SMOKE_SOURCE" "$SMOKE_BUNDLE"
 verify_trusted_build_cli "$SMOKE_SOURCE" "$SMOKE_BUNDLE" 1.2.4
 
-printf '%s\n' '#!/bin/sh' 'echo "fremd"' > "$SMOKE_BUNDLE"
+SMOKE_EXECUTED="$TEST_ROOT/smoke-executed"
+export SMOKE_EXECUTED
+printf '%s\n' '#!/bin/sh' 'printf ausgeführt > "$SMOKE_EXECUTED"' 'echo "fremd"' > "$SMOKE_BUNDLE"
 if verify_trusted_build_cli "$SMOKE_SOURCE" "$SMOKE_BUNDLE" 1.2.4 >/dev/null 2>&1; then
   echo "✗ Build-Smoke-Test führt eine nicht zur Quelle passende CLI aus" >&2
   exit 1
 fi
+[ ! -e "$SMOKE_EXECUTED" ]
 
 printf '%s\n' '#!/bin/sh' 'if then' > "$SMOKE_SOURCE"
 cp "$SMOKE_SOURCE" "$SMOKE_BUNDLE"

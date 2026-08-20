@@ -86,7 +86,9 @@ done
 # Die App ist nicht sandboxed; Sparkles XPC-Dienste gehören deshalb nicht ins
 # ausgelieferte Bundle. Sie wären nur nutzlose Angriffsfläche.
 if [ -e "$SPARKLE_FRAMEWORK/Versions/B/XPCServices" ] \
-   || [ -e "$SPARKLE_FRAMEWORK/XPCServices" ]; then
+   || [ -L "$SPARKLE_FRAMEWORK/Versions/B/XPCServices" ] \
+   || [ -e "$SPARKLE_FRAMEWORK/XPCServices" ] \
+   || [ -L "$SPARKLE_FRAMEWORK/XPCServices" ]; then
   echo "Sparkles XPC-Dienste sind noch im Bundle." >&2
   exit 65
 fi
@@ -256,6 +258,8 @@ if [ "$SIGNED" -eq 1 ]; then
   verify_distribution_signature "$APP" "App"
   verify_distribution_signature "$UPDATER" "Updater-Helfer"
   verify_distribution_signature "$APP/Contents/MacOS/md-clip-hud" "HUD-Helfer"
+  verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-html" "HTML-Helfer"
+  verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-rtf" "RTF-Helfer"
   # Sparkle kommt fertig gebaut von außen und wird beim Signieren neu
   # gesiegelt. Diese Prüfung stellt sicher, dass die eigene Developer ID
   # wirklich auf Framework, Updater-App und Autoupdate liegt — sonst

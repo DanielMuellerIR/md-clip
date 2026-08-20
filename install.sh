@@ -112,12 +112,15 @@ command -v pandoc >/dev/null 2>&1 || missing+=("pandoc")
 command -v perl   >/dev/null 2>&1 || missing+=("perl")
 
 if [ "$PLATFORM" = "linux" ]; then
-  # Beide Clipboard-Werkzeuge empfehlen, nicht nur das der aktuellen Sitzung:
-  # Beim Wechsel zwischen X11- und Wayland-Sitzung (Login-Bildschirm) soll
-  # md-clip weiter laufen, ohne dass man nachinstallieren muss.
-  command -v xclip >/dev/null 2>&1 || missing+=("xclip (X11-Sitzungen)")
-  if ! command -v wl-paste >/dev/null 2>&1 || ! command -v wl-copy >/dev/null 2>&1; then
-    missing+=("wl-clipboard (Wayland-Sitzungen; wl-paste + wl-copy)")
+  # Nur das Backend der laufenden Sitzung ist Pflicht. WAYLAND_DISPLAY ist
+  # auch hier die Produkt-Weiche; DISPLAY wäre unter Wayland durch XWayland
+  # häufig ebenfalls gesetzt und würde die falsche Abhängigkeit verlangen.
+  if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    if ! command -v wl-paste >/dev/null 2>&1 || ! command -v wl-copy >/dev/null 2>&1; then
+      missing+=("wl-clipboard (Wayland-Sitzung; wl-paste + wl-copy)")
+    fi
+  else
+    command -v xclip >/dev/null 2>&1 || missing+=("xclip (X11-Sitzung)")
   fi
 fi
 
@@ -191,7 +194,9 @@ if [ ! -d "$INSTALL_PREFIX" ]; then
       ;;
     *)
       echo "FEHLER: Verzeichnis existiert nicht: $INSTALL_PREFIX"
-      echo "       Anlegen oder INSTALL_PREFIX setzen."
+      echo "       Vorher gezielt anlegen, zum Beispiel:"
+      echo "         sudo mkdir -p \"$INSTALL_PREFIX\""
+      echo "       oder INSTALL_PREFIX auf ein Verzeichnis in deinem Home setzen."
       exit 2
       ;;
   esac

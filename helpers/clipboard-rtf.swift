@@ -17,13 +17,15 @@
 //   swiftc helpers/clipboard-rtf.swift -o helpers/clipboard-rtf
 
 import AppKit  // bringt NSPasteboard mit
+import Foundation
 
 let pb = NSPasteboard.general
 
 // .rtf ist die typsichere Konstante für die RTF-UTI ("public.rtf").
 // Liefert nil, wenn kein RTF-Flavor auf dem Clipboard liegt.
-if let rtf = pb.string(forType: .rtf) {
-    print(rtf)
+if let rtf = pb.string(forType: .rtf),
+   rtf.range(of: #"\S"#, options: .regularExpression) != nil {
+    FileHandle.standardOutput.write(Data(rtf.utf8))
     exit(0)
 } else {
     FileHandle.standardError.write("Kein RTF auf dem Clipboard.\n".data(using: .utf8)!)

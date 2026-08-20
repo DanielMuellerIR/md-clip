@@ -92,9 +92,10 @@ kompilierte Helfer `Contents/MacOS/md-clip-updater`
 
 ## Ablauf pro Release
 
-1. Version in `bin/md-clip` (`VERSION=`), README und Changelog pflegen. Die
-   Bundle-Version leitet der Build daraus ab; sie muss monoton steigen, denn
-   Sparkle vergleicht Versionen über `CFBundleVersion`.
+1. Version in `bin/md-clip` (`VERSION=`), `CHANGELOG.md` und den Status in
+   `docs/DISTRIBUTION.md` pflegen. Die Bundle-Version leitet der Build daraus
+   ab; sie muss monoton steigen, denn Sparkle vergleicht Versionen über
+   `CFBundleVersion`.
 2. Release bauen: `./release.sh`. Das signiert (inkl. Sparkle), verifiziert,
    notarisiert App und DMG und stapelt die Tickets.
 3. Tag und GitHub-Release mit genau einem DMG anlegen. Die Release Notes sind

@@ -5,9 +5,9 @@
 set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$TESTS_DIR")"
-TEST_ROOT=$(mktemp -d)
-trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
+# shellcheck source=lib/test-helpers.sh
+source "$TESTS_DIR/lib/test-helpers.sh"
+init_test_environment "$TESTS_DIR"
 
 mkdir -p "$TEST_ROOT/runtime" "$TEST_ROOT/fake-bin"
 cp "$PROJECT_ROOT/bin/md-clip" "$TEST_ROOT/runtime/md-clip"
@@ -192,3 +192,30 @@ if [ "$(/usr/bin/uname -s)" = "Darwin" ]; then
 fi
 check_mso_fallback x11 Linux ""
 check_mso_fallback wayland Linux wayland-test
+
+# Ein leerer Rich-Flavor darf im Auto-Modus den weiterhin vorhandenen
+# Plain-Text weder verdecken noch mit --replace das Clipboard leeren.
+: > "$TEST_ROOT/empty-rich.html"
+printf 'Plain bleibt erhalten\n' > "$TEST_ROOT/rich-fallback.input"
+export MD_CLIP_TEST_HTML="$TEST_ROOT/empty-rich.html"
+export MD_CLIP_TEST_RTF=""
+export MD_CLIP_TEST_INPUT="$TEST_ROOT/rich-fallback.input"
+
+check_empty_rich_fallback() {
+  local name="$1"
+  local platform="$2"
+  local wayland="$3"
+  local output="$TEST_ROOT/empty-rich-${name}.clipboard"
+
+  printf 'darf nicht geleert werden\n' > "$output"
+  MD_CLIP_TEST_OUTPUT="$output" MD_CLIP_TEST_UNAME="$platform" WAYLAND_DISPLAY="$wayland" \
+    "$TEST_ROOT/runtime/md-clip" --replace --quiet
+  cmp "$TEST_ROOT/rich-fallback.input" "$output"
+  printf '✓ empty-rich-fallback-%s\n' "$name"
+}
+
+if [ "$(/usr/bin/uname -s)" = "Darwin" ]; then
+  check_empty_rich_fallback macos Darwin ""
+fi
+check_empty_rich_fallback x11 Linux ""
+check_empty_rich_fallback wayland Linux wayland-test

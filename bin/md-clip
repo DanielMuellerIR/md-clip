@@ -110,7 +110,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.2.5"
+VERSION="1.2.6"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -160,14 +160,10 @@ if [ -x "$SCRIPT_DIR/pandoc" ]; then
   export PATH="$SCRIPT_DIR:$PATH"
 fi
 
-# Standard-Optionen für pandoc — werden nach dem Argument-Parsing gesetzt
-# (PANDOC_OPTS Zeile nach dem `done`), weil das `-t`-Flag vom --to-Argument abhängt.
-# Dokumentation der Optionen:
-#   -f html         : HTML als Input-Format.
-#   -t <TO>-raw_html: Ziel-Markdown ohne raw_html-Extension (Standard: gfm-raw_html).
-#                     Nicht abbildbare HTML-Tags werden VERWORFEN statt
-#                     durchgereicht. Killt Tailwind-Müll im Output.
-#   --wrap=none     : Kein Auto-Wrap bei ~78 Zeichen.
+# Die pandoc-Optionen leitet die Pipeline selbst aus dem Zielformat ab
+# (`run_pandoc` in lib/pipeline.sh, der einzige pandoc-Aufruf der
+# HTML→Markdown-Strecke); $TO wird nur noch an convert_html / convert_rtf
+# übergeben.
 
 # ---------- Flag-Defaults ----------
 
@@ -542,9 +538,6 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-# Pandoc-Optionen entsprechend --to anpassen, falls vom Default abweichend.
-# `-t gfm-raw_html` ist Default; bei anderen Zielen lassen wir raw_html ebenfalls weg.
-PANDOC_OPTS=(-f html -t "${TO}-raw_html" --wrap=none)
 
 # ---------- Dependency-Checks ----------
 
@@ -705,12 +698,12 @@ else
   case "$FROM" in
     html)
       html=$(try_html) || die 1 "Kein HTML auf dem Clipboard (--from html)."
-      printf '%s' "$html" | convert_html > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
+      printf '%s' "$html" | convert_html "$TO" > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
       CONVERTED=1
       ;;
     rtf)
       rtf=$(try_rtf) || die 1 "Kein RTF auf dem Clipboard (--from rtf)."
-      printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
+      printf '%s' "$rtf" | convert_rtf "$TO" > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
       CONVERTED=1
       ;;
     plain)
@@ -733,19 +726,42 @@ else
         mso_flag=0
         is_mso_html "$html" && mso_flag=1
 
+        conversion_succeeded=0
         if [ "$mso_flag" -eq 1 ] && rtf=$(try_rtf); then
           vlog "HTML ist Microsoft-Word-Format — verwende stattdessen RTF"
-          printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
+          if printf '%s' "$rtf" | convert_rtf "$TO" > "$OUTPUT_FILE"; then
+            conversion_succeeded=1
+          fi
         else
           if [ "$mso_flag" -eq 1 ]; then
             vlog "HTML ist Microsoft-Word-Format, aber kein RTF da — versuche HTML trotzdem (Ergebnis vermutlich unsauber)"
           fi
-          printf '%s' "$html" | convert_html > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
+          if printf '%s' "$html" | convert_html "$TO" > "$OUTPUT_FILE"; then
+            conversion_succeeded=1
+          fi
         fi
-        CONVERTED=1
+        if [ "$conversion_succeeded" -eq 1 ]; then
+          CONVERTED=1
+        else
+          # Ein vorhandener Rich-Flavor kann leer oder für pandoc nicht
+          # darstellbar sein. Im Auto-Modus ist der Plain-Flavor dann die
+          # sichere Nutzdatenquelle; --from html/rtf bleibt dagegen strikt.
+          clip_read_text > "$OUTPUT_FILE" || true
+          if [ ! -s "$OUTPUT_FILE" ]; then
+            die 1 "Rich-Text war leer oder nicht konvertierbar; kein Plain-Text als Fallback."
+          fi
+          vlog "Rich-Text ergab keinen Inhalt — Plain-Text durchgereicht"
+        fi
       elif rtf=$(try_rtf); then
-        printf '%s' "$rtf" | convert_rtf > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
-        CONVERTED=1
+        if printf '%s' "$rtf" | convert_rtf "$TO" > "$OUTPUT_FILE"; then
+          CONVERTED=1
+        else
+          clip_read_text > "$OUTPUT_FILE" || true
+          if [ ! -s "$OUTPUT_FILE" ]; then
+            die 1 "RTF war leer oder nicht konvertierbar; kein Plain-Text als Fallback."
+          fi
+          vlog "RTF ergab keinen Inhalt — Plain-Text durchgereicht"
+        fi
       else
         # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
         clip_read_text > "$OUTPUT_FILE" || true
@@ -773,6 +789,13 @@ if [ "$REPLACE" -eq 1 ]; then
   # belegt an `<p>a</p><p><br></p>` → `a\n\n`).
   if [ "$CONVERTED" -eq 1 ]; then
     perl -0777 -i -pe 's/\n\z//' "$OUTPUT_FILE"
+  fi
+
+  # Letzte Schutzlinie direkt vor der destruktiven Clipboard-Operation. Die
+  # Konverter lehnen leere Ausgabe bereits ab; dieser Check verhindert auch
+  # bei künftigen Pfaden ein erfolgreich gemeldetes 0-Byte-Clipboard.
+  if [ ! -s "$OUTPUT_FILE" ]; then
+    die 1 "Ergebnis ist leer; Clipboard bleibt unverändert."
   fi
 
   # clip_write_text liest von stdin und ersetzt den Clipboard-Inhalt

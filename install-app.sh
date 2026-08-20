@@ -25,6 +25,9 @@
 # Letzte Zeile bei Erfolg: INSTALL OK: /Applications/md-clip.app (<version>)
 set -euo pipefail
 cd "$(dirname "$0")"
+PROJECT_ROOT="$PWD"
+# shellcheck source=wrappers/notarization.sh
+source wrappers/notarization.sh
 
 APP="build/md-clip.app"
 DESTINATION="/Applications/md-clip.app"
@@ -35,12 +38,10 @@ VERSION="$(grep '^VERSION=' bin/md-clip | head -1 | cut -d'"' -f2)"
 # `ditto` oder die Notarisierung, bleibt sonst ein großes App-Archiv liegen.
 # Eine erledigte Zwischenstufe leert ihre Variable und fällt damit aus der
 # Zuständigkeit heraus.
-APP_ZIP_DIR=""
+NOTARY_APP_ZIP_DIR=""
 STAGED=""
 cleanup_install() {
-  if [ -n "$APP_ZIP_DIR" ]; then
-    rm -rf "$APP_ZIP_DIR"
-  fi
+  cleanup_notary_archive
   if [ -n "$STAGED" ]; then
     rm -rf "$STAGED"
   fi
@@ -49,17 +50,7 @@ trap cleanup_install EXIT
 trap 'cleanup_install; exit 130' INT
 trap 'cleanup_install; exit 143' TERM
 
-NOTARY_PROFILE="${NOTARY_PROFILE:-}"
-if [ -z "$NOTARY_PROFILE" ]; then
-  NOTARY_PROFILE="$(git config --local --get mdClip.notaryProfile 2>/dev/null || true)"
-fi
-if [ -z "$NOTARY_PROFILE" ]; then
-  echo "FEHLER: Kein Notary-Profil bekannt." >&2
-  echo "Entweder NOTARY_PROFILE setzen oder einmalig fuer diesen Clone:" >&2
-  echo "  git config --local mdClip.notaryProfile <profil>" >&2
-  exit 2
-fi
-export NOTARY_PROFILE
+resolve_notary_profile "$PROJECT_ROOT" || exit $?
 
 # Fail-fast VOR dem Bauen: Ein unbrauchbares Profil erst nach dem Bauen zu
 # bemerken, kostet nur Zeit.
@@ -67,27 +58,10 @@ export NOTARY_PROFILE
 # Mit Wiederholungen, weil der Aufruf gelegentlich fälschlich „No Keychain
 # password item found" meldet, obwohl das Profil da ist (am 2026-07-26 belegt).
 # Ein wirklich fehlendes Profil scheitert auch nach fünf Versuchen.
-notary_profile_works() {
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 && return 0
-    sleep 3
-  done
-  return 1
-}
-if ! notary_profile_works; then
-  echo "FEHLER: Das Notary-Profil '$NOTARY_PROFILE' ist auf diesem Mac nicht verwendbar." >&2
-  echo "Über SSH ist der Login-Schlüsselbund gesperrt — dann in einer lokalen" >&2
-  echo "Terminalsitzung erneut versuchen." >&2
-  exit 2
-fi
-
 TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
 IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
-if ! security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
-  echo "FEHLER: Signing-Identität nicht gefunden: $IDENTITY" >&2
-  exit 1
-fi
+verify_notary_profile "$NOTARY_PROFILE" "$TEAM_ID" || exit 2
+require_signing_identity "$IDENTITY" || exit 1
 
 echo "=== 1/4 App bauen ==="
 bash wrappers/build-app-bundled.sh
@@ -101,16 +75,7 @@ bash wrappers/sign-bundle.sh "$APP" "$IDENTITY"
 bash wrappers/verify-bundle.sh "$APP" --signed --team-id "$TEAM_ID"
 
 echo "=== 3/4 Notarisieren ==="
-# notarytool nimmt kein nacktes .app entgegen, deshalb der Umweg über ein ZIP.
-APP_ZIP_DIR="$(mktemp -d)"
-APP_ZIP="$APP_ZIP_DIR/md-clip.zip"
-ditto -c -k --keepParent "$APP" "$APP_ZIP"
-xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-rm -rf "$APP_ZIP_DIR"
-APP_ZIP_DIR=""
-xcrun stapler staple "$APP"
-xcrun stapler validate "$APP"
-spctl --assess --type execute -vv "$APP" 2>&1 | tail -2
+notarize_app_bundle "$APP" "$NOTARY_PROFILE"
 
 echo "=== 4/4 Installieren ==="
 # Erst neben das Ziel legen, dann atomar austauschen: ein Abbruch mittendrin

@@ -17,6 +17,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=notarization.sh
+source "$SCRIPT_DIR/notarization.sh"
+
 # ---------- Konstanten ----------
 
 # Die Apple-ID braucht dieses Skript nicht: Die Zugangsdaten liegen vollständig
@@ -27,19 +32,7 @@ set -euo pipefail
 TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
 IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
 
-# Profilname: Umgebung schlägt clone-lokale Git-Konfiguration. Einen Default
-# gibt es im öffentlichen Repo bewusst nicht; Keychain-Profile sind pro Mac
-# lokal und ein fest eingebauter Name ließe den Lauf erst nach dem Bauen scheitern.
-NOTARY_PROFILE="${NOTARY_PROFILE:-}"
-if [ -z "$NOTARY_PROFILE" ]; then
-  NOTARY_PROFILE="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." config --local --get mdClip.notaryProfile 2>/dev/null || true)"
-fi
-if [ -z "$NOTARY_PROFILE" ]; then
-  echo "FEHLER: Kein Notary-Profil bekannt." >&2
-  echo "Entweder NOTARY_PROFILE setzen oder einmalig fuer diesen Clone:" >&2
-  echo "  git config --local mdClip.notaryProfile <profil>" >&2
-  exit 2
-fi
+resolve_notary_profile "$PROJECT_ROOT" || exit $?
 
 # --no-finder-layout überspringt den AppleScript-Schritt: Er öffnet ein echtes
 # Finder-Fenster und reißt den Fokus an sich, was headless-Läufe (und Läufe neben
@@ -61,8 +54,6 @@ DMG_VOLNAME="md-clip"
 
 # ---------- Pfade ----------
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build"
 APP_BUNDLE="$BUILD_DIR/md-clip.app"
 BACKGROUND_SRC="$PROJECT_ROOT/assets/dmg-background.png"
@@ -70,25 +61,20 @@ BACKGROUND_SRC="$PROJECT_ROOT/assets/dmg-background.png"
 # Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth.
 APP_VERSION=$(grep '^VERSION=' "$PROJECT_ROOT/bin/md-clip" | head -1 | cut -d'"' -f2)
 DMG_PATH="$BUILD_DIR/md-clip-${APP_VERSION}.dmg"
+PENDING_DMG_PATH="$BUILD_DIR/.md-clip-${APP_VERSION}.pending.dmg"
 RW_DMG_PATH="$BUILD_DIR/md-clip-${APP_VERSION}-rw.dmg"
 # Gesetzt, sobald hdiutil create das Image angelegt hat: nur dann darf die
 # Aufraeumroutine es loeschen. Vorher koennte dort noch das Image eines
 # frueheren Laufs liegen, das uns nicht gehoert.
 RW_DMG_OWNED=""
+PENDING_DMG_OWNED=""
 
 echo "==> md-clip Sign-and-Release v${APP_VERSION}"
 
 # ---------- Sanity-Checks ----------
 
 # Existiert die Signing-Identität?
-if ! security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
-  echo "FEHLER: Signing-Identität nicht gefunden:" >&2
-  echo "        $IDENTITY" >&2
-  echo
-  echo "Verfügbare Identitäten:" >&2
-  security find-identity -v -p codesigning >&2
-  exit 1
-fi
+require_signing_identity "$IDENTITY" || exit 1
 
 # Existiert das Notary-Schlüsselbund-Profil?
 # Wir testen es mit einem History-Aufruf — funktioniert nur mit gültigem Profil.
@@ -99,25 +85,7 @@ fi
 # verändert). Ein einzelner Fehlversuch würde hier einen kompletten Release-Lauf
 # abbrechen. Ein wirklich fehlendes Profil scheitert dagegen auch nach fünf
 # Versuchen; die Aussagekraft geht also nicht verloren.
-notary_profile_works() {
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 && return 0
-    sleep 3
-  done
-  return 1
-}
-if ! notary_profile_works; then
-  echo "FEHLER: notarytool-Schlüsselbund-Profil '$NOTARY_PROFILE' nicht eingerichtet." >&2
-  echo
-  echo "So einrichten (Passwort INTERAKTIV eingeben, NICHT als Argument!):" >&2
-  echo "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" \\"  >&2
-  echo "    --apple-id \"<deine-apple-id>\" \\"                        >&2
-  echo "    --team-id  \"$TEAM_ID\""                                   >&2
-  echo
-  echo "Danach fragt das Tool nach dem App-spezifischen Passwort." >&2
-  exit 1
-fi
+verify_notary_profile "$NOTARY_PROFILE" "$TEAM_ID" || exit 1
 
 # Hintergrundbild da?
 if [ ! -f "$BACKGROUND_SRC" ]; then
@@ -132,7 +100,7 @@ fi
 # Trap steht bewusst VOR dem ersten mktemp: Ein Abbruch beim Notarisieren oder
 # beim DMG-Layout darf weder ein großes App-Archiv noch einen eingehängten
 # privaten Mount hinterlassen.
-APP_ZIP_DIR=""
+NOTARY_APP_ZIP_DIR=""
 MOUNT_DIR=""
 MOUNT_DEVICE=""
 MOUNT_MAY_BE_ATTACHED=""
@@ -156,10 +124,7 @@ detach_release_mount() {
 }
 
 cleanup_release() {
-  if [ -n "$APP_ZIP_DIR" ] && [ -d "$APP_ZIP_DIR" ]; then
-    rm -rf "$APP_ZIP_DIR"
-    APP_ZIP_DIR=""
-  fi
+  cleanup_notary_archive
   if [ -n "$MOUNT_DEVICE" ]; then
     # Die Referenz erst nach erfolgreichem Aushängen löschen. Sonst wäre nach
     # einem gescheiterten Versuch das einzige Handle auf unser Device weg und
@@ -204,6 +169,10 @@ cleanup_release() {
     rm -f "$RW_DMG_PATH"
     RW_DMG_OWNED=""
   fi
+  if [ -n "$PENDING_DMG_OWNED" ]; then
+    rm -f "$PENDING_DMG_PATH"
+    PENDING_DMG_OWNED=""
+  fi
 }
 # END RELEASE_CLEANUP
 
@@ -235,15 +204,7 @@ echo "✓ Bundle signiert"
 # nimmt kein nacktes .app entgegen, deshalb der Umweg über ein ZIP. Das
 # angeheftete Ticket landet als Datei im Bundle und wird unten mitkopiert.
 echo "==> Notarisiere App-Bundle (Profil $NOTARY_PROFILE)"
-APP_ZIP_DIR="$(mktemp -d)"
-APP_ZIP="$APP_ZIP_DIR/md-clip.zip"
-ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ZIP"
-xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-rm -rf "$APP_ZIP_DIR"
-APP_ZIP_DIR=""
-xcrun stapler staple "$APP_BUNDLE"
-xcrun stapler validate "$APP_BUNDLE"
-spctl --assess --type execute -vv "$APP_BUNDLE" 2>&1 | tail -2
+notarize_app_bundle "$APP_BUNDLE" "$NOTARY_PROFILE"
 echo "✓ App notarisiert und gestapelt"
 
 # ---------- 3. DMG mit Installations-Layout erzeugen ----------
@@ -255,22 +216,24 @@ echo "✓ App notarisiert und gestapelt"
 echo "==> Erzeuge DMG-Layout"
 
 # Aufräumen von vorigen Läufen.
-rm -f "$DMG_PATH" "$RW_DMG_PATH"
+rm -f "$DMG_PATH" "$PENDING_DMG_PATH" "$RW_DMG_PATH"
 
 # Nur das von DIESEM Lauf eingehängte Device darf die Aufräumroutine lösen.
 # `hdiutil attach -plist` liefert den eindeutigen Device-Pfad; ein gleichnamiges
 # fremdes Volume unter /Volumes bleibt damit vollständig unberührt. Variablen
 # und Aufräumroutine stehen weiter oben, siehe Abschnitt „Aufräumen".
 
+# BEGIN DEVICE_FOR_MOUNTPOINT
 device_for_mountpoint() {
   local plist_path="$1"
   local expected_mount="$2"
+  local plistbuddy="${3:-/usr/libexec/PlistBuddy}"
   local index=0
   local device=""
   local mountpoint=""
 
-  while device=$(/usr/libexec/PlistBuddy -c "Print :system-entities:$index:dev-entry" "$plist_path" 2>/dev/null); do
-    mountpoint=$(/usr/libexec/PlistBuddy -c "Print :system-entities:$index:mount-point" "$plist_path" 2>/dev/null || true)
+  while device=$("$plistbuddy" -c "Print :system-entities:$index:dev-entry" "$plist_path" 2>/dev/null); do
+    mountpoint=$("$plistbuddy" -c "Print :system-entities:$index:mount-point" "$plist_path" 2>/dev/null || true)
     if [ "$mountpoint" = "$expected_mount" ]; then
       printf '%s\n' "$device"
       return 0
@@ -280,6 +243,7 @@ device_for_mountpoint() {
 
   return 1
 }
+# END DEVICE_FOR_MOUNTPOINT
 
 # Größenbedarf grob abschätzen: Bundle + 20 MB Puffer für Hintergrund,
 # DS_Store, Filesystem-Overhead. hdiutil reserviert das beim Erzeugen
@@ -402,10 +366,11 @@ ATTACH_PLIST=""
 
 # In komprimiertes Read-only-DMG konvertieren.
 echo "==> Konvertiere zu UDZO (komprimiert, read-only)"
+PENDING_DMG_OWNED=1
 hdiutil convert "$RW_DMG_PATH" \
   -format UDZO \
   -imagekey zlib-level=9 \
-  -o "$DMG_PATH"
+  -o "$PENDING_DMG_PATH"
 
 rm -f "$RW_DMG_PATH"
 RW_DMG_OWNED=""
@@ -415,9 +380,9 @@ RW_DMG_OWNED=""
 codesign --sign "$IDENTITY" \
          --timestamp \
          --force \
-         "$DMG_PATH"
+         "$PENDING_DMG_PATH"
 
-echo "✓ DMG: $(basename "$DMG_PATH") ($(du -h "$DMG_PATH" | cut -f1))"
+echo "✓ DMG gebaut: $(du -h "$PENDING_DMG_PATH" | cut -f1)"
 
 # ---------- 4. Bei Apple zur Notarization einreichen ----------
 
@@ -425,7 +390,7 @@ echo "==> Reiche zur Notarization ein (1-10 Min, manchmal länger)"
 
 # --wait blockiert, bis Apple geantwortet hat. Ohne wäre der Befehl
 # sofort fertig und man müsste später per Submission-ID den Status pollen.
-xcrun notarytool submit "$DMG_PATH" \
+xcrun notarytool submit "$PENDING_DMG_PATH" \
   --keychain-profile "$NOTARY_PROFILE" \
   --wait
 
@@ -437,12 +402,12 @@ echo "✓ Notarization akzeptiert"
 # Schritt müsste Gatekeeper beim ersten Öffnen online den Status prüfen.
 # Mit Stapler funktioniert es auch offline.
 echo "==> Stapele Notarization-Ticket"
-xcrun stapler staple "$DMG_PATH"
+xcrun stapler staple "$PENDING_DMG_PATH"
 
 # ---------- 6. Verifizieren ----------
 
 echo "==> Verifizierung"
-xcrun stapler validate "$DMG_PATH"
+xcrun stapler validate "$PENDING_DMG_PATH"
 
 # spctl simuliert, was Gatekeeper beim Öffnen tun würde. Wenn das hier
 # durchgeht, geht es auch auf fremden Macs durch.
@@ -452,7 +417,13 @@ xcrun stapler validate "$DMG_PATH"
 # selbst wurde weiter oben mit der für sie zuständigen Policy `--type execute`
 # bewertet.
 spctl --assess --type open --context context:primary-signature \
-      -v "$DMG_PATH"
+      -v "$PENDING_DMG_PATH"
+
+# Erst ein vollständig geprüftes Image erhält den veröffentlichten Dateinamen.
+# Ein Fehler bei Signatur, Notarisierung oder Gatekeeper-Prüfung lässt damit
+# kein scheinbar fertiges Release-Artefakt im Build-Verzeichnis zurück.
+mv "$PENDING_DMG_PATH" "$DMG_PATH"
+PENDING_DMG_OWNED=""
 
 # ---------- Fertig ----------
 

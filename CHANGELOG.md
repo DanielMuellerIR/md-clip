@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.6 — 2026-08-20
+
+- Die HTML-Vorverarbeitung entfernt `style`- und `data-*`-Attribute nur noch
+  aus Tags. Gleichlautender Text in Prosa und Code bleibt erhalten; pandocs
+  Sandbox verhindert außerdem Netzwerkzugriffe durch eingebettete Ressourcen.
+- Leere oder nicht direkt als UTF-8 lesbare Rich-Text-Flavors umgehen den
+  Plain-Text-Fallback nicht mehr. Die macOS-Helfer dekodieren auch UTF-16 mit
+  BOM, und `--replace` lehnt ein leeres Konvertat unmittelbar vor dem Schreiben
+  ins Clipboard ab.
+- Echte Datentabellen, formatierte Listen und harte Zeilenumbrüche vor
+  Jahreszahlen bleiben im RTF- und HTML-Pfad erhalten. Google-Classroom-Links
+  behalten Fragmente und weitere Query-Parameter.
+- Alphabetische, römische und Definitionslisten sowie verschachtelte Zitate
+  werden im jeweiligen Markdown-Dialekt konsistent erkannt. Beide
+  Konvertierungswege verwenden dafür dieselbe pandoc-Konfiguration.
+- Der Linux-Installer verlangt nur noch das Clipboard-Werkzeug der aktiven
+  X11- oder Wayland-Sitzung. Bytegenaue Clipboard-Tests decken UTF-8 und den
+  UTF-16-HTML-Flavor von Firefox ab.
+- Der Release-Lauf veröffentlicht den endgültigen DMG-Dateinamen erst nach
+  erfolgreicher Signatur-, Notarisierungs- und Gatekeeper-Prüfung. Gemeinsame
+  Notarisierungslogik, vollständige Helfer-Signaturprüfungen und eine feste
+  Lebensdauer des Updater-Dialogs härten App und Image zusätzlich ab.
+- Der Appcast-Workflow prüft die Ed25519-Signatur kryptografisch gegen den
+  öffentlichen Schlüssel aus dem tatsächlichen Release-Bundle. Tooling,
+  Release-DMG, Versionsfelder und Download-URL werden dabei fest miteinander
+  verknüpft.
+- Gemeinsame Test- und Release-Helfer ersetzen doppelte Abläufe. Die erweiterte
+  Suite prüft Pipeline, Installer, Wrapper und beide Linux-Clipboard-Wege mit
+  denselben Erwartungsdateien.
+
 ## 1.2.5 — 2026-08-16
 
 - Die Markdown-Nachbearbeitung unterscheidet Listenmarker jetzt nach dem
