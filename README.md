@@ -84,7 +84,7 @@ md-clip läuft unter Linux als CLI-Werkzeug — dieselbe Konvertierungs-Pipeline
 ```bash
 # Debian / Ubuntu / Mint (pandoc muss den RTF-Reader enthalten)
 sudo apt install xclip wl-clipboard libnotify-bin
-# pandoc >= 2.14.2 aus den Distributions-Backports oder dem offiziellen Release
+# pandoc >= 2.15 aus den Distributions-Backports oder dem offiziellen Release
 
 git clone https://github.com/DanielMuellerIR/md-clip.git
 cd md-clip

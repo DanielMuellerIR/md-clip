@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.2.7 — 2026-08-21
+
+Fixes aus dem Code-Review vom 2026-08-21:
+
+- **`--sandbox` wird jetzt vorab geprüft.** Die Option steckt in jedem
+  HTML→Markdown-Aufruf, gibt es aber erst ab pandoc 2.15. Auf der bisher
+  dokumentierten Mindestversion 2.14.2 bestand die Dependency-Prüfung und
+  erst die eigentliche Konvertierung brach mit „Unknown option --sandbox"
+  und Exit 3 ab. `pandoc_supports_sandbox()` prüft die Option jetzt real,
+  Produkt und Installer lehnen ein zu altes pandoc mit klarer Meldung ab,
+  und die dokumentierte Mindestversion ist überall 2.15.
+- **Ein Hard-Break vor `1.`, `1)` oder `-` überlebt im Ziel `markdown`.**
+  Diese Marker unterbrechen in GFM und CommonMark einen laufenden Absatz, in
+  pandoc-Markdown nicht. Der Umbruch fiel bisher in allen Zielen weg und
+  degradierte dort deshalb zum SoftBreak. Jetzt entscheidet der Zieldialekt,
+  und zusätzlich zählt, ob die Zeile davor selbst zur Liste gehört: Nur dann
+  ist der Umbruch pandocs Layout am Ende eines Listenpunktes.
+- **Nur unsichtbarer Inhalt gilt wieder als leer.** `require_nonempty_markdown`
+  las UTF-8 als rohe Bytes; die zwei Bytes des geschützten Leerzeichens
+  U+00A0 galten dabei als sichtbarer Inhalt. Ein Rich-Text-Flavor mit einem
+  einzelnen `&nbsp;` unterdrückte damit den vorhandenen Plain-Text-Fallback
+  und ersetzte mit `--replace` das Clipboard durch Unsichtbares. Die Prüfung
+  dekodiert jetzt als UTF-8 und wertet Unicode-Whitespace sowie die
+  breitenlosen Zeichen (U+200B–U+200D, U+2060, U+FEFF) als leer.
+- **`decodeHTML` in `helpers/clipboard-html.swift` ist nicht mehr optional.**
+  ISO-8859-1 bildet jeden Bytewert ab, der Latin-1-Rückfall konnte also nie
+  `nil` liefern — der Exit-2-Zweig „nicht dekodierbar" war unerreichbar und
+  täuschte eine Prüfung vor.
+- **Die dokumentierten Handbefehle bauen die Test-Helfer in ein
+  Temp-Verzeichnis**, nicht mehr nach `tests/`. Sonst hinterließe der
+  dokumentierte Diagnoseweg zwei ungetrackte Binaries im Arbeitsbaum,
+  entgegen der Zusage im README.
+
+Tests: 34 Fixture-/Roundtrip-Tests plus die vier `tests/test-*.sh` grün. Die
+pandoc-Attrappe lehnt jetzt unbekannte Optionen ab und liegt auch neben
+`md-clip` — das Produkt stellt sein eigenes Verzeichnis vorn in den PATH,
+eine nur im fake-bin gepflegte Attrappe wurde nie befragt.
+
 ## 1.2.6 — 2026-08-20
 
 - Die HTML-Vorverarbeitung entfernt `style`- und `data-*`-Attribute nur noch

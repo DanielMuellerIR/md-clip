@@ -306,12 +306,26 @@ Kodierung prüfen will, hat den Text bereits zerstört, bevor er ihn ansieht.
 Siehe `tests/run-tests.sh` → Block „Clipboard-Roundtrip-Tests". Kurz:
 
 1. Setze HTML mit Umlaut + Emoji + EM-Dash auf das Clipboard
-   (`tests/load-clipboard public.html …`).
+   (`load-clipboard public.html …`).
 2. Lass `md-clip --replace` laufen — die gesamte Pipeline inkl. pbcopy.
-3. Lies das Clipboard via `tests/clipboard-string` — ein Swift-Helper,
+3. Lies das Clipboard via `clipboard-string` — ein Swift-Helper,
    der `NSPasteboard.string(forType: .string)` aufruft und das Ergebnis
    als UTF-8 nach stdout schreibt.
 4. Vergleiche Byte-für-Byte mit der erwarteten Ausgabe.
+
+Beide Helfer werden aus `tests/load-clipboard.swift` und
+`tests/clipboard-string.swift` in ein privates Temp-Verzeichnis kompiliert —
+so wie es `tests/run-tests.sh` tut. Von Hand entsprechend:
+
+```bash
+HELPERS=$(mktemp -d)
+swiftc tests/load-clipboard.swift  -o "$HELPERS/load-clipboard"
+swiftc tests/clipboard-string.swift -o "$HELPERS/clipboard-string"
+```
+
+Nicht nach `tests/` bauen: Das hinterliesse zwei ungetrackte Binaries im
+Arbeitsbaum, obwohl ein sauberer Checkout ohne lokale Alt-Binaries auskommen
+soll.
 
 Der Test schlägt rot fehl, sobald jemand wieder einen `LC_ALL=C
 pbcopy`-Inline-Override einbaut oder die globale LC_ALL-Locale

@@ -24,6 +24,45 @@ copy_install_test_project() {
   cp "$PROJECT_ROOT/helpers/clipboard-rtf.swift" "$destination/helpers/clipboard-rtf.swift"
 }
 
+# Schreibt die pandoc-Attrappe. Sie liegt an ZWEI Orten: im fake-bin und im
+# Laufzeitverzeichnis neben `md-clip` — das Produkt stellt sein eigenes
+# Verzeichnis vorn in den PATH (bin/md-clip, `export PATH="$SCRIPT_DIR:$PATH"`),
+# eine nur im fake-bin gepflegte Attrappe wuerde also nie befragt.
+write_pandoc_mock() {
+  local destination="$1"
+
+  mkdir -p "$destination"
+  # Die Attrappe muss unbekannte Optionen ABLEHNEN — sonst besteht ein zu
+  # altes pandoc jede Fähigkeitsprüfung und der Fehler zeigt sich erst beim
+  # Nutzer. MD_CLIP_TEST_PANDOC_SANDBOX=0 spielt genau das nach: ein pandoc
+  # vor 2.15, das `--sandbox` nicht kennt.
+  cat > "$destination/pandoc" <<'SH'
+#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    --sandbox)
+      if [ "${MD_CLIP_TEST_PANDOC_SANDBOX:-1}" != "1" ]; then
+        echo "Unknown option --sandbox." >&2
+        exit 2
+      fi
+      ;;
+    --*)
+      case "$arg" in
+        --version|--list-input-formats|--wrap=*|--from=*|--to=*) ;;
+        *) echo "Unknown option $arg." >&2; exit 2 ;;
+      esac
+      ;;
+  esac
+done
+case "${1:-}" in
+  --version) printf 'pandoc %s\n' "${MD_CLIP_TEST_PANDOC_VERSION:-3.9.0.2}" ;;
+  --list-input-formats) printf '%b' "${MD_CLIP_TEST_PANDOC_FORMATS:-html\nrtf\n}" ;;
+  *) exit 0 ;;
+esac
+SH
+  chmod +x "$destination/pandoc"
+}
+
 write_install_platform_mocks() {
   local destination="$1"
 
@@ -32,14 +71,7 @@ write_install_platform_mocks() {
 #!/bin/sh
 printf '%s\n' "${MD_CLIP_TEST_UNAME:-Darwin}"
 SH
-  cat > "$destination/pandoc" <<'SH'
-#!/bin/sh
-case "${1:-}" in
-  --version) printf 'pandoc %s\n' "${MD_CLIP_TEST_PANDOC_VERSION:-3.9.0.2}" ;;
-  --list-input-formats) printf '%b' "${MD_CLIP_TEST_PANDOC_FORMATS:-html\nrtf\n}" ;;
-  *) exit 0 ;;
-esac
-SH
+  write_pandoc_mock "$destination"
   cat > "$destination/swiftc" <<'SH'
 #!/bin/sh
 output=""

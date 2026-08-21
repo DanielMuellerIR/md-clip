@@ -6,11 +6,16 @@
 //   load-clipboard <pasteboard-type> <datei>
 //
 // Beispiele:
-//   load-clipboard public.rtf  tests/fixtures/word-rtf.rtf
-//   load-clipboard public.html tests/fixtures/safari-article.html
+//   "$HELPERS/load-clipboard" public.rtf  tests/fixtures/word-rtf.rtf
+//   "$HELPERS/load-clipboard" public.html tests/fixtures/safari-article.html
 //
-// Kompilieren:
-//   swiftc tests/load-clipboard.swift -o tests/load-clipboard
+// Kompilieren — in ein privates Temp-Verzeichnis, NICHT nach tests/:
+//   HELPERS=$(mktemp -d)
+//   swiftc tests/load-clipboard.swift -o "$HELPERS/load-clipboard"
+// Der automatische Lauf (tests/run-tests.sh) macht es genauso. Ein Bauen
+// nach tests/ hinterliesse ein ungetracktes Binary im Arbeitsbaum und
+// widerspraeche der Zusage im README, dass ein sauberer Checkout ohne
+// lokale Alt-Binaries auskommt.
 
 import AppKit
 import Foundation

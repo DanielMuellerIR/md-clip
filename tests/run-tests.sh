@@ -371,6 +371,35 @@ else
   PASSED=$((PASSED + 1))
 fi
 
+# Unsichtbar heißt auch: nur ein geschütztes Leerzeichen. `\S` auf rohen Bytes
+# hielt dessen zwei UTF-8-Bytes (0xC2 0xA0) für Inhalt — der Auto-Modus
+# unterdrückte dann den vorhandenen Plain-Text-Fallback, und mit --replace
+# ersetzte Unsichtbares das Clipboard (Review-Fund 2026-08-21).
+for invisible_html in '<p>&nbsp;</p>' '<p>&#8203;</p>' '<p> </p>'; do
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$invisible_html" | convert_html gfm \
+      > "$TEST_RUNTIME/invisible-rich.actual" 2>/dev/null; then
+    echo "✗ invisible-rich ($invisible_html wurde als Erfolg gemeldet)"
+    od -c "$TEST_RUNTIME/invisible-rich.actual" | sed 's/^/    /' | head -3
+    FAILED=$((FAILED + 1))
+  else
+    echo "✓ invisible-rich ($invisible_html löst Fallback aus)"
+    PASSED=$((PASSED + 1))
+  fi
+done
+
+# Gegenprobe: Ein geschütztes Leerzeichen NEBEN echtem Text bleibt Inhalt.
+TOTAL=$((TOTAL + 1))
+if printf '%s' '<p>A&nbsp;B</p>' | convert_html gfm \
+    > "$TEST_RUNTIME/visible-nbsp.actual" 2>/dev/null \
+    && grep -q 'A' "$TEST_RUNTIME/visible-nbsp.actual"; then
+  echo "✓ visible-nbsp (Text mit geschütztem Leerzeichen bleibt Inhalt)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ visible-nbsp (Text mit geschütztem Leerzeichen ging verloren)"
+  FAILED=$((FAILED + 1))
+fi
+
 # run_pandoc muss das Netzwerk-Tor in jedem Zieldialekt setzen. Eine Attrappe
 # zeichnet argv auf; damit prüft der Test die echte Funktionsgrenze statt nur
 # nach Text im Skript zu suchen.
@@ -563,6 +592,46 @@ for target_format in gfm markdown commonmark; do
     echo "✗ $target_format-markerkontext"
     printf '%s\n' "$hardbreak_ast" "$year_break_ast" "$marker_code_actual" "$positive_list_ast" \
       | sed 's/^/    /'
+    FAILED=$((FAILED + 1))
+  fi
+done
+
+# --- Test 10e: `1.`, `1)` und `-` direkt hinter einem Hard-Break ---
+# Diese drei Marker unterbrechen in GFM und CommonMark einen laufenden Absatz,
+# in pandoc-Markdown aber nicht. Das Zielformat entscheidet deshalb, was
+# richtig ist: dort Absatz plus Liste, hier EIN Absatz mit echtem LineBreak.
+# Der Fund vom 2026-08-21: Der Umbruch fiel in ALLEN Zielen weg und degradierte
+# in pandoc-Markdown zum SoftBreak. Test 10d erreicht den Fall nicht, weil er
+# nur `2024.` und `3)` verwendet — Marker, die keinen Absatz unterbrechen.
+for target_format in gfm markdown commonmark; do
+  TOTAL=$((TOTAL + 1))
+  marker_break_ok=1
+  marker_break_report=""
+  for hard_break_marker in '1.' '1)' '-'; do
+    marker_break_actual=$(
+      printf '<p>Text<br>%s ordinary</p>' "$hard_break_marker" \
+        | convert_html "$target_format"
+    )
+    marker_break_ast=$(
+      printf '%s\n' "$marker_break_actual" | pandoc -f "$target_format" -t native
+    )
+    marker_break_report="$marker_break_report$hard_break_marker: $marker_break_ast"
+    if [ "$target_format" = markdown ]; then
+      printf '%s' "$marker_break_ast" | grep -q 'LineBreak' || marker_break_ok=0
+      if printf '%s' "$marker_break_ast" | grep -q 'SoftBreak'; then
+        marker_break_ok=0
+      fi
+    else
+      printf '%s' "$marker_break_ast" \
+        | grep -qE 'BulletList|OrderedList' || marker_break_ok=0
+    fi
+  done
+  if [ "$marker_break_ok" -eq 1 ]; then
+    echo "✓ $target_format-hardbreak-vor-listenmarker (Umbruch dialektgerecht)"
+    PASSED=$((PASSED + 1))
+  else
+    echo "✗ $target_format-hardbreak-vor-listenmarker"
+    printf '%s\n' "$marker_break_report" | sed 's/^/    /'
     FAILED=$((FAILED + 1))
   fi
 done

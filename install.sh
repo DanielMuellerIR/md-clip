@@ -142,8 +142,17 @@ fi
 
 if [ "$PLATFORM" = "linux" ] && ! pandoc_supports_rtf; then
   echo "FEHLER: Das installierte pandoc unterstützt das Eingabeformat RTF nicht."
-  echo "        Bitte pandoc >= 2.14.2 installieren; die Paketversion von"
+  echo "        Bitte pandoc >= 2.15 installieren; die Paketversion von"
   echo "        Ubuntu 22.04 ist dafür zu alt."
+  exit 2
+fi
+
+# `--sandbox` steckt in jedem HTML→Markdown-Aufruf und gibt es erst ab
+# pandoc 2.15. Ohne die Prüfung liefe die Installation durch und erst die
+# erste Konvertierung schlüge fehl.
+if ! pandoc_supports_sandbox; then
+  echo "FEHLER: Das installierte pandoc kennt die Option --sandbox nicht."
+  echo "        Bitte pandoc >= 2.15 installieren."
   exit 2
 fi
 echo "✓ pandoc gefunden: $(pandoc --version | head -1)"

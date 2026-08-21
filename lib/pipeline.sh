@@ -232,6 +232,16 @@ tidy_markdown() {
     # geordneten Listenblock beginnen. Weitere Zahlen sind erst dann
     # Listenpunkte, wenn Durchlauf 1 ihren Listenkontext belegt hat.
     my $block_list_marker = qr/(?:[-*+]|1[.)])/;
+    # Darf ein solcher Marker einen laufenden Absatz unterbrechen?
+    # GFM und CommonMark: ja. `<p>Text<br>- x</p>` wird dort zu Absatz plus
+    # Liste, egal ob der Hard-Break stehen bleibt — die zwei Leerzeichen
+    # wirken nicht mehr und wären nur toter Weißraum.
+    # pandoc-Markdown: nein. Dort bleibt `Text  \n- x` EIN Absatz mit echtem
+    # LineBreak; wird der Break weggelassen, degradiert er zum SoftBreak und
+    # der bewusst gesetzte Umbruch ist weg (Review-Fund 2026-08-21, an allen
+    # drei Zieldialekten mit `pandoc -t native` gegengeprüft). Deshalb zählt
+    # dort nur der in Durchlauf 1 belegte Listenkontext.
+    my $block_list_interrupts_paragraph = $target_format ne q{markdown};
     my $markdown_special_marker =
         qr/(?:[:~]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])/;
     my $list_marker = $target_format eq q{markdown}
@@ -548,11 +558,22 @@ tidy_markdown() {
             # (`a. Text`) und darf den echten Umbruch nicht verlieren. Deshalb
             # gilt derselbe Nachweis wie in Durchlauf 1 (`@is_list_item`) —
             # sonst behielte der zweite Punkt einer engen Sonderliste einen
-            # reinen Layout-Umbruch (Review-Fund 2026-08-17). Die seit Projekt-
-            # beginn unterstützte Bullet-/Dezimallisten-Heuristik bleibt eng.
-            } elsif ($next_body =~ /^[ \t]*$block_list_marker[ \t]+/
-                     || $is_list_item[$i + 1]) {
+            # reinen Layout-Umbruch (Review-Fund 2026-08-17).
+            #
+            # In einem Dialekt, in dem ein Marker den laufenden Absatz NICHT
+            # unterbricht, zählt zusätzlich, was in der Zeile davor steht:
+            # Gehört sie selbst zur Liste, ist der Umbruch pandocs Layout am
+            # Ende eines Listenpunktes und darf weg. Ist sie gewöhnlicher
+            # Absatztext (`<p>Text<br>- x</p>`), bleibt der Umbruch ein echter
+            # LineBreak und muss stehen bleiben — sonst degradiert er zum
+            # SoftBreak (Review-Fund 2026-08-21).
+            } elsif ($is_list_item[$i + 1]
+                     && ($block_list_interrupts_paragraph
+                         || $is_list_item[$i])) {
                 $drop = 1;                        # Umbruch vor einem Listenpunkt
+            } elsif ($block_list_interrupts_paragraph
+                     && $next_body =~ /^[ \t]*$block_list_marker[ \t]+/) {
+                $drop = 1;                        # Marker unterbricht den Absatz
             }
         }
 
@@ -656,6 +677,15 @@ pandoc_supports_rtf() {
   pandoc --list-input-formats 2>/dev/null | grep -Fxq 'rtf'
 }
 
+# `--sandbox` gibt es erst ab pandoc 2.15. Ältere Fassungen bestehen den
+# RTF-Test, brechen danach aber JEDE Konvertierung mit „Unknown option
+# --sandbox" ab. Die Option ist kein Komfort, sondern die Zusicherung, dass
+# eingebettete Frames und Ressourcen keinen Netzabruf auslösen — sie darf
+# deshalb nicht still entfallen, sondern muss vorab geprüft werden.
+pandoc_supports_sandbox() {
+  printf '' | pandoc --sandbox -f html -t plain >/dev/null 2>&1
+}
+
 # Der einzige pandoc-Aufruf der HTML→Markdown-Strecke. Beide Konvertierungen
 # gehen hier durch, damit die Optionen nur an einer Stelle stehen:
 #   -f html            : HTML als Eingabeformat.
@@ -679,10 +709,25 @@ run_pandoc() {
 # als Fehler, damit der Auto-Pfad auf den vorhandenen Plain-Text zurückfallen
 # kann und --replace niemals unbemerkt das Clipboard leert.
 require_nonempty_markdown() {
+  # `\S` auf rohen Bytes hielt die zwei UTF-8-Bytes des geschützten
+  # Leerzeichens U+00A0 (0xC2 0xA0) für sichtbaren Inhalt. Ein Rich-Text-
+  # Flavor, der nur ein `&nbsp;` enthält, unterdrückte damit den vorhandenen
+  # Plain-Text-Fallback und ersetzte mit --replace das Clipboard durch
+  # Unsichtbares. Deshalb wird der Text zum Prüfen als UTF-8 dekodiert und
+  # gegen die Unicode-Eigenschaft White_Space geprüft; ausgegeben werden
+  # weiterhin exakt die eingelesenen Bytes.
   perl -0e '
+    use Encode ();
     my $text = do { local $/; <STDIN> };
     print $text;
-    exit($text =~ /\S/ ? 0 : 1);
+    my $decoded = eval { Encode::decode("UTF-8", $text, Encode::FB_CROAK()) };
+    $decoded = $text unless defined $decoded;   # kein gültiges UTF-8
+    # Neben Unicode-Whitespace zählen auch die breitenlosen Zeichen als
+    # unsichtbar: U+200B..U+200D, U+2060 und U+FEFF. Unicode führt sie nicht
+    # unter White_Space, für den Nutzer sind sie aber genauso leer wie ein
+    # geschütztes Leerzeichen.
+    exit($decoded =~ /[^\s\p{White_Space}\x{200B}-\x{200D}\x{2060}\x{FEFF}]/
+         ? 0 : 1);
   '
 }
 

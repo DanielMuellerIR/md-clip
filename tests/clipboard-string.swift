@@ -13,8 +13,11 @@
 // NSString-Eintrag des Clipboards. Wenn dieser Helper Mojibake sieht,
 // sieht JEDE App, in die der Nutzer einfügt, dasselbe Mojibake.
 //
-// Kompilieren:
-//   swiftc tests/clipboard-string.swift -o tests/clipboard-string
+// Kompilieren — in ein privates Temp-Verzeichnis, NICHT nach tests/:
+//   HELPERS=$(mktemp -d)
+//   swiftc tests/clipboard-string.swift -o "$HELPERS/clipboard-string"
+// Der automatische Lauf (tests/run-tests.sh) macht es genauso; ein Bauen
+// nach tests/ hinterliesse ein ungetracktes Binary im Arbeitsbaum.
 //
 // Exit 0: Plain-Text-Flavor vorhanden, wurde ausgegeben.
 // Exit 1: kein Plain-Text-Flavor auf dem Clipboard.

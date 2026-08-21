@@ -11,20 +11,29 @@ import Foundation
 // Das System-Clipboard, "general pasteboard" in macOS-Sprech.
 let pb = NSPasteboard.general
 
-func decodeHTML(_ data: Data) -> String? {
+// Liefert immer einen String: ISO-8859-1 bildet jeden Bytewert 0…255 ab, der
+// letzte Zweig kann also nicht fehlschlagen. Deshalb ist der Rueckgabetyp
+// nicht optional — ein `guard let` darauf haette einen Fehlerzweig
+// vorgetaeuscht, den kein Clipboard-Inhalt je erreicht.
+// (Die BOM-Zweige koennen einzeln nil liefern; sie fallen dann bewusst auf
+//  denselben Latin-1-Weg zurueck.)
+func decodeHTML(_ data: Data) -> String {
     let bytes = [UInt8](data.prefix(3))
 
     if bytes.starts(with: [0xFF, 0xFE]) || bytes.starts(with: [0xFE, 0xFF]) {
-        return String(data: data, encoding: .utf16)
+        if let utf16 = String(data: data, encoding: .utf16) { return utf16 }
     }
     if bytes.starts(with: [0xEF, 0xBB, 0xBF]) {
-        return String(data: Data(data.dropFirst(3)), encoding: .utf8)
+        if let utf8 = String(data: Data(data.dropFirst(3)), encoding: .utf8) {
+            return utf8
+        }
     }
     if let utf8 = String(data: data, encoding: .utf8) {
         return utf8
     }
     // Alte Clipboard-Quellen liefern gelegentlich Latin-1 ohne Kennzeichnung.
-    return String(data: data, encoding: .isoLatin1)
+    // ISO-8859-1 kennt jeden Bytewert, dieser Aufruf liefert also nie nil.
+    return String(data: data, encoding: .isoLatin1) ?? ""
 }
 
 // Daten statt string(forType:) lesen: NSPasteboard garantiert für public.html
@@ -33,10 +42,7 @@ guard let data = pb.data(forType: .html) else {
     FileHandle.standardError.write("Kein HTML auf dem Clipboard.\n".data(using: .utf8)!)
     exit(1)
 }
-guard let html = decodeHTML(data) else {
-    FileHandle.standardError.write("HTML auf dem Clipboard ist nicht dekodierbar.\n".data(using: .utf8)!)
-    exit(2)
-}
+let html = decodeHTML(data)
 guard html.range(of: #"\S"#, options: .regularExpression) != nil else {
     FileHandle.standardError.write("HTML auf dem Clipboard ist leer.\n".data(using: .utf8)!)
     exit(1)

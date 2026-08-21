@@ -110,7 +110,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.2.6"
+VERSION="1.2.7"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -588,7 +588,15 @@ check_dependencies() {
   # Der Linux-Pfad benötigt pandocs RTF-Reader. Ältere Distributionen
   # liefern zwar ein `pandoc`-Binary, aber noch kein Eingabeformat `rtf`.
   if [ "$PLATFORM" = "linux" ] && ! pandoc_supports_rtf; then
-    die 2 "Pandoc unterstützt das Eingabeformat RTF nicht. Bitte pandoc >= 2.14.2 installieren (die Ubuntu-22.04-Paketversion ist zu alt)."
+    die 2 "Pandoc unterstützt das Eingabeformat RTF nicht. Bitte pandoc >= 2.15 installieren (die Ubuntu-22.04-Paketversion ist zu alt)."
+  fi
+
+  # `--sandbox` gibt es erst ab pandoc 2.15 und steckt in JEDEM
+  # HTML→Markdown-Aufruf. Ohne diese Prüfung bestünde die Dependency-
+  # Prüfung, und erst die eigentliche Konvertierung bräche mit
+  # „Unknown option --sandbox" ab.
+  if ! pandoc_supports_sandbox; then
+    die 2 "Das installierte pandoc kennt die Option --sandbox nicht. Bitte pandoc >= 2.15 installieren."
   fi
 
   # Swift-Helper separat prüfen — die werden im Projekt mitgeliefert,
