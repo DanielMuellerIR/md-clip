@@ -16,3 +16,16 @@ __pycache__/
 
 # macOS-Metadaten.
 .DS_Store
+
+# Frueherer Ablageort der kompilierten Test-Helfer. Heute bauen die
+# Test-Skripte sie nach $TEST_RUNTIME; auf aelteren Arbeitskopien liegen
+# sie noch neben ihrer .swift-Quelle.
+tests/clipboard-string
+tests/load-clipboard
+
+# Frueherer Ausgabeort des App-Bundles — build-app-bundled.sh schreibt
+# heute nach build/md-clip.app.
+wrappers/md-clip.app/
+
+# Ordner fuer Handversuche, kein Quellcode.
+spike/
