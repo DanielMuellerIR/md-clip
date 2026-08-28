@@ -4,12 +4,15 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 2026-08-20)
+## Status (Stand: 2026-08-28)
 
-- Aktuelle Produktversion im Quellcode und jüngster Git-Tag: **v1.2.6 vom
-  2026-08-20**. Der Sparkle-Update-Weg ist vollständig belegt: Eine
-  installierte App lädt ein signiertes DMG, prüft es und tauscht sich ohne
-  ungefragten Neustart aus.
+- Verbindlich für die Version sind zwei Quellen, nicht dieses Dokument:
+  `bin/md-clip --version` nennt die Produktversion im Quellcode,
+  `git describe --tags --abbrev=0` den jüngsten Release-Tag. Zwischen zwei
+  Releases liegt die Produktversion eine Nummer vor dem Tag — beim Release
+  ziehen Tag und DMG nach. Der Sparkle-Update-Weg ist vollständig belegt:
+  Eine installierte App lädt ein signiertes DMG, prüft es und tauscht sich
+  ohne ungefragten Neustart aus.
 
 - **Stufe A — Self-contained App bauen.** ✅ Erledigt.
 - **Stufe B — Signieren und notarisieren.** ✅ Erledigt.
@@ -406,7 +409,14 @@ Schlüsselbundverwaltung öffnen (`open /Applications/Utilities/Keychain\ Access
 3. **`.github/workflows/release.yml` schreiben** nach Skizze oben.
 4. **Lokal trockenlaufen lassen**, soweit möglich: jeden einzelnen Step
    manuell durchgehen, prüfen, dass keine Surprises kommen.
-5. **Test-Tag pushen**, z.B. `git tag v1.2.6-rc1 && git push --tags`,
+5. **Test-Tag pushen** — die Nummer aus der Produktversion ableiten, damit
+   hier nie ein längst vergebener Tag steht:
+
+   ```bash
+   VERSION=$(bin/md-clip --version | awk 'NR==1 {print $2}')
+   git tag "v${VERSION}-rc1" && git push --tags
+   ```
+
    Workflow-Run beobachten, Logs debuggen.
 6. **Funktionierenden Workflow als regulär markieren**, Test-Release
    löschen, echte Version taggen.

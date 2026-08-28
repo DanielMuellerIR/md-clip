@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.2.8 — 2026-08-28
+
+Fixes aus dem Code-Review vom 2026-08-28:
+
+- **Ein beschädigter HTML-Flavor mit BOM gilt nicht mehr als lesbarer
+  Rich Text.** Eine Byte-Order-Mark sagt verbindlich, in welcher Kodierung
+  die Daten vorliegen. Scheiterte diese Dekodierung, lief
+  `helpers/clipboard-html.swift` bis zum Latin-1-Rückfall durch — und
+  ISO-8859-1 kennt jeden Bytewert, lieferte also Zeichensalat mit Exit 0.
+  md-clip hielt das für brauchbaren Rich Text, erreichte den vorhandenen
+  Plain-Text-Fallback nicht und ersetzte mit `--replace` das Clipboard
+  durch den Zeichensalat. Jetzt bricht der Helfer bei einer BOM ab, die
+  nicht zum Inhalt passt.
+- **Unsichtbare Steuer- und Formatzeichen zählen wieder als leer.**
+  `require_nonempty_markdown` kannte nur eine handgepflegte Liste
+  (U+200B–U+200D, U+2060, U+FEFF). Ein Rich-Text-Flavor, der nur aus
+  `&lrm;`/`&rlm;` (U+200E/U+200F), den unsichtbaren Operatoren
+  U+2061–U+2064, einem weichen Trennstrich oder einem Variation Selector
+  bestand, galt als sichtbarer Inhalt und unterdrückte den vorhandenen
+  Plain-Text-Fallback. Maßgeblich ist jetzt die Unicode-Eigenschaft
+  `Default_Ignorable_Code_Point`.
+- **Der Layout-Umbruch am Ende eines mehrzeiligen Listenpunktes fällt weg.**
+  Ob ein Hard-Break vor dem nächsten Listenpunkt entfernt wird, hing daran,
+  ob die Zeile davor selbst mit einem Listenmarker beginnt. Fortsetzungs-
+  zeilen eines offenen Punktes tun das nicht — im Ziel `markdown` blieb dort
+  sichtbarer Leerraum stehen, der beim erneuten Rendern als zusätzliches
+  `<br />` direkt vor `</li>` auftauchte. Jetzt entscheidet die Zugehörigkeit
+  zum offenen Listencontainer.
+- **Die Diagnose-Anleitung in `docs/ENCODING.md` läuft wieder durch.** Sie
+  baute die beiden Test-Helfer in ein Temp-Verzeichnis, rief sie aber ohne
+  Pfad auf — in einer normalen Shell antwortete beides mit
+  `command not found`. Jetzt stehen die vollen Pfade da, samt Aufräumschritt.
+- **`docs/DISTRIBUTION.md` nennt keine eingefrorene Versionsnummer mehr.**
+  Sie stand noch auf v1.2.6 und empfahl `v1.2.6-rc1` als nächsten Test-Tag,
+  während das Produkt längst 1.2.7 meldete. Status und Beispiel leiten die
+  Nummer jetzt aus `bin/md-clip --version` beziehungsweise
+  `git describe` ab.
+
+Tests: `tests/run-tests.sh` 39/39 grün (drei neue Regressionstests: kaputte
+BOM mit Plain-Text-Fallback, unsichtbare Zeichen, mehrzeiliger Listenpunkt in
+allen drei Zieldialekten) plus die vier `tests/test-*.sh` grün.
+
 ## 1.2.7 — 2026-08-21
 
 Fixes aus dem Code-Review vom 2026-08-21:

@@ -636,6 +636,69 @@ for target_format in gfm markdown commonmark; do
   fi
 done
 
+# --- Test 10f: Hard-Break am Ende eines MEHRZEILIGEN Listenpunktes ---
+# Der Umbruch vor dem naechsten Listenpunkt ist pandocs Layout und gehoert weg.
+# Test 10e deckt nur die einzeilige Markerzeile ab; die Entscheidung haing bis
+# zum Fund vom 2026-08-28 an „die Zeile davor beginnt mit einem Marker".
+# Fortsetzungszeilen im offenen Listenpunkt sind das nicht — im Ziel `markdown`
+# blieb dort ein sichtbarer Leerraum stehen, der beim erneuten Rendern als
+# zusaetzliches `<br />` direkt vor `</li>` wieder auftauchte.
+for target_format in gfm markdown commonmark; do
+  TOTAL=$((TOTAL + 1))
+  multiline_item_actual=$(
+    printf '%s' '<ul><li>first<br>continuation<br></li><li>second</li></ul>' \
+      | convert_html "$target_format"
+  )
+  multiline_item_ast=$(
+    printf '%s\n' "$multiline_item_actual" | pandoc -f "$target_format" -t native
+  )
+  # Genau EIN LineBreak: der echte zwischen `first` und `continuation`.
+  # Der zweite waere der Layout-Umbruch am Punktende.
+  if [ "$(printf '%s' "$multiline_item_ast" | grep -c 'LineBreak')" -eq 1 ] \
+    && printf '%s' "$multiline_item_ast" | grep -q 'BulletList' \
+    && ! printf '%s\n' "$multiline_item_actual" | grep -q 'continuation  $'; then
+    echo "✓ $target_format-mehrzeiliger-listenpunkt (Layout-Umbruch entfernt)"
+    PASSED=$((PASSED + 1))
+  else
+    echo "✗ $target_format-mehrzeiliger-listenpunkt"
+    printf '%s\n' "$multiline_item_actual" | sed 's/$/|/;s/^/    /'
+    printf '%s\n' "$multiline_item_ast" | sed 's/^/    /'
+    FAILED=$((FAILED + 1))
+  fi
+done
+
+# --- Test 10g: unsichtbarer Inhalt gilt als leer ---
+# `require_nonempty_markdown` muss Exit 1 liefern, damit der Auto-Pfad auf den
+# vorhandenen Plain-Text zurueckfaellt und --replace das Clipboard nicht durch
+# Unsichtbares ersetzt. Die frueher handgepflegte Liste kannte nur
+# U+200B..U+200D, U+2060 und U+FEFF; Richtungszeichen, unsichtbare Operatoren
+# und Variation Selectors rutschten als „sichtbarer Inhalt" durch
+# (Review-Fund 2026-08-28).
+TOTAL=$((TOTAL + 1))
+invisible_ok=1
+invisible_report=""
+for invisible_entity in '&lrm;' '&rlm;' '&#x2061;' '&#xFE0F;' '&#xAD;' '&nbsp;' '&#x200B;'; do
+  if printf '<p>%s</p>' "$invisible_entity" | convert_html gfm >/dev/null 2>&1; then
+    invisible_ok=0
+    invisible_report="$invisible_report$invisible_entity galt als sichtbar
+"
+  fi
+done
+# Gegenprobe: echter Text darf NICHT als leer gelten.
+if ! printf '<p>echter Text</p>' | convert_html gfm >/dev/null 2>&1; then
+  invisible_ok=0
+  invisible_report="${invisible_report}echter Text galt als leer
+"
+fi
+if [ "$invisible_ok" -eq 1 ]; then
+  echo "✓ unsichtbarer-inhalt (Richtungszeichen, Operatoren, Variation Selectors)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ unsichtbarer-inhalt"
+  printf '%s' "$invisible_report" | sed 's/^/    /'
+  FAILED=$((FAILED + 1))
+fi
+
 echo
 echo "==> Clipboard-Roundtrip-Tests"
 #
@@ -794,6 +857,44 @@ else
     FAILED=$((FAILED + 1))
   fi
   TOTAL=$((TOTAL + 1))
+
+  # --- Roundtrip 1c: beschaedigter BOM-HTML-Flavor (nur macOS) ---
+  # Eine BOM ist eine verbindliche Kodierungsangabe. Passt sie nicht zum Inhalt,
+  # muss clipboard-html mit Exit 1 abbrechen, damit der Auto-Pfad den
+  # vorhandenen Plain-Text nimmt. Bis zum Fund vom 2026-08-28 lief der Fall bis
+  # zum Latin-1-Zweig durch und lieferte Zeichensalat mit Exit 0 — md-clip hielt
+  # das fuer brauchbaren Rich Text und ersetzte mit --replace das Clipboard
+  # damit. Die Bytes ff fe 00 d8 sind eine UTF-16-LE-BOM plus ein einzelnes
+  # High-Surrogate ohne Partner, also ungueltiges UTF-16.
+  if [ "$PLATFORM" = "macos" ]; then
+    TOTAL=$((TOTAL + 1))
+    BROKEN_BOM_HTML="$TEST_RUNTIME/broken-bom.html"
+    BROKEN_BOM_PLAIN="$TEST_RUNTIME/broken-bom.txt"
+    printf '\377\376\000\330' > "$BROKEN_BOM_HTML"
+    printf 'reiner Text' > "$BROKEN_BOM_PLAIN"
+    "$LOAD_CLIPBOARD_BIN" \
+      public.html "$BROKEN_BOM_HTML" \
+      public.utf8-plain-text "$BROKEN_BOM_PLAIN" >/dev/null
+
+    BROKEN_BOM_EXPECTED_FILE="$TEST_RUNTIME/broken-bom.expected"
+    BROKEN_BOM_ACTUAL_FILE="$TEST_RUNTIME/broken-bom.actual"
+    # Der Plain-Text-Fallback reicht das Clipboard unveraendert durch —
+    # ohne das Schluss-LF, das die HTML-Strecke zusichert.
+    printf 'reiner Text' > "$BROKEN_BOM_EXPECTED_FILE"
+    "$PRODUCT_CLI" --quiet > "$BROKEN_BOM_ACTUAL_FILE" 2>/dev/null || true
+
+    if cmp -s "$BROKEN_BOM_EXPECTED_FILE" "$BROKEN_BOM_ACTUAL_FILE"; then
+      echo "✓ broken-bom-html (kaputte BOM faellt auf Plain-Text zurueck)"
+      PASSED=$((PASSED + 1))
+    else
+      echo "✗ broken-bom-html"
+      echo "  Erwartete Bytes:"
+      xxd "$BROKEN_BOM_EXPECTED_FILE" | sed 's/^/    /'
+      echo "  Erhaltene Bytes:"
+      xxd "$BROKEN_BOM_ACTUAL_FILE" | sed 's/^/    /'
+      FAILED=$((FAILED + 1))
+    fi
+  fi
 
   # --- Roundtrip 2: UTF-16-HTML (Firefox-Fall, nur Linux) ---
   # Firefox legt sein text/html unter Linux als UTF-16 mit BOM aufs Clipboard,

@@ -394,6 +394,12 @@ tidy_markdown() {
     # dieselbe Auskunft wie Durchlauf 1 — sonst behandelt der eine `b.  zwei`
     # als Listenpunkt und der andere als Absatztext (Review-Fund 2026-08-17).
     my @is_list_item = map { 0 } @lines;
+    # Zeilen, die INNERHALB eines offenen Listenpunktes stehen — also der
+    # Markerzeile selbst UND ihren eingerückten Fortsetzungszeilen. Durchlauf
+    # 2b braucht diese weitere Auskunft: Ein Hard-Break am Ende eines
+    # mehrzeiligen Listenpunktes ist ebenso pandocs Layout wie einer am Ende
+    # einer einzeiligen Markerzeile (Review-Fund 2026-08-28).
+    my @in_list_container = map { 0 } @lines;
     my $fence_char;                 # undef = kein offener Zaun
     my $fence_len    = 0;
     my $fence_indent = 0;
@@ -429,6 +435,9 @@ tidy_markdown() {
             pop @item_markers;
         }
         my $container = @item_indents ? $item_indents[-1] : 0;
+        # Nach dem Zuklappen offener Punkte gilt: Bleibt ein Punkt offen,
+        # gehört diese Zeile zu seinem Inhalt.
+        $in_list_container[$i] = 1 if @item_indents;
 
         # Vier Spalten jenseits des Containers: eingerückter Code-Block.
         if ($indent >= $container + 4) {
@@ -497,6 +506,7 @@ tidy_markdown() {
 
             if ($proven_list_item) {
                 $is_list_item[$i] = 1;
+                $in_list_container[$i] = 1;
                 push @item_indents,
                     $indent + length($marker) + indent_width($gap);
                 push @item_markers, $indent;
@@ -567,9 +577,14 @@ tidy_markdown() {
             # Absatztext (`<p>Text<br>- x</p>`), bleibt der Umbruch ein echter
             # LineBreak und muss stehen bleiben — sonst degradiert er zum
             # SoftBreak (Review-Fund 2026-08-21).
+            # Maßgeblich ist die Zugehörigkeit zum offenen Listencontainer,
+            # nicht „die Zeile beginnt mit einem Marker": Sonst behielte die
+            # letzte Fortsetzungszeile eines mehrzeiligen Punktes ihren
+            # Layout-Umbruch, während dieselbe Stelle nach einer einzeiligen
+            # Markerzeile bereinigt wird (Review-Fund 2026-08-28).
             } elsif ($is_list_item[$i + 1]
                      && ($block_list_interrupts_paragraph
-                         || $is_list_item[$i])) {
+                         || $in_list_container[$i])) {
                 $drop = 1;                        # Umbruch vor einem Listenpunkt
             } elsif ($block_list_interrupts_paragraph
                      && $next_body =~ /^[ \t]*$block_list_marker[ \t]+/) {
@@ -722,11 +737,16 @@ require_nonempty_markdown() {
     print $text;
     my $decoded = eval { Encode::decode("UTF-8", $text, Encode::FB_CROAK()) };
     $decoded = $text unless defined $decoded;   # kein gültiges UTF-8
-    # Neben Unicode-Whitespace zählen auch die breitenlosen Zeichen als
-    # unsichtbar: U+200B..U+200D, U+2060 und U+FEFF. Unicode führt sie nicht
-    # unter White_Space, für den Nutzer sind sie aber genauso leer wie ein
-    # geschütztes Leerzeichen.
-    exit($decoded =~ /[^\s\p{White_Space}\x{200B}-\x{200D}\x{2060}\x{FEFF}]/
+    # Neben Unicode-Whitespace zählen auch die breitenlosen und
+    # Steuerzeichen als unsichtbar. Statt einer handgepflegten Liste
+    # (früher nur U+200B..U+200D, U+2060, U+FEFF) steht hier die
+    # Unicode-Eigenschaft Default_Ignorable_Code_Point: sie umfasst
+    # dieselben Zeichen und zusätzlich unter anderem die Richtungszeichen
+    # U+200E/U+200F (`&lrm;`/`&rlm;`), die unsichtbaren Operatoren
+    # U+2061..U+2064, den weichen Trennstrich U+00AD und die
+    # Variation Selectors U+FE00..U+FE0F. Ein Rich-Text-Flavor, der nur
+    # daraus besteht, unterdrückte sonst den vorhandenen Plain-Text-Fallback.
+    exit($decoded =~ /[^\s\p{White_Space}\p{Default_Ignorable_Code_Point}]/
          ? 0 : 1);
   '
 }
