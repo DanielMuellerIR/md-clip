@@ -27,6 +27,13 @@ jobs:
   linux:
     name: Linux (Ubuntu)
     runs-on: ubuntu-latest
+    # Der Lauf dauert normal wenige Minuten. Die Grenze ist gegen Haenger
+    # gerichtet, nicht gegen Langsamkeit: `xvfb-run` haengt als letzter Befehl
+    # einer Shell VOR dem ersten Test, weil es dann PID 1 wird und Xvfbs
+    # Bereitschaftssignal nicht zugestellt bekommt (siehe
+    # tasks/2026-07-05-linux-port/plan.md). Ohne Grenze liefe der Job dann bis
+    # zum GitHub-Standard von sechs Stunden.
+    timeout-minutes: 15
 
     steps:
       # Unveraenderlicher Commit statt eines beweglichen Versions-Tags; derselbe

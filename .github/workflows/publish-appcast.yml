@@ -384,6 +384,10 @@ jobs:
           cleanup_release_mount
           trap - EXIT
 
+      # Derselbe Pfad wie APPCAST_WORK, aber bewusst noch einmal ausgeschrieben:
+      # `runner.temp` gibt es hier, `env.APPCAST_WORK` waere erst zur Laufzeit
+      # des Schritts belegt und liesse sich hier nicht nachpruefen. Dass beide
+      # Schreibweisen zusammenpassen, haelt tests/test-wrapper-safety.sh fest.
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
