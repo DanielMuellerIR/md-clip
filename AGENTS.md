@@ -91,6 +91,15 @@
   Sprachangabe eines Code-Blocks gehört in `<code class="language-x">`. Steht
   sie zusätzlich am `<pre>`, schreibt pandoc 3.1.3 ` ``` language-x `, 3.9 aber
   ` ``` x ` — und dasselbe Fixture kann nicht beide erfüllen.
+- **Die Produktversion liest nur `md_clip_version`.** Sie steht als
+  `VERSION="…"` in `bin/md-clip` und wird an sechs Stellen gebraucht: `build.sh`,
+  `wrappers/build-app-bundled.sh`, `wrappers/verify-bundle.sh`, `install-app.sh`,
+  `wrappers/sign-and-release.sh` und `.github/workflows/publish-appcast.yml`.
+  Vorher standen dort drei Schreibweisen nebeneinander, und die im Workflow kam
+  ohne `head` aus — bei zwei `VERSION`-Zeilen hätte sie etwas anderes gelesen
+  als der Build. Wer eine siebte Lesestelle ergänzt, sourct
+  `wrappers/version.sh` und ruft die Funktion; `tests/test-wrapper-safety.sh`
+  lehnt jede eigene Grammatik ab.
 - **Vor Linux-Änderungen testen:** `./tests/run-tests.sh` (macOS) und ein
   Linux-Lauf. Rezept für den Container-Lauf ohne fremde Systeme anzufassen:
   `tasks/2026-07-05-linux-port/plan.md`.

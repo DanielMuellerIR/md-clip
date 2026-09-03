@@ -1,16 +1,24 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project": "md_clip",
   "campaign": {
-    "id": "20260815T134633852340+0200",
-    "token_budget": 700000,
-    "status": "complete",
-    "started_at": "2026-08-15T13:46:33+02:00",
-    "tokens_spent": 526066,
-    "finished_at": "2026-08-15T14:30:02+02:00",
-    "finish_reason": "all-current"
+    "id": "20260903T100610327930+0200",
+    "token_budget": 1000000,
+    "status": "active",
+    "started_at": "2026-09-03T10:06:10+02:00",
+    "tokens_spent": 381725
   },
-  "campaign_history": [],
+  "campaign_history": [
+    {
+      "id": "20260815T134633852340+0200",
+      "token_budget": 700000,
+      "status": "complete",
+      "started_at": "2026-08-15T13:46:33+02:00",
+      "tokens_spent": 526066,
+      "finished_at": "2026-08-15T14:30:02+02:00",
+      "finish_reason": "all-current"
+    }
+  ],
   "scope": {
     "paths": [
       ".github/workflows",
@@ -49,16 +57,19 @@
       "reason": "Zentrale Inhaltskonvertierung; jeder formatierte Clipboard-Inhalt läuft durch diese Regeln",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T13:52:53+02:00",
-        "observed_head": "07d37c8cea7b8c8a7628c4473524bc52d4ecb567",
-        "content_sha256": "152f0dfa84a0ba64b1188e8ca3cf6799c439c3bffb732fd359ba3dcee7072765",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:08:46+02:00",
+        "observed_head": "b4b32aa5638f210a8880dc5450469856d22d502e",
+        "content_sha256": "b0e70fd5b5873745ef19cef2ba5f998b1024f86b21575c6d77350cbbb219a203",
         "file_count": 5,
-        "review": "full",
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Gemeinsame Listenmarker-Grammatik verhindert fälschliche Code-Erkennung; alphabetische, römische und Definitionslisten verlieren sichtbare Pipe-/Rauten-Escapes, Hard-Breaks vor Sonderlisten werden korrekt entfernt",
+        "summary": "Drei Tabellenfehler behoben (gfm/commonmark verwarfen Tabellen mit Blockinhalt als [TABLE]; commonmark kannte gar keine Tabellensyntax; das Ziel markdown schob durch entfernte Escapes in simple-Tabellen Text in die Nachbarzelle) und Encode durch das eingebaute utf8::decode ersetzt. Das gemeinsame Ende beider Konvertierungswege steht jetzt einmal in html_to_markdown.",
         "tests": [
-          "macOS: tests/run-tests.sh 17/17 plus vier Einzelskripte grün; Ubuntu 24.04/pandoc 3.1.3: 15/15 ohne Display, 18/18 unter Xvfb plus vier Einzelskripte grün; alter Stand reproduzierbar clean_count=0"
+          "macOS: tests/run-tests.sh 43/43 plus vier Einzelskripte gruen",
+          "Ubuntu 24.04 im minimalen Container (pandoc 3.1.3, nur perl-base): 40/40 ohne Display, 43/43 unter Xvfb, vier Einzelskripte gruen",
+          "Gegenprobe: alle vier neuen Pruefungen schlagen auf dem Stand vor dem Fix fehl (39/43)",
+          "Ende-zu-Ende mit echtem Clipboard gegen das gebaute App-Bundle: Tabelle bleibt in gfm und markdown erhalten"
         ]
       }
     },
@@ -78,16 +89,17 @@
       "reason": "Clipboard-Datenintegrität, Argumentvertrag und macOS/Linux-Plattformränder",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:04:33+02:00",
-        "observed_head": "32ba81b5a19ed6f82f8f05575f2fd67e75fae77e",
-        "content_sha256": "313c7aef162db022b21c20279c743e13a0dc2f471b7eb8e7eebf413bf5c57a2c",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:11:11+02:00",
+        "observed_head": "920ead238a8f40e2ea8b0c9d1f99d4869984a985",
+        "content_sha256": "29e2ffb7bf5b3c1056090077c38acdb64c012a08cf0068e6cd1c2faefa24b305",
         "file_count": 7,
         "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Linux-Abhängigkeitstest stellt nach dem Installer-Fix beide wl-clipboard-Befehle bereit und erreicht weiterhin gezielt den alten-pandoc-RTF-Fehler; Produktgrenze unverändert",
+        "summary": "Der Plain-Text-Rueckfall stand fuenfmal als derselbe Dreisatz im Skript; er steht jetzt einmal in use_plain_text, samt der Leerpruefung, die --replace davor bewahrt das Clipboard zu loeschen. Zusaetzlich beenden INT und TERM die CLI jetzt wirklich (Exit 130/143), statt hinter dem Trap mit geloeschter Ausgabedatei weiterzulaufen.",
         "tests": [
-          "tests/test-dependencies.sh: Produkt und Installer lehnen pandoc ohne RTF-Reader ab; vollständige macOS- und Ubuntu-Gesamtgruppen zuvor grün"
+          "macOS: tests/run-tests.sh 43/43 plus vier Einzelskripte gruen; drei Leer-Fehlerpfade von Hand nachgeprueft (Meldung und Exit 1 unveraendert)",
+          "Ubuntu 24.04 im minimalen Container: 40/40 ohne Display, 43/43 unter Xvfb, vier Einzelskripte gruen"
         ]
       }
     },
@@ -102,16 +114,18 @@
       "reason": "Installationspfad schreibt ausführbare Helfer und Symlinks in Nutzerziele",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:04:05+02:00",
-        "observed_head": "32af77e8e8f0f34bbc77a7685cb3c97dfba9b4e4",
-        "content_sha256": "07a12582cbaf0bcc765eb85a88413ca84b5cbf00e1950ccbca212b57ef68fd34",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:13:58+02:00",
+        "observed_head": "93980cd025fd3ac9c819d61d8e09f1cab990e5e5",
+        "content_sha256": "2cac0a2ea6baeca4d573e6e2c1d4989dafdb7a1de9931d7bd09e5dbdee177e19",
         "file_count": 2,
-        "review": "full",
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Installer verlangt für Wayland sowohl wl-paste als auch wl-copy und meldet das Paket einmal; negativer Teilinstallationsfall und erfolgreicher Linux-Weg sind abgedeckt",
+        "summary": "install.sh setzt den Symlink nicht mehr mit 'ln -sf': Zwischen der Zielpruefung und dem Verlinken konnte etwas Fremdes entstehen, und bei /usr/local/bin laeuft der Befehl mit sudo. Jetzt wird nur der eigene oder tote Symlink entfernt und ohne -f verlinkt, wie im privilegierten Schritt des Launchers. Der Befehlsvertrag ist als Test festgehalten.",
         "tests": [
-          "macOS-Gesamtgruppe grün; Ubuntu 24.04/pandoc 3.1.3: 15/15 ohne Display, 18/18 unter Xvfb und alle Einzelskripte grün; install-safety prüft fehlendes wl-copy und vollständigen Linux-Erfolg"
+          "tests/test-install-safety.sh: 12 Faelle gruen, der neue Vertragstest faellt auf dem alten Stand durch",
+          "macOS: tests/run-tests.sh 43/43 plus vier Einzelskripte gruen",
+          "Ubuntu 24.04 im minimalen Container: 40/40 ohne Display, 43/43 unter Xvfb, vier Einzelskripte gruen"
         ]
       }
     },
@@ -124,23 +138,25 @@
         "wrappers/sign-bundle.sh",
         "wrappers/verified-cache.sh",
         "wrappers/verify-bundle-trust.sh",
-        "wrappers/verify-bundle.sh"
+        "wrappers/verify-bundle.sh",
+        "wrappers/version.sh"
       ],
       "risk": "critical",
       "priority": 4,
       "reason": "Lieferkette, Download-Prüfsummen, Bundle-Struktur und Signaturvertrauen",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:10:34+02:00",
-        "observed_head": "50e74632dc6f6be6450392aeb71f151da388919d",
-        "content_sha256": "3959d123cb08dcd5507b177965c393195ec5a2b0b6bca710fa62a05ef094352f",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:32:58+02:00",
+        "observed_head": "ca6f46aae19b83e52c9657e38b89d61facf225ac",
+        "content_sha256": "b0e6f3b199c5574c69c8f2c8b5518f802cf52ddefd89a2a0d52c9ef62b0cace1",
         "file_count": 7,
-        "review": "full",
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Tatsächliches pandoc-Minimum macOS 14 ist in Build und README ausgewiesen; Bundle-Prüfer vergleicht LSMinimumSystemVersion fail-closed mit allen eigenen und Sparkle-Mach-O-Zielen, einschließlich alter und neuer Load-Command-Form",
+        "summary": "Nachbuchung des Querschnitts-Funds version-quelle-doppelt: Die Bereichsdateien lesen die Produktversion jetzt ueber md_clip_version aus wrappers/version.sh statt mit je eigener Grammatik. Der Delta ist genau der zuvor verifizierte Theme-Diff.",
         "tests": [
-          "Alter 11.0-Build: verify-bundle Exit 65 wegen pandoc minos 14.0; neuer ./build.sh: VERIFY OK und BUILD OK mit allen eigenen Zielen 14.0; macOS- und Ubuntu-Gesamtgruppen einschließlich isolierter modern/legacy/missing-Kompatibilitätsmatrix grün"
+          "macOS: ./build.sh VERIFY OK und BUILD OK (1.2.9), tests/test-wrapper-safety.sh 34 Pruefungen gruen, run-tests.sh 43/43",
+          "Ubuntu 24.04 im minimalen Container: 40/40 ohne Display, 43/43 unter Xvfb, alle vier Einzelskripte gruen"
         ]
       }
     },
@@ -149,23 +165,25 @@
       "paths": [
         "install-app.sh",
         "release.sh",
-        "wrappers/sign-and-release.sh"
+        "wrappers/sign-and-release.sh",
+        "wrappers/notarization.sh"
       ],
       "risk": "critical",
       "priority": 5,
       "reason": "Notarisierung, /Applications-Installation, DMG-Erzeugung und Cleanup",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:13:59+02:00",
-        "observed_head": "3c44d293b52b0b9f572ffc2359a0b18cceafbc72",
-        "content_sha256": "6a54bbf2de2c23919d27d2ef4864a2ab32d18747d38626c6856d2c8e312ce3e7",
-        "file_count": 3,
-        "review": "full",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:32:58+02:00",
+        "observed_head": "ca6f46aae19b83e52c9657e38b89d61facf225ac",
+        "content_sha256": "3287f1aae58fcb8e9b49203124b28175fe703f230dad6fa56f22e076fc8f113e",
+        "file_count": 4,
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Release-Cleanup verfolgt einen möglicherweise aktiven Mount unabhängig vom geparsten Device; bei unbekanntem Zustand bleiben Mountpfad und RW-Image erhalten, bis rmdir oder gezieltes Detach das Aushängen belegt",
+        "summary": "Nachbuchung des Querschnitts-Funds version-quelle-doppelt: Die Bereichsdateien lesen die Produktversion jetzt ueber md_clip_version aus wrappers/version.sh statt mit je eigener Grammatik. Der Delta ist genau der zuvor verifizierte Theme-Diff.",
         "tests": [
-          "Isolierte Cleanup-Simulation bewahrt Image und Pfad bei unbekanntem Device und räumt nach belegtem rmdir auf; macOS- und Ubuntu-Gesamtgruppen grün; keine realen Signing-, Notary- oder Mount-Läufe"
+          "macOS: ./build.sh VERIFY OK und BUILD OK (1.2.9), tests/test-wrapper-safety.sh 34 Pruefungen gruen, run-tests.sh 43/43",
+          "Ubuntu 24.04 im minimalen Container: 40/40 ohne Display, 43/43 unter Xvfb, alle vier Einzelskripte gruen"
         ]
       }
     },
@@ -181,62 +199,68 @@
       "reason": "Dock-Start, privilegierte CLI-Verknüpfung, HUD und Sparkle-Laufzeit",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:20:28+02:00",
-        "observed_head": "1ba26a3160e3af36225c21b9d5d2d121d32e3595",
-        "content_sha256": "72381151401b9d05ca73167717f31cbe71369d5276f94dbc1d07721348d49ee3",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:22:55+02:00",
+        "observed_head": "9a97d1ce88b36ad66ae67e5550b4d8446cfdad37",
+        "content_sha256": "0063358824e281c7d5f1c582175a35b114e8d28ab1d5f2cd434fd03abcac939d",
         "file_count": 3,
-        "review": "full",
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Updater-Helfer akzeptiert jetzt genau eine dokumentierte Betriebsart; widersprüchliche oder doppelte Argumente enden vor AppKit/Sparkle mit Exit 64. Launcher, HUD und Sparkle-Delegate-Lebenszyklus vollständig geprüft; keine weitere belegbare Vereinfachung nötig.",
+        "summary": "Der Launcher meldet ein Bundle ohne eingebettete CLI jetzt sichtbar statt wortlos nichts zu tun; der Meldungsdialog steckt in show_error_dialog und bekommt seinen Text ueber die Umgebung, nicht als Zeichenkette im AppleScript-Quelltext. md-clip-hud hatte als einziger Bundle-Helfer keinen Argumentvertragstest.",
         "tests": [
-          "Altparser aus HEAD akzeptiert --background --interactive; neuer echter Bundle-Helfer: fehlend/doppelt/unbekannt jeweils Exit 64; ./build.sh BUILD/VERIFY OK; macOS 17/17 plus vier test-*.sh; Ubuntu 24.04 mit pandoc 3.1.3: 15/15 ohne Display, 18/18 unter Xvfb plus vier test-*.sh."
+          "tests/test-wrapper-safety.sh: 32 Pruefungen gruen, darunter neu fehlende CLI (Exit 2, Dialog, keine Update-Suche), Meldungstext nur als Daten und HUD-Argumentvertrag (Exit 64 bei fehlendem, leerem und doppeltem Text)",
+          "Gegenprobe: der neue Launcher-Test faellt auf dem alten Stand durch (Exit 2)",
+          "tests/run-tests.sh 43/43, tests/test-plain-newlines.sh gruen, ./build.sh VERIFY OK und BUILD OK (1.2.9)"
         ]
       }
     },
     {
       "id": "safety-test-harness",
       "paths": [
-        "tests/test-wrapper-safety.sh"
+        "tests/test-wrapper-safety.sh",
+        "tests/lib/test-helpers.sh"
       ],
       "risk": "high",
       "priority": 7,
       "reason": "Plattformübergreifende Sicherheitsregressionen für Launcher, Release, Cache und Appcast",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:23:25+02:00",
-        "observed_head": "a970ae92271b552309766427adde24d233d27e16",
-        "content_sha256": "b69240255610ae09005cc58e85376380a18abe5d7bbebadc3f2dc34efacbc33e",
-        "file_count": 1,
-        "review": "full",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:32:58+02:00",
+        "observed_head": "ca6f46aae19b83e52c9657e38b89d61facf225ac",
+        "content_sha256": "82d0b97f39ac040f5152fee0c1755c22dca31b51c875c2ad63f3a9b83f39fdc2",
+        "file_count": 2,
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Zwei frühere Sicherheitsfunde sind jetzt durch funktionale Regressionen abgedeckt: unklarer DMG-Mountzustand bewahrt Image und Pfad, Bundle-Mindestversionen werden in moderner und alter Mach-O-Form gegen Info.plist geprüft. Sechs duplizierte Produktionsblock-Extraktionen sind in einer eindeutigen, syntaxprüfenden Hilfsfunktion zusammengeführt.",
+        "summary": "Nachbuchung des Querschnitts-Funds version-quelle-doppelt: Die Bereichsdateien lesen die Produktversion jetzt ueber md_clip_version aus wrappers/version.sh statt mit je eigener Grammatik. Der Delta ist genau der zuvor verifizierte Theme-Diff.",
         "tests": [
-          "bash -n und tests/test-wrapper-safety.sh auf macOS grün; derselbe Wrapper-Test im Ubuntu-24.04-Container grün; zuvor komplette macOS-Matrix 17/17 plus vier test-*.sh sowie Linux 15/15 ohne Display, 18/18 unter Xvfb plus vier test-*.sh grün."
+          "macOS: ./build.sh VERIFY OK und BUILD OK (1.2.9), tests/test-wrapper-safety.sh 34 Pruefungen gruen, run-tests.sh 43/43",
+          "Ubuntu 24.04 im minimalen Container: 40/40 ohne Display, 43/43 unter Xvfb, alle vier Einzelskripte gruen"
         ]
       }
     },
     {
       "id": "release-automation",
       "paths": [
-        ".github/workflows"
+        ".github/workflows",
+        "helpers/verify-sparkle-signature.swift"
       ],
       "risk": "critical",
       "priority": 8,
       "reason": "Privilegierter Appcast-Workflow mit Release-Artefakten, GitHub Pages und Sparkle-Schlüssel",
       "state": "completed",
       "last_run": {
-        "campaign_id": "20260815T134633852340+0200",
-        "completed_at": "2026-08-15T14:25:31+02:00",
-        "observed_head": "73744ef3705f6d3c73d90cecff60be868ffa5fb4",
-        "content_sha256": "806b289f206b3d34e9881ab99002057df965e99e826ab59ba2fd43566d16a3ce",
-        "file_count": 3,
-        "review": "full",
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:32:58+02:00",
+        "observed_head": "ca6f46aae19b83e52c9657e38b89d61facf225ac",
+        "content_sha256": "66d13adb26d8e08e278736671420d0924a6f6c5d5449b8af02d28f2e4ac3b5ef",
+        "file_count": 4,
+        "review": "delta-plus-boundaries",
         "outcome": "improved",
-        "summary": "Linux-CI auf expliziten contents:read-Zugriff begrenzt, Checkout-Credentials nicht persistiert und actions/checkout vom beweglichen Tag auf denselben geprüften Commit wie im Appcast-Workflow gepinnt. Privilegierter Appcast-Workflow und unprivilegierter Release-Dispatcher vollständig geprüft; Vertrauenszonentrennung bleibt schlüssig.",
+        "summary": "Nachbuchung des Querschnitts-Funds version-quelle-doppelt: Die Bereichsdateien lesen die Produktversion jetzt ueber md_clip_version aus wrappers/version.sh statt mit je eigener Grammatik. Der Delta ist genau der zuvor verifizierte Theme-Diff.",
         "tests": [
-          "Ruby YAML-Parser: alle drei Workflow-Dateien gültig; tests/test-wrapper-safety.sh auf macOS grün und prüft extrahierte Release-Tag-Auswahl, Generator-Runner und Appcast-Validator; komplette Linux-CI-Befehle derselben Kampagne zuvor im Ubuntu-24.04-Container grün (15/15 ohne Display, 18/18 unter Xvfb plus vier Einzelskripte)."
+          "macOS: ./build.sh VERIFY OK und BUILD OK (1.2.9), tests/test-wrapper-safety.sh 34 Pruefungen gruen, run-tests.sh 43/43",
+          "Ubuntu 24.04 im minimalen Container: 40/40 ohne Display, 43/43 unter Xvfb, alle vier Einzelskripte gruen"
         ]
       }
     },
@@ -267,12 +291,61 @@
     }
   ],
   "architecture": {
-    "campaign_id": "20260815T134633852340+0200",
-    "recorded_at": "2026-08-15T13:46:34+02:00",
-    "observed_head": "c4401d4a86bb791f19979ed2ebdceb42812ff3be",
-    "summary": "Seiteneffektfreie Konvertierung in lib/pipeline.sh; CLI und macOS-Helfer kapseln Clipboard-, UI-, Build- und Release-Ränder",
+    "campaign_id": "20260903T100610327930+0200",
+    "recorded_at": "2026-09-03T10:06:23+02:00",
+    "observed_head": "0bd1197a361b036e47a3e9bb0c46c94788da3864",
+    "summary": "lib/pipeline.sh konvertiert seiteneffektfrei; bin/md-clip, die Swift-Helfer und wrappers/ kapseln Clipboard-, UI-, Build- und Release-Raender. Beim Review 2026-09-03 unveraendert bestaetigt.",
     "paradigm": "Pipeline-orientiertes Schichtenmodell mit Plattformadaptern",
     "fit": "passt",
-    "recommendation": "Paradigma beibehalten; große Shell-Einstiegspunkte nur bereichsweise an belegten Verantwortungsgrenzen vereinfachen"
-  }
+    "recommendation": "Paradigma beibehalten; grosse Shell-Einstiegspunkte nur bereichsweise an belegten Verantwortungsgrenzen vereinfachen"
+  },
+  "themes": [
+    {
+      "id": "version-quelle-doppelt",
+      "summary": "Die Produktversion aus bin/md-clip wird an sechs Stellen mit zwei verschiedenen Idiomen gelesen (awk -F'\"' bzw. grep|head|cut); eine gemeinsame Hilfsfunktion fehlt",
+      "evidence": [
+        "build.sh",
+        "install-app.sh",
+        "wrappers/verify-bundle.sh",
+        "wrappers/build-app-bundled.sh",
+        "wrappers/sign-and-release.sh",
+        ".github/workflows/publish-appcast.yml"
+      ],
+      "priority": 2,
+      "state": "completed",
+      "noted_at": "2026-09-03T10:08:14+02:00",
+      "campaign_id": "20260903T100610327930+0200",
+      "started_at": "2026-09-03T10:30:03+02:00",
+      "completed": {
+        "campaign_id": "20260903T100610327930+0200",
+        "completed_at": "2026-09-03T10:32:19+02:00",
+        "observed_head": "ca6f46aae19b83e52c9657e38b89d61facf225ac",
+        "summary": "md_clip_version in wrappers/version.sh ersetzt drei nebeneinander gewachsene Schreibweisen an sechs Lesestellen; die Fassung im Appcast-Workflow kam ohne head aus und haette bei zwei VERSION-Zeilen etwas anderes gelesen als der Build. Zwei fehlende Absicherungen fielen dabei mit auf: sign-and-release.sh haette bei unlesbarer Zeile ein md-clip-.dmg veroeffentlicht, verify-bundle.sh meldete einen Versionsvergleich gegen einen leeren Wert.",
+        "tests": [
+          "tests/test-wrapper-safety.sh prueft die Funktion selbst und dass alle sechs Leser sie benutzen; Gegenprobe mit dem alten build.sh faellt durch",
+          "./build.sh VERIFY OK und BUILD OK (1.2.9); unkenntlich gemachte VERSION-Zeile im gebauten Bundle liefert Exit 65 mit der neuen Meldung",
+          "Alle drei Workflow-Dateien YAML-gueltig; run-tests.sh 43/43, alle vier Einzelskripte gruen"
+        ]
+      }
+    },
+    {
+      "id": "bundle-und-team-id-mehrfach",
+      "summary": "Bundle-ID und Team-ID stehen in wrappers/launcher.sh, wrappers/build-app-bundled.sh, wrappers/verify-bundle-trust.sh und wrappers/notarization.sh je eigen",
+      "evidence": [
+        "wrappers/launcher.sh",
+        "wrappers/build-app-bundled.sh",
+        "wrappers/verify-bundle-trust.sh",
+        "wrappers/notarization.sh"
+      ],
+      "priority": 3,
+      "state": "dismissed",
+      "noted_at": "2026-09-03T10:33:28+02:00",
+      "campaign_id": "20260903T100610327930+0200",
+      "dismissed": {
+        "campaign_id": "20260903T100610327930+0200",
+        "dismissed_at": "2026-09-03T10:33:28+02:00",
+        "reason": "Keine versehentliche Doppelung, sondern gewollte Gegenprobe. wrappers/verify-bundle-trust.sh haelt seine EIGENE Erwartung an Bundle- und Team-ID; wuerde es sie aus dem Build beziehen, koennte es einen Build mit veraenderter Kennung nicht mehr auffallen lassen. wrappers/launcher.sh wird als Datei ins Bundle kopiert und muss ohne die uebrigen Skripte auskommen; seine Bundle-ID ist die defaults-Domain, und dass sie zur Info.plist passt, prueft verify-bundle-trust.sh. Die frueher doppelte Signaturvorgabe von install-app.sh und sign-and-release.sh war der echte Fund und steckt seit 2026-09-03 in notarization.sh."
+      }
+    }
+  ]
 }

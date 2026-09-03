@@ -19,3 +19,22 @@
   anderem `lib/pipeline.sh:319`, `install-app.sh:121`,
   `wrappers/verify-bundle.sh:233`) sichten und importieren oder begründet
   verwerfen. Übernommen aus Session c-ed04883f (tag_explosion-Fleet-Aufräumlauf).
+  Hinweis vom 2026-09-03: Der Code-Review und die CodeQA-Kampagne dieses Tages
+  haben genau diese drei Dateien vollständig durchgesehen (siehe CHANGELOG 1.2.9
+  und `.codeqa/coverage.json`). Beim Import lässt sich also abgleichen, welche
+  der rund 19 Funde noch offen sind — die Zeilennummern von damals passen
+  allerdings nicht mehr.
+
+## Aus dem Code-Review und der CodeQA-Kampagne 2026-09-03
+
+- **Toter Worktree im Repo-Verzeichnis.** `.claude/worktrees/festive-greider-8d3ac0/`
+  ist ein Arbeitsbaum vom 2026-05-19; sein Elternrepo
+  (`Nextcloud/Arbeit/Viben/p_md_clip/.git`) existiert nicht mehr, `git worktree
+  list` kennt ihn nicht, und der globale gitignore blendet `.claude/` aus. Er
+  enthält einen alten Projektstand (736 KB, noch mit `BLUEPRINT.md` im Wurzel-
+  verzeichnis). Ich habe ihn NICHT gelöscht — bitte einmal ansehen und dann
+  wegräumen oder behalten.
+
+- **Alter AppleScript-Applet-Ordner.** `wrappers/md-clip.app/` liegt ungetrackt
+  im Arbeitsbaum und wird von `.gitignore` als „früherer Ausgabeort" geführt.
+  Der heutige Build schreibt nach `build/md-clip.app`. Ebenfalls nicht gelöscht.

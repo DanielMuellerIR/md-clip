@@ -41,6 +41,45 @@ Standardweg und liefen dabei ohne Fehlermeldung durch.
   gelöschten Datei. Jetzt endet es mit 130 beziehungsweise 143, wie es die
   übrigen Skripte des Projekts schon taten.
 
+Aus der CodeQA-Kampagne desselben Tages, alle neun Bereiche und beide
+Querschnitts-Funde:
+
+- **Ein beschädigtes App-Bundle meldet sich jetzt.** Fehlte der eingebettete
+  Befehl, schrieb der Launcher nur „No such file or directory" nach stderr —
+  md-clip.app hat kein Fenster, das sah niemand. Der Dock-Klick wirkte, als
+  täte die App nichts. Jetzt erscheint ein Dialog, und die App endet mit 2.
+- **`install.sh` setzt den Symlink ohne `ln -sf`.** Zwischen der Prüfung des
+  Ziels und dem Verlinken konnte dort etwas Fremdes entstehen; bei
+  `/usr/local/bin` läuft der Befehl mit sudo und hätte es als root ersetzt.
+  Jetzt wird nur der eigene oder tote Symlink entfernt und danach ohne `-f`
+  verlinkt — wie im privilegierten Schritt des Launchers schon länger.
+- **Die Produktversion wird überall gleich gelesen.** `bin/md-clip` trägt sie;
+  gelesen wurde sie an sechs Stellen mit drei Schreibweisen, und die im
+  Appcast-Workflow kam ohne `head` aus. Jetzt liest `md_clip_version` überall
+  dasselbe. Dabei fielen zwei fehlende Absicherungen auf: Der Release-Lauf
+  hätte bei unlesbarer Zeile ein `md-clip-.dmg` veröffentlicht, und die
+  Bundle-Prüfung meldete einen Versionsvergleich gegen einen leeren Wert statt
+  zu sagen, was fehlt.
+- **Innen aufgeräumt, Verhalten unverändert:** Das gemeinsame Ende beider
+  Konvertierungswege steht einmal in `html_to_markdown`, der Plain-Text-
+  Rückfall einmal in `use_plain_text` statt fünfmal, die verifizierten
+  Downloads des Bundle-Baus in `fetch_verified`, und die Developer-ID-Vorgabe
+  nur noch in `wrappers/notarization.sh`. Der Aufräum-Trap des Bundle-Baus
+  steht jetzt vor dem ersten `mktemp`.
+- **Ein fehlgeschlagener Test sagt endlich, was er wollte.** Knapp sechzig
+  stumme Vertragsprüfungen beendeten den Lauf wortlos; jetzt nennt ein
+  ERR-Trap Datei, Zeile und Wortlaut. Der Linux-CI-Job hat eine Zeitgrenze von
+  15 Minuten, und `md-clip-hud` hat als letzter Bundle-Helfer einen
+  Argumentvertragstest bekommen.
+
+Tests: `tests/run-tests.sh` 43/43 grün (vier neue Prüfungen: Tabellenzellen in
+allen drei Zieldialekten, dazu ein Lauf mit absichtlich kaputtem `Encode.pm`),
+`tests/test-wrapper-safety.sh` 34, `tests/test-install-safety.sh` 13,
+`tests/test-plain-newlines.sh` 15 und `tests/test-dependencies.sh` 4 Prüfungen
+grün. Ubuntu 24.04 im minimalen Container (pandoc 3.1.3, nur `perl-base`):
+40/40 ohne Display, 43/43 unter Xvfb, alle vier Einzelskripte grün.
+`./build.sh` VERIFY OK und BUILD OK.
+
 ## 1.2.8 — 2026-08-28
 
 Fixes aus dem Code-Review vom 2026-08-28:
