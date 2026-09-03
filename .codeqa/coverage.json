@@ -4,9 +4,11 @@
   "campaign": {
     "id": "20260903T100610327930+0200",
     "token_budget": 1000000,
-    "status": "active",
+    "status": "complete",
     "started_at": "2026-09-03T10:06:10+02:00",
-    "tokens_spent": 381725
+    "tokens_spent": 401725,
+    "finished_at": "2026-09-03T10:34:56+02:00",
+    "finish_reason": "all-current"
   },
   "campaign_history": [
     {
