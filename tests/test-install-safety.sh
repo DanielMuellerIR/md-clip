@@ -184,3 +184,18 @@ run_install "$TEST_ROOT/dead"
 run_install "$TEST_ROOT/dead"
 [ "$(readlink "$TEST_ROOT/dead/md-clip")" = "$ABS_MAIN" ]
 echo "✓ install-eigener-oder-toter-symlink wird sicher gesetzt"
+
+# Zwischen der Prüfung des Ziels und dem Verlinken liegt ein Moment, in dem dort
+# etwas Fremdes entstehen kann — bei /usr/local/bin läuft der Befehl zudem als
+# root. `ln -sf` würde das ungefragt ersetzen. Diese Rennbedingung lässt sich
+# nicht auslösen, der Befehlsvertrag dagegen schon prüfen; dieselbe Regel hält
+# tests/test-wrapper-safety.sh für den Launcher fest.
+# Kommentarzeilen vorher weg: Die Begründung im Skript nennt `ln -sf` beim
+# Namen und würde sonst den eigenen Vertrag verletzen.
+if grep -v '^[[:space:]]*#' "$PROJECT_COPY/install.sh" \
+  | grep -Eq 'ln[[:space:]]+-sf|ln[[:space:]]+-fs'; then
+  echo "✗ install.sh verlinkt mit -f und ersetzt damit ein fremdes Ziel" >&2
+  exit 1
+fi
+grep -Fq 'ln -s "$ABS_MAIN" "$INSTALL_TARGET"' "$PROJECT_COPY/install.sh"
+echo "✓ install-verlinkt-nie-mit-f"

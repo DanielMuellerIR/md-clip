@@ -216,13 +216,27 @@ fi
 # nachweislich toten Symlink.
 check_install_target
 
-# Prüfen, ob wir Schreibrechte auf das Ziel-Verzeichnis haben.
+# Verlinken bewusst OHNE `ln -sf`. Zwischen der Prüfung direkt darüber und
+# diesem Befehl liegt ein kurzer Moment, in dem am Ziel etwas Fremdes entstehen
+# kann — und bei /usr/local/bin läuft der Befehl mit Root-Rechten. `-f` würde
+# das ungefragt ersetzen. Stattdessen nehmen wir gezielt nur den eigenen oder
+# toten Symlink weg (mehr hat check_install_target gerade nicht durchgelassen)
+# und verlinken dann; taucht in diesem Moment doch etwas anderes auf, scheitert
+# `ln` statt zu überschreiben. Denselben Weg geht der privilegierte Schritt in
+# wrappers/launcher.sh.
+#
 # `-w` testet auf Schreibbarkeit aus Sicht des aktuellen Prozesses.
 if [ -w "$INSTALL_PREFIX" ]; then
-  ln -sf "$ABS_MAIN" "$INSTALL_TARGET"
+  if [ -L "$INSTALL_TARGET" ]; then
+    rm -f "$INSTALL_TARGET"
+  fi
+  ln -s "$ABS_MAIN" "$INSTALL_TARGET"
 else
   echo "==> $INSTALL_PREFIX braucht sudo zum Schreiben"
-  sudo ln -sf "$ABS_MAIN" "$INSTALL_TARGET"
+  if [ -L "$INSTALL_TARGET" ]; then
+    sudo rm -f "$INSTALL_TARGET"
+  fi
+  sudo ln -s "$ABS_MAIN" "$INSTALL_TARGET"
 fi
 
 echo "✓ Symlink: $INSTALL_TARGET → $ABS_MAIN"
