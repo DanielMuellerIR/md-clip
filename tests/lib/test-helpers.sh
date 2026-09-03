@@ -4,13 +4,39 @@
 # dieselben Plattformattrappen; spezielle Clipboard-Attrappen bleiben im
 # jeweiligen Test, weil sie unterschiedliche Zustände modellieren.
 
+# Meldet, welche Zusicherung gescheitert ist. Ohne das beendet `set -e` den
+# Lauf wortlos: Auf dem Bildschirm stehen dann nur die bis dahin bestandenen
+# Prüfungen und ein Exit-Code — bei den knapp sechzig stummen grep-Verträgen in
+# tests/test-wrapper-safety.sh sieht niemand mehr, WAS regressiert ist. Der
+# ERR-Trap unten nennt Datei, Zeile und Wortlaut der Prüfung.
+report_failed_check() {
+  local status=$?
+  local line="$1"
+
+  # Bash führt den ERR-Trap auch bei abgeschaltetem `set -e` aus. Die Tests
+  # schalten es aber genau dort ab, wo sie einen Fehlschlag ERWARTEN und selbst
+  # auswerten — dort wäre die Meldung falsch. Ohne das `e` in $- also schweigen.
+  case "$-" in
+    *e*) ;;
+    *)   return 0 ;;
+  esac
+
+  printf '✗ Zusicherung in %s:%s fehlgeschlagen (Exit %s):\n' \
+    "${TEST_SCRIPT##*/}" "$line" "$status" >&2
+  sed -n "${line}p" "$TEST_SCRIPT" 2>/dev/null | sed 's/^/    /' >&2
+}
+
 init_test_environment() {
   TESTS_DIR="$1"
   PROJECT_ROOT="$(dirname "$TESTS_DIR")"
   TEST_ROOT=$(mktemp -d)
+  # BASH_SOURCE[1] ist das aufrufende Testskript — BASH_SOURCE[0] wäre diese
+  # Hilfsdatei und damit die falsche Datei für die Zeilenangabe.
+  TEST_SCRIPT="${BASH_SOURCE[1]}"
   trap 'rm -rf "$TEST_ROOT"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'report_failed_check "$LINENO"' ERR
 }
 
 copy_install_test_project() {
