@@ -80,6 +80,12 @@ grün. Ubuntu 24.04 im minimalen Container (pandoc 3.1.3, nur `perl-base`):
 40/40 ohne Display, 43/43 unter Xvfb, alle vier Einzelskripte grün.
 `./build.sh` VERIFY OK und BUILD OK.
 
+Nach dem Tag kamen zwei Korrekturen an CI und Tests dazu, ohne Wirkung auf das
+ausgelieferte Programm: Der Appcast-Workflow sourcte eine Datei aus der fest
+gepinnten Tooling-Revision, die es dort noch nicht gibt, und der neue
+HUD-Vertragstest kompilierte AppKit-Code auf dem Linux-Runner. Beides ist
+behoben und im `swift:6.0`-Container unter genau der CI-Bedingung nachgeprüft.
+
 ## 1.2.8 — 2026-08-28
 
 Fixes aus dem Code-Review vom 2026-08-28:

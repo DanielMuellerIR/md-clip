@@ -91,15 +91,22 @@
   Sprachangabe eines Code-Blocks gehört in `<code class="language-x">`. Steht
   sie zusätzlich am `<pre>`, schreibt pandoc 3.1.3 ` ``` language-x `, 3.9 aber
   ` ``` x ` — und dasselbe Fixture kann nicht beide erfüllen.
-- **Die Produktversion liest nur `md_clip_version`.** Sie steht als
-  `VERSION="…"` in `bin/md-clip` und wird an sechs Stellen gebraucht: `build.sh`,
-  `wrappers/build-app-bundled.sh`, `wrappers/verify-bundle.sh`, `install-app.sh`,
-  `wrappers/sign-and-release.sh` und `.github/workflows/publish-appcast.yml`.
-  Vorher standen dort drei Schreibweisen nebeneinander, und die im Workflow kam
-  ohne `head` aus — bei zwei `VERSION`-Zeilen hätte sie etwas anderes gelesen
-  als der Build. Wer eine siebte Lesestelle ergänzt, sourct
-  `wrappers/version.sh` und ruft die Funktion; `tests/test-wrapper-safety.sh`
-  lehnt jede eigene Grammatik ab.
+- **Die Produktversion liest überall dieselbe Grammatik.** Sie steht als
+  `VERSION="…"` in `bin/md-clip` und wird an sechs Stellen gebraucht. Die fünf
+  Shell-Einstiegspunkte — `build.sh`, `wrappers/build-app-bundled.sh`,
+  `wrappers/verify-bundle.sh`, `install-app.sh`, `wrappers/sign-and-release.sh` —
+  sourcen `wrappers/version.sh` und rufen `md_clip_version`. Vorher standen dort
+  drei Schreibweisen nebeneinander, und die im Appcast-Workflow kam ohne `head`
+  aus — bei zwei `VERSION`-Zeilen hätte sie etwas anderes gelesen als der Build.
+  **Der Appcast-Workflow schreibt die Grammatik aus und darf die Funktion NICHT
+  sourcen.** Sein Tooling kommt aus einer fest gepinnten Revision, und ein Pin
+  ist älter als jede neu dort angelegte Datei: `source
+  tooling/wrappers/version.sh` ließ den Lauf zu v1.2.9 mit „No such file or
+  directory" abbrechen, und der Feed blieb auf der Vorversion stehen
+  (2026-09-03). Wer dort eine Tooling-Datei ergänzen will, braucht zuerst einen
+  geprüften neuen Pin. `tests/test-wrapper-safety.sh` hält beides fest: dieselbe
+  Grammatik an allen sechs Stellen und kein anderes `source tooling/…` als das
+  nachweislich vorhandene.
 - **Vor Linux-Änderungen testen:** `./tests/run-tests.sh` (macOS) und ein
   Linux-Lauf. Rezept für den Container-Lauf ohne fremde Systeme anzufassen:
   `tasks/2026-07-05-linux-port/plan.md`.
