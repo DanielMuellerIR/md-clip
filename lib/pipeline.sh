@@ -837,6 +837,25 @@ require_nonempty_markdown() {
   '
 }
 
+# Das gemeinsame Ende beider Wege: aufbereitetes HTML von stdin, fertiges
+# Markdown auf stdout. Davor steht der Teil, der sich unterscheidet — die
+# Herkunftsbereinigung beim HTML, die Tabellen- und Listenkorrektur beim RTF.
+#
+# Eine Funktion und nicht zweimal dieselbe Kette: Drei dieser Stufen bekommen
+# das Zielformat, und alle sechs müssen in beiden Wegen in derselben Reihenfolge
+# stehen. Zweimal hingeschrieben blieb beim Ergänzen einer Stufe leicht eine
+# Kette zurück — dann käme Clipboard-HTML anders heraus als dasselbe HTML aus
+# einem RTF.
+html_to_markdown() {
+  local target_format="${1:-gfm}"
+  clean_html \
+    | fill_empty_html_links \
+    | inline_table_cells "$target_format" \
+    | run_pandoc "$target_format" \
+    | tidy_markdown "$target_format" \
+    | require_nonempty_markdown
+}
+
 convert_html() {
   local target_format="${1:-gfm}"
   if declare -F vlog >/dev/null 2>&1; then
@@ -844,12 +863,7 @@ convert_html() {
   fi
   preprocess_claude_desktop \
     | preprocess_google_classroom \
-    | clean_html \
-    | fill_empty_html_links \
-    | inline_table_cells "$target_format" \
-    | run_pandoc "$target_format" \
-    | tidy_markdown "$target_format" \
-    | require_nonempty_markdown
+    | html_to_markdown "$target_format"
 }
 
 convert_rtf() {
@@ -860,10 +874,5 @@ convert_rtf() {
   rtf_to_html \
     | flatten_layout_tables \
     | unwrap_list_paragraphs \
-    | clean_html \
-    | fill_empty_html_links \
-    | inline_table_cells "$target_format" \
-    | run_pandoc "$target_format" \
-    | tidy_markdown "$target_format" \
-    | require_nonempty_markdown
+    | html_to_markdown "$target_format"
 }

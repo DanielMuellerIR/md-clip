@@ -167,8 +167,7 @@ run_test "word-rtf (RTF-Pfad, $PLATFORM)" \
 # werden. Eine einspaltige Tabelle ohne Kopf bleibt dagegen bewusst Layout.
 actual_file="$TEST_RUNTIME/data-table.actual"
 printf '%s' '<table><tr><th>Name</th><th>Wert</th></tr><tr><td>A</td><td>1</td></tr></table>' \
-  | flatten_layout_tables | clean_html | fill_empty_html_links \
-  | run_pandoc gfm | tidy_markdown gfm | require_nonempty_markdown > "$actual_file"
+  | flatten_layout_tables | unwrap_list_paragraphs | html_to_markdown gfm > "$actual_file"
 run_test "data-table (Zeilen und Spalten bleiben erhalten)" \
   "$actual_file" "$FIXTURES/data-table.expected.md"
 
