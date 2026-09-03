@@ -86,14 +86,52 @@ echo "==> Build-Verzeichnis: $BUILD_DIR"
 # Falls später doch Intel gebraucht wird: zweite arch hier dazu, lipo
 # zum Mergen.
 
+# Alles Temporäre dieses Laufs hängt an diesen drei Variablen. Aufräumroutine
+# und Trap stehen bewusst VOR dem ersten `mktemp`: Wird der Build zwischen dem
+# Anlegen und dem Registrieren abgebrochen, bliebe sonst ein Staging-Verzeichnis
+# in build/ liegen. Dieselbe Reihenfolge halten install-app.sh und
+# wrappers/sign-and-release.sh ein. Ohne eigenes `exit` liefe das Skript hinter
+# dem Trap weiter; 130/143 sind die üblichen Codes für INT und TERM.
+PANDOC_STAGE=""
+PANDOC_BUILD_TMP=""
+SPARKLE_STAGE=""
+cleanup_build_stages() {
+  if [ -n "$PANDOC_STAGE" ]; then
+    rm -rf "$PANDOC_STAGE"
+  fi
+  if [ -n "$PANDOC_BUILD_TMP" ]; then
+    rm -f "$PANDOC_BUILD_TMP"
+  fi
+  if [ -n "$SPARKLE_STAGE" ]; then
+    rm -rf "$SPARKLE_STAGE"
+  fi
+}
+trap cleanup_build_stages EXIT
+trap 'cleanup_build_stages; exit 130' INT
+trap 'cleanup_build_stages; exit 143' TERM
+
+# fetch_verified: Archiv aus dem Cache nehmen oder laden — in beiden Fällen erst
+# nach bestandener SHA-256-Prüfung. `download_verified` prüft den Cache selbst;
+# hier steht nur noch, welcher Weg gegangen wurde. Eine Funktion, weil pandoc,
+# Sparkle und der pandoc-COPYRIGHT-Text sonst dreimal dieselbe if/else-Kette
+# hätten — und ein vergessenes `|| exit 1` einen unverifizierten Build ergäbe.
+fetch_verified() {
+  local label="$1"
+  local url="$2"
+  local expected_sha256="$3"
+  local destination="$4"
+
+  if sha256_matches "$destination" "$expected_sha256"; then
+    echo "✓ Verifiziertes $label aus Cache: $destination"
+    return 0
+  fi
+  echo "==> Lade und verifiziere $url"
+  download_verified "$url" "$expected_sha256" "$destination" || exit 1
+}
+
 PANDOC_ZIP="$CACHE_DIR/pandoc-${PANDOC_VERSION}-arm64.zip"
 PANDOC_URL="https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-arm64-macOS.zip"
-if sha256_matches "$PANDOC_ZIP" "$PANDOC_ZIP_SHA256"; then
-  echo "✓ Verifiziertes pandoc-arm64 aus Cache: $PANDOC_ZIP"
-else
-  echo "==> Lade und verifiziere $PANDOC_URL"
-  download_verified "$PANDOC_URL" "$PANDOC_ZIP_SHA256" "$PANDOC_ZIP" || exit 1
-fi
+fetch_verified "pandoc-arm64" "$PANDOC_URL" "$PANDOC_ZIP_SHA256" "$PANDOC_ZIP"
 
 # Immer aus dem verifizierten Archiv in ein privates Staging-Verzeichnis
 # entpacken. Nur der dokumentierte Archivpfad ist zulässig; ein zusätzlich
@@ -102,17 +140,6 @@ PANDOC_ARCHIVE_ROOT="pandoc-${PANDOC_VERSION}-arm64"
 PANDOC_ARCHIVE_BIN="$PANDOC_ARCHIVE_ROOT/bin/pandoc"
 PANDOC_STAGE=$(mktemp -d "$BUILD_DIR/.pandoc-extract.XXXXXX")
 PANDOC_BUILD_TMP=$(mktemp "$BUILD_DIR/.pandoc-binary.XXXXXX")
-# SPARKLE_STAGE wird erst in Schritt 3 angelegt; die Aufräumroutine kennt ihn
-# schon jetzt, damit auch ein Abbruch mittendrin nichts liegen lässt.
-SPARKLE_STAGE=""
-cleanup_build_stages() {
-  rm -rf "$PANDOC_STAGE"
-  rm -f "$PANDOC_BUILD_TMP"
-  if [ -n "$SPARKLE_STAGE" ]; then
-    rm -rf "$SPARKLE_STAGE"
-  fi
-}
-trap cleanup_build_stages EXIT INT TERM
 
 unzip -q "$PANDOC_ZIP" "$PANDOC_ARCHIVE_BIN" -d "$PANDOC_STAGE"
 PANDOC_BIN="$PANDOC_STAGE/$PANDOC_ARCHIVE_BIN"
@@ -144,12 +171,7 @@ done
 # und nur die dokumentierten Archivpfade werden entpackt.
 SPARKLE_TAR="$CACHE_DIR/Sparkle-${SPARKLE_VERSION}.tar.xz"
 SPARKLE_URL="https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
-if sha256_matches "$SPARKLE_TAR" "$SPARKLE_TAR_SHA256"; then
-  echo "✓ Verifiziertes Sparkle aus Cache: $SPARKLE_TAR"
-else
-  echo "==> Lade und verifiziere $SPARKLE_URL"
-  download_verified "$SPARKLE_URL" "$SPARKLE_TAR_SHA256" "$SPARKLE_TAR" || exit 1
-fi
+fetch_verified "Sparkle" "$SPARKLE_URL" "$SPARKLE_TAR_SHA256" "$SPARKLE_TAR"
 
 SPARKLE_STAGE=$(mktemp -d "$BUILD_DIR/.sparkle-extract.XXXXXX")
 tar -x -C "$SPARKLE_STAGE" -f "$SPARKLE_TAR" ./Sparkle.framework ./LICENSE
@@ -305,10 +327,10 @@ LIC_DIR="$APP_BUNDLE/Contents/Resources/Licenses"
 # Offline-Build darf niemals still ein leeres Lizenzdokument ausliefern.
 PANDOC_COPYRIGHT_URL="https://raw.githubusercontent.com/jgm/pandoc/${PANDOC_VERSION}/COPYRIGHT"
 PANDOC_COPYRIGHT_CACHE="$CACHE_DIR/pandoc-${PANDOC_VERSION}-COPYRIGHT"
-download_verified \
+fetch_verified "pandoc-COPYRIGHT" \
   "$PANDOC_COPYRIGHT_URL" \
   "$PANDOC_COPYRIGHT_SHA256" \
-  "$PANDOC_COPYRIGHT_CACHE" || exit 1
+  "$PANDOC_COPYRIGHT_CACHE"
 test -s "$PANDOC_COPYRIGHT_CACHE"
 cp "$PANDOC_COPYRIGHT_CACHE" "$LIC_DIR/pandoc-COPYRIGHT.txt"
 
