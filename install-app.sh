@@ -28,10 +28,16 @@ cd "$(dirname "$0")"
 PROJECT_ROOT="$PWD"
 # shellcheck source=wrappers/notarization.sh
 source wrappers/notarization.sh
+# shellcheck source=wrappers/version.sh
+source wrappers/version.sh
 
 APP="build/md-clip.app"
 DESTINATION="/Applications/md-clip.app"
-VERSION="$(grep '^VERSION=' bin/md-clip | head -1 | cut -d'"' -f2)"
+VERSION="$(md_clip_version bin/md-clip || true)"
+if [ -z "$VERSION" ]; then
+  echo "FEHLER: VERSION fehlt in bin/md-clip." >&2
+  exit 65
+fi
 
 # Alles Temporäre hängt an diesen beiden Variablen und wird von EINER
 # Aufräumroutine erledigt. Der Trap steht vor dem ersten `mktemp`: Scheitert

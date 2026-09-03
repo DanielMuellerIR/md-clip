@@ -440,6 +440,61 @@ if [ "$PLIST_ONE" = "$PLIST_TWO" ]; then
 fi
 echo "✓ Release-Skript bekommt fuer jede Plist einen eindeutigen Pfad"
 
+# --- Version: eine Grammatik für alle sechs Leser. ---
+# bin/md-clip trägt die Produktversion; gelesen wird sie in build.sh,
+# build-app-bundled.sh, verify-bundle.sh, install-app.sh, sign-and-release.sh
+# und im Appcast-Workflow. Vorher standen dort drei Schreibweisen nebeneinander
+# — die im Workflow ohne `head`, die also bei zwei VERSION-Zeilen etwas anderes
+# gelesen hätte als der Build (Querschnitts-Fund 2026-09-03).
+# shellcheck source=../wrappers/version.sh
+source "$PROJECT_ROOT/wrappers/version.sh"
+
+VERSION_PROBE="$TEST_ROOT/version-probe"
+printf 'VERSION="1.2.3"\n' > "$VERSION_PROBE"
+[ "$(md_clip_version "$VERSION_PROBE")" = "1.2.3" ]
+
+# Nur die erste Zeile zählt — genauso, wie der Build sie liest.
+printf 'VERSION="1.2.3"\nVERSION="9.9.9"\n' > "$VERSION_PROBE"
+[ "$(md_clip_version "$VERSION_PROBE")" = "1.2.3" ]
+
+# Nur am Zeilenanfang: In Kommentaren und Meldungen steht das Wort auch.
+printf '# VERSION="9.9.9" steht hier nur im Text\nVERSION="1.2.3"\n' > "$VERSION_PROBE"
+[ "$(md_clip_version "$VERSION_PROBE")" = "1.2.3" ]
+
+assert_version_unreadable() {
+  local label="$1"
+  local content="$2"
+
+  printf '%b' "$content" > "$VERSION_PROBE"
+  set +e
+  version_probe_output="$(md_clip_version "$VERSION_PROBE")"
+  version_probe_status=$?
+  set -e
+  if [ "$version_probe_status" -eq 0 ] || [ -n "$version_probe_output" ]; then
+    echo "✗ md_clip_version meldet $label als lesbare Version" >&2
+    exit 1
+  fi
+}
+
+assert_version_unreadable "eine Datei ohne VERSION-Zeile" 'nur Text\n'
+assert_version_unreadable "einen leeren Wert" 'VERSION=""\n'
+
+# Keine eigene Grammatik mehr neben der Funktion.
+for version_reader in "$PROJECT_ROOT/build.sh" "$PROJECT_ROOT/install-app.sh" \
+  "$PROJECT_ROOT/wrappers/build-app-bundled.sh" "$PROJECT_ROOT/wrappers/verify-bundle.sh" \
+  "$PROJECT_ROOT/wrappers/sign-and-release.sh" "$PROJECT_ROOT/.github/workflows/publish-appcast.yml"; do
+  if ! grep -Fq 'md_clip_version' "$version_reader"; then
+    echo "✗ $version_reader liest die Version nicht über md_clip_version" >&2
+    exit 1
+  fi
+  if grep -v '^[[:space:]]*#' "$version_reader" \
+    | grep -Eq "(awk -F.\"..|grep )'\\^VERSION="; then
+    echo "✗ $version_reader hat eine eigene Versions-Grammatik" >&2
+    exit 1
+  fi
+done
+echo "✓ Alle sechs Leser der Produktversion benutzen dieselbe Grammatik"
+
 # --- Cache: manipulierte Downloads werden verworfen, gültige atomar gesetzt. ---
 # shellcheck source=../wrappers/verified-cache.sh
 source "$PROJECT_ROOT/wrappers/verified-cache.sh"

@@ -19,6 +19,8 @@
 # Letzte Zeile bei Erfolg: BUILD OK: <pfad-zur-app>
 set -euo pipefail
 cd "$(dirname "$0")"
+# shellcheck source=wrappers/version.sh
+source wrappers/version.sh
 
 # BEGIN TRUSTED_BUILD_CLI_SMOKE
 verify_trusted_build_cli() {
@@ -60,7 +62,7 @@ APP="build/md-clip.app"
 # das Bundle wird geprüft, nicht dem Build geglaubt.
 bash wrappers/verify-bundle.sh "$APP"
 
-SOURCE_VERSION="$(awk -F'"' '/^VERSION=/{print $2; exit}' bin/md-clip)"
+SOURCE_VERSION="$(md_clip_version bin/md-clip || true)"
 [ -n "$SOURCE_VERSION" ] || { echo "FEHLER: VERSION fehlt in bin/md-clip." >&2; exit 65; }
 verify_trusted_build_cli \
   "bin/md-clip" \

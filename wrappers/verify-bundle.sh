@@ -9,6 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=verify-bundle-trust.sh
 source "$SCRIPT_DIR/verify-bundle-trust.sh"
+# shellcheck source=version.sh
+source "$SCRIPT_DIR/version.sh"
 
 if [ "$#" -lt 1 ]; then
   echo "Aufruf: verify-bundle.sh <App-Bundle> [--signed] [--team-id TEAM_ID]" >&2
@@ -287,7 +289,11 @@ if [ "$SIGNED" -eq 1 ]; then
   CLI_OUTPUT="$("$BUNDLED_CLI" --version)"
   CLI_VERSION="${CLI_OUTPUT%%$'\n'*}"
 else
-  CLI_SOURCE_VERSION="$(awk -F'"' '/^VERSION=/{print $2; exit}' "$BUNDLED_CLI")"
+  CLI_SOURCE_VERSION="$(md_clip_version "$BUNDLED_CLI" || true)"
+  if [ -z "$CLI_SOURCE_VERSION" ]; then
+    echo "Eingebettete CLI enthält keine lesbare VERSION-Zeile." >&2
+    exit 65
+  fi
   CLI_VERSION="md-clip $CLI_SOURCE_VERSION"
 fi
 if [ "$CLI_VERSION" != "md-clip $PLIST_VERSION" ]; then

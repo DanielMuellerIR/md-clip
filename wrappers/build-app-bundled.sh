@@ -55,11 +55,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=verified-cache.sh
 source "$SCRIPT_DIR/verified-cache.sh"
+# shellcheck source=version.sh
+source "$SCRIPT_DIR/version.sh"
 
 # Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth,
 # identisch zu wrappers/sign-and-release.sh. Landet unten im Info.plist als
 # CFBundleShortVersionString/CFBundleVersion.
-APP_VERSION=$(awk -F'"' '/^VERSION=/{print $2; exit}' "$PROJECT_ROOT/bin/md-clip")
+APP_VERSION="$(md_clip_version "$PROJECT_ROOT/bin/md-clip" || true)"
 if [ -z "$APP_VERSION" ]; then
   echo "FEHLER: VERSION fehlt oder ist nicht in Anführungszeichen gesetzt: bin/md-clip." >&2
   exit 65

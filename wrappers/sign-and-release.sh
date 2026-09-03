@@ -21,6 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=notarization.sh
 source "$SCRIPT_DIR/notarization.sh"
+# shellcheck source=version.sh
+source "$SCRIPT_DIR/version.sh"
 
 # ---------- Konstanten ----------
 
@@ -60,7 +62,13 @@ APP_BUNDLE="$BUILD_DIR/md-clip.app"
 BACKGROUND_SRC="$PROJECT_ROOT/assets/dmg-background.png"
 
 # Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth.
-APP_VERSION=$(grep '^VERSION=' "$PROJECT_ROOT/bin/md-clip" | head -1 | cut -d'"' -f2)
+# Ohne die Prüfung hiesse das Release-Artefakt bei einer unlesbaren Zeile
+# `md-clip-.dmg` und würde genau so veröffentlicht.
+APP_VERSION="$(md_clip_version "$PROJECT_ROOT/bin/md-clip" || true)"
+if [ -z "$APP_VERSION" ]; then
+  echo "FEHLER: VERSION fehlt in bin/md-clip." >&2
+  exit 65
+fi
 DMG_PATH="$BUILD_DIR/md-clip-${APP_VERSION}.dmg"
 PENDING_DMG_PATH="$BUILD_DIR/.md-clip-${APP_VERSION}.pending.dmg"
 RW_DMG_PATH="$BUILD_DIR/md-clip-${APP_VERSION}-rw.dmg"
