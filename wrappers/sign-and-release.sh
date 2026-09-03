@@ -28,9 +28,10 @@ source "$SCRIPT_DIR/notarization.sh"
 # im notarytool-Profil im Schlüsselbund. Sie taucht nur noch als Platzhalter im
 # Einrichtungs-Hinweis weiter unten auf.
 
-# Team-ID/Identitaet ueberschreibbar (CI/anderer Account); Default als Fallback.
-TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
-IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
+# Team-ID und Identitaet kommen aus wrappers/notarization.sh — derselben Datei,
+# aus der auch install-app.sh sie holt. Ueber APPLE_TEAM_ID und
+# CODESIGN_IDENTITY bleiben sie ueberschreibbar (CI/anderer Account).
+resolve_signing_identity
 
 resolve_notary_profile "$PROJECT_ROOT" || exit $?
 

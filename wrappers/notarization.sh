@@ -6,6 +6,17 @@
 
 NOTARY_APP_ZIP_DIR=""
 
+# Developer-ID-Vorgaben für beide Einstiegspunkte. install-app.sh und
+# sign-and-release.sh signieren dasselbe Bundle und müssen deshalb dieselbe
+# Team-ID und dieselbe Identität benutzen; zweimal hingeschrieben signiert der
+# eine Weg irgendwann mit einem anderen Zertifikat als der andere. Über
+# APPLE_TEAM_ID und CODESIGN_IDENTITY bleibt beides für einen anderen Account
+# oder eine CI überschreibbar. Setzt TEAM_ID und IDENTITY.
+resolve_signing_identity() {
+  TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
+  IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
+}
+
 resolve_notary_profile() {
   local project_root="$1"
 

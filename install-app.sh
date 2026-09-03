@@ -52,14 +52,17 @@ trap 'cleanup_install; exit 143' TERM
 
 resolve_notary_profile "$PROJECT_ROOT" || exit $?
 
+# Team-ID und Identität kommen aus wrappers/notarization.sh — derselben Datei,
+# aus der auch der Release-Weg sie holt. Über APPLE_TEAM_ID und
+# CODESIGN_IDENTITY bleiben sie überschreibbar (CI/anderer Account).
+resolve_signing_identity
+
 # Fail-fast VOR dem Bauen: Ein unbrauchbares Profil erst nach dem Bauen zu
 # bemerken, kostet nur Zeit.
 #
 # Mit Wiederholungen, weil der Aufruf gelegentlich fälschlich „No Keychain
 # password item found" meldet, obwohl das Profil da ist (am 2026-07-26 belegt).
 # Ein wirklich fehlendes Profil scheitert auch nach fünf Versuchen.
-TEAM_ID="${APPLE_TEAM_ID:-9QSWKSR4NQ}"
-IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Daniel Mueller ($TEAM_ID)}"
 verify_notary_profile "$NOTARY_PROFILE" "$TEAM_ID" || exit 2
 require_signing_identity "$IDENTITY" || exit 1
 

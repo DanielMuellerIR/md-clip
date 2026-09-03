@@ -359,7 +359,31 @@ grep -Fq 'source wrappers/notarization.sh' "$PROJECT_ROOT/install-app.sh"
 grep -Fq 'source "$SCRIPT_DIR/notarization.sh"' "$RELEASE_SCRIPT"
 grep -Fq 'notarize_app_bundle "$APP" "$NOTARY_PROFILE"' "$PROJECT_ROOT/install-app.sh"
 grep -Fq 'notarize_app_bundle "$APP_BUNDLE" "$NOTARY_PROFILE"' "$RELEASE_SCRIPT"
-echo "✓ Installation und Release verwenden dieselbe Notarisierungslogik"
+
+# Auch die Developer-ID-Vorgabe darf nur einmal im Repo stehen: Zwei eigene
+# Fassungen würden bedeuten, dass Installation und Release dasselbe Bundle
+# irgendwann mit verschiedenen Zertifikaten signieren.
+for signing_script in "$PROJECT_ROOT/install-app.sh" "$RELEASE_SCRIPT"; do
+  if ! grep -Fq 'resolve_signing_identity' "$signing_script"; then
+    echo "✗ $signing_script holt die Developer-ID nicht aus notarization.sh" >&2
+    exit 1
+  fi
+  # Kommentarzeilen weg: Die Begründung im Skript darf die Namen nennen.
+  if grep -v '^[[:space:]]*#' "$signing_script" \
+    | grep -Eq 'TEAM_ID="\$\{APPLE_TEAM_ID|IDENTITY="\$\{CODESIGN_IDENTITY'; then
+    echo "✗ $signing_script hat eine eigene Developer-ID-Vorgabe" >&2
+    exit 1
+  fi
+done
+# Die Vorgabe selbst bleibt über die Umgebung überschreibbar.
+(
+  APPLE_TEAM_ID=ABCDE12345 CODESIGN_IDENTITY="" resolve_signing_identity
+  [ "$TEAM_ID" = "ABCDE12345" ]
+  [ "$IDENTITY" = "Developer ID Application: Daniel Mueller (ABCDE12345)" ]
+  CODESIGN_IDENTITY="Eigene Identitaet" resolve_signing_identity
+  [ "$IDENTITY" = "Eigene Identitaet" ]
+)
+echo "✓ Installation und Release verwenden dieselbe Notarisierungs- und Signaturvorgabe"
 
 # --- Release: die Plist-Vorlage muss wirklich eindeutige Pfade liefern. ---
 # Darwins mktemp ersetzt die X-Kette nur am ENDE der Vorlage. Stünde noch ein
