@@ -383,7 +383,9 @@ DESTINATION="$TEST_ROOT/cache/artifact"
 mkdir -p "$(dirname "$DESTINATION")"
 printf 'verifiziert\n' > "$GOOD_SOURCE"
 printf 'manipuliert\n' > "$BAD_SOURCE"
-GOOD_SHA=$(shasum -a 256 "$GOOD_SOURCE" | awk '{print $1}')
+# Dieselbe Hilfsfunktion wie das Produkt: sonst prüfte der Test mit einem
+# Werkzeug, das auf dem laufenden System gar nicht installiert sein muss.
+GOOD_SHA=$(sha256_of "$GOOD_SOURCE")
 
 cat > "$TEST_ROOT/fake-bin/curl" <<'SH'
 #!/bin/sh

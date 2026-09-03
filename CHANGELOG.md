@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.2.9 — 2026-09-03
+
+Fünf Fixes aus dem Code-Review vom 2026-09-03. Die ersten vier trafen den
+Standardweg und liefen dabei ohne Fehlermeldung durch.
+
+- **Eine Tabelle mit Zeilenumbruch in einer Zelle ging komplett verloren.**
+  Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Enthielt eine Zelle einen
+  `<br>`, zwei Absätze oder eine Liste, konnte pandoc sie dort nicht
+  unterbringen und schrieb statt der ganzen Tabelle den Text `[TABLE]` — mit
+  `--replace` stand danach genau dieses Wort im Clipboard. `<td>eins<br>zwei
+  </td>` reichte dafür schon, und das ist in Word-Tabellen und auf Webseiten
+  Alltag. `inline_table_cells` macht jetzt aus jeder Blockgrenze innerhalb einer
+  Zelle ein Leerzeichen: Der Text bleibt vollständig erhalten, nur die Struktur
+  *innerhalb* der Zelle geht verloren. Beim Ziel `markdown` bleibt alles wie es
+  war — dort trägt die Gittertabelle Absätze und Umbrüche.
+- **Beim Ziel `commonmark` verschwand jede Tabelle.** Strenges CommonMark kennt
+  keine Tabellensyntax; ohne die Erweiterung `pipe_tables` schrieb pandoc auch
+  für die einfachste Tabelle nur `[TABLE]`. Die Erweiterung ist jetzt an.
+- **Beim Ziel `markdown` rutschte Text in die Nachbarzelle.** pandoc schrieb
+  dort „simple"- und „multiline"-Tabellen, deren Zeilen mit dem Zellinhalt
+  beginnen. `tidy_markdown` erkennt eine Tabellenzeile am führenden `|`, hielt
+  diese Zeilen also für Fließtext und nahm den Backslash vor einem `|` weg. Weil
+  die Spalten dort an festen Zeichenpositionen stehen, wurde die Zeile ein
+  Zeichen kürzer und die Folgespalte rutschte hinein: Aus den Zellen `x|y` und
+  `ok` wurde `x|y o` und `k` (im AST belegt). `run_pandoc` schaltet diese beiden
+  Tabellenformen jetzt ab; die Gittertabelle bleibt für Zellen mit Absätzen, und
+  ihre Inhaltszeilen beginnen ebenfalls mit `|`.
+- **Auf einem schlanken Linux scheiterte jede Konvertierung.** Debian und Ubuntu
+  liefern als Pflichtpaket nur `perl-base`; das Modul `Encode` steckt erst im
+  vollen `perl`-Paket. `command -v perl` bestand deshalb, und danach brach jeder
+  Lauf mit „Can't locate Encode.pm in @INC" ab. Statt `Encode::decode` steht
+  dort jetzt das im Perl-Kern eingebaute `utf8::decode`, das dieselbe Auskunft
+  über ungültiges UTF-8 gibt. Aus demselben Grund ermittelt
+  `wrappers/verified-cache.sh` die Prüfsumme jetzt über `sha256_of`: `shasum`
+  gibt es auf macOS, auf einem schlanken Linux dagegen nur mit dem vollen
+  `perl`-Paket.
+- **Strg-C beendet die CLI wieder sofort.** `bin/md-clip` räumte bei INT und
+  TERM zwar seine Ausgabedatei weg, lief danach aber weiter — mit einer gerade
+  gelöschten Datei. Jetzt endet es mit 130 beziehungsweise 143, wie es die
+  übrigen Skripte des Projekts schon taten.
+
 ## 1.2.8 — 2026-08-28
 
 Fixes aus dem Code-Review vom 2026-08-28:

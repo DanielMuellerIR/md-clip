@@ -667,6 +667,137 @@ for target_format in gfm markdown commonmark; do
   fi
 done
 
+# --- Test 10f2: Tabellen überleben in jedem Zieldialekt (Review-Fund 2026-09-03) ---
+# Drei Befunde stecken in diesem einen Fall, alle drei mit Totalverlust oder
+# verschobenem Text:
+#
+#   1. gfm (Default) und commonmark schrieben statt der ganzen Tabelle den Text
+#      `[TABLE]`, sobald EINE Zelle einen `<br>` oder zwei Absätze enthielt.
+#      Mit --replace stand dieses Wort danach im Clipboard.
+#   2. commonmark kennt ohne die Erweiterung `pipe_tables` gar keine
+#      Tabellensyntax — dort war JEDE Tabelle `[TABLE]`.
+#   3. Das Ziel `markdown` schrieb „simple"-Tabellen, deren Zeilen mit dem
+#      Zellinhalt beginnen. tidy_markdown hielt sie für Fließtext und nahm den
+#      Backslash vor dem `|` weg; weil die Spalten dort über die
+#      Zeichenposition definiert sind, rutschte der Text der Folgespalte um ein
+#      Zeichen nach links.
+#
+# Geprüft wird über den Rückweg nach HTML: Er zeigt Zellgrenzen und Zellinhalt
+# zugleich und hängt nicht an der Spaltenbreite, die je nach pandoc-Version
+# anders ausfallen kann.
+table_source_html='<table><tr><th>Spalte</th><th>Wert</th></tr><tr><td>Pipe | und Raute #</td><td>ok</td></tr><tr><td>Erste Zeile<br>Zweite Zeile</td><td>zwei</td></tr><tr><td><p>Absatz eins</p><p>Absatz zwei</p></td><td>drei</td></tr></table>'
+for target_format in gfm markdown commonmark; do
+  TOTAL=$((TOTAL + 1))
+  # Strenges CommonMark kennt keine Tabellen; zum Zurücklesen braucht der Leser
+  # deshalb dieselbe Erweiterung, die pandoc_table_extensions beim Schreiben setzt.
+  if [ "$target_format" = commonmark ]; then
+    table_reader="commonmark+pipe_tables"
+  else
+    table_reader="$target_format"
+  fi
+
+  table_actual=$(printf '%s' "$table_source_html" | convert_html "$target_format")
+  table_roundtrip=$(
+    printf '%s\n' "$table_actual" | pandoc -f "$table_reader" -t html | tr -d '\n'
+  )
+
+  table_ok=1
+  # Keine Zeile darf pandocs Platzhalter für „nicht darstellbar" sein.
+  printf '%s\n' "$table_actual" | grep -Fq '[TABLE]' && table_ok=0
+  # Die Escapes der Tabellenzeile bleiben stehen, Pipe und Raute kommen
+  # ungekürzt in DERSELBEN Zelle wieder an.
+  printf '%s' "$table_roundtrip" | grep -Fq '<td>Pipe | und Raute #</td>' || table_ok=0
+  printf '%s' "$table_roundtrip" | grep -Fq '<td>ok</td>' || table_ok=0
+
+  if [ "$target_format" = markdown ]; then
+    # Gittertabellen können Absätze und Umbrüche in einer Zelle abbilden —
+    # dort bleibt der Zellinhalt vollständig erhalten.
+    printf '%s' "$table_roundtrip" | grep -Fq '<td>Erste Zeile<br />Zweite Zeile</td>' || table_ok=0
+    printf '%s' "$table_roundtrip" | grep -Fq '<td><p>Absatz eins</p><p>Absatz zwei</p></td>' || table_ok=0
+  else
+    # Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. inline_table_cells
+    # macht aus jeder Blockgrenze ein Leerzeichen — der Text bleibt vollständig.
+    printf '%s' "$table_roundtrip" | grep -Fq '<td>Erste Zeile Zweite Zeile</td>' || table_ok=0
+    printf '%s' "$table_roundtrip" | grep -Fq '<td>Absatz eins Absatz zwei</td>' || table_ok=0
+  fi
+
+  # Zweiter Fall, eigens für Befund 3: eine Tabelle aus kurzen, einzeiligen
+  # Zellen. Genau dafür schrieb das Ziel `markdown` früher eine „simple"-Tabelle
+  # ohne führendes `|`. Die Tabelle oben trifft den Fall nicht — ihre Zellen mit
+  # Absatz und Umbruch erzwingen schon eine Gittertabelle.
+  simple_table_actual=$(
+    printf '%s' '<table><tr><th>A</th><th>B</th></tr><tr><td>x|y</td><td>ok</td></tr></table>' \
+      | convert_html "$target_format"
+  )
+  simple_table_roundtrip=$(
+    printf '%s\n' "$simple_table_actual" | pandoc -f "$table_reader" -t html | tr -d '\n'
+  )
+  printf '%s' "$simple_table_roundtrip" | grep -Fq '<td>x|y</td><td>ok</td>' || table_ok=0
+
+  if [ "$table_ok" -eq 1 ]; then
+    echo "✓ $target_format-tabellenzellen (Zellgrenzen und Zellinhalt bleiben)"
+    PASSED=$((PASSED + 1))
+  else
+    echo "✗ $target_format-tabellenzellen"
+    printf '%s\n' "$table_actual" | sed 's/^/    /'
+    printf '%s\n' "$table_roundtrip" | sed 's/^/    HTML: /'
+    printf '%s\n' "$simple_table_actual" | sed 's/^/    kurz: /'
+    printf '%s\n' "$simple_table_roundtrip" | sed 's/^/    kurz-HTML: /'
+    FAILED=$((FAILED + 1))
+  fi
+done
+
+# --- Test 10f3: Die Pipeline kommt mit Perl-Bordmitteln aus (Review-Fund 2026-09-03) ---
+# Debian und Ubuntu liefern nur `perl-base` als Pflichtpaket aus; Module wie
+# Encode stecken erst im vollen `perl`-Paket. `command -v perl` bestand deshalb
+# auf einem schlanken System, und trotzdem brach jede Konvertierung mit
+# „Can't locate Encode.pm in @INC" ab. Im Ubuntu-24.04-Container belegt.
+#
+# Erste Probe, funktional: ein absichtlich kaputtes Encode.pm ganz vorn in
+# @INC. Wer das Modul wieder anfasst, merkt es hier sofort.
+perl_core_root="$TEST_RUNTIME/perl-core"
+mkdir -p "$perl_core_root"
+cat > "$perl_core_root/Encode.pm" <<'POISON'
+package Encode;
+die "Encode ist auf einem schlanken Linux nicht installiert";
+POISON
+
+TOTAL=$((TOTAL + 1))
+perl_core_ok=1
+perl_core_report=""
+perl_core_actual=$(
+  export PERL5LIB="$perl_core_root${PERL5LIB:+:$PERL5LIB}"
+  printf '%s' '<p>Text mit &nbsp; und Umlaut ä</p>' | convert_html gfm 2>&1
+) || perl_core_ok=0
+printf '%s' "$perl_core_actual" | grep -Fq 'Umlaut ä' || perl_core_ok=0
+if [ "$perl_core_ok" -eq 0 ]; then
+  perl_core_report="ohne Encode: $perl_core_actual"
+fi
+
+# Zweite Probe, als Vertrag: In den Perl-Schnipseln der Pipeline und der CLI
+# darf ausser strict und warnings kein Modul geladen werden. Das deckt auch
+# das nächste Modul ab, für das es hier kein eigenes kaputtes Encode.pm gibt.
+perl_module_uses=$(
+  grep -nE "^[[:space:]]*(use|require)[[:space:]]+[A-Z]" \
+    "$PROJECT_ROOT/lib/pipeline.sh" "$PROJECT_ROOT/bin/md-clip" \
+    | grep -vE "(use|require)[[:space:]]+(strict|warnings)\b" || true
+)
+if [ -n "$perl_module_uses" ]; then
+  perl_core_ok=0
+  perl_core_report="$perl_core_report
+Modul ausserhalb von perl-base geladen:
+$perl_module_uses"
+fi
+
+if [ "$perl_core_ok" -eq 1 ]; then
+  echo "✓ perl-bordmittel (Pipeline laeuft ohne Encode und ohne Zusatzmodule)"
+  PASSED=$((PASSED + 1))
+else
+  echo "✗ perl-bordmittel"
+  printf '%s\n' "$perl_core_report" | sed 's/^/    /'
+  FAILED=$((FAILED + 1))
+fi
+
 # --- Test 10g: unsichtbarer Inhalt gilt als leer ---
 # `require_nonempty_markdown` muss Exit 1 liefern, damit der Auto-Pfad auf den
 # vorhandenen Plain-Text zurueckfaellt und --replace das Clipboard nicht durch

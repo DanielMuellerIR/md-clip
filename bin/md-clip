@@ -110,7 +110,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.2.8"
+VERSION="1.2.9"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -686,7 +686,14 @@ OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/md-clip-output.XXXXXX")
 cleanup_output() {
   rm -f "$OUTPUT_FILE"
 }
-trap cleanup_output EXIT INT TERM
+# Bei Strg-C oder `kill` reicht Aufräumen nicht: Ohne eigenes `exit` läuft das
+# Skript hinter dem Trap einfach weiter — dann arbeitete es mit einer gerade
+# gelöschten Ausgabedatei weiter. 130/143 sind die üblichen Codes für Abbruch
+# per INT beziehungsweise TERM (128 + Signalnummer); dieselbe Schreibweise
+# benutzen install-app.sh, wrappers/sign-and-release.sh und tests/run-tests.sh.
+trap cleanup_output EXIT
+trap 'cleanup_output; exit 130' INT
+trap 'cleanup_output; exit 143' TERM
 
 # Lief eine Konvertierung (HTML/RTF) oder wurde nur Plain-Text durchgereicht?
 # Die beiden Fälle haben unterschiedliche Regeln für das Schluss-Newline:

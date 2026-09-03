@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 # Kleine, sourcebare Helfer für verifizierte Release-Artefakte.
 
+# SHA-256 einer Datei, als reine Hex-Kette.
+#
+# Zwei Werkzeuge, weil keines auf beiden Systemen sicher da ist: macOS bringt
+# `shasum` mit, aber kein `sha256sum`. Auf Debian und Ubuntu ist es umgekehrt —
+# dort steckt `shasum` im vollen `perl`-Paket, das auf einem schlanken System
+# (Container, Server) fehlt, während `sha256sum` aus den coreutils immer da ist.
+sha256_of() {
+  local path="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+  else
+    sha256sum "$path" | awk '{print $1}'
+  fi
+}
+
 sha256_matches() {
   local path="$1"
   local expected="$2"
-  [ -f "$path" ] && [ "$(shasum -a 256 "$path" | awk '{print $1}')" = "$expected" ]
+  [ -f "$path" ] && [ "$(sha256_of "$path")" = "$expected" ]
 }
 
 download_verified() {

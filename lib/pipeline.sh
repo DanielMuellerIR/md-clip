@@ -184,6 +184,53 @@ unwrap_list_paragraphs() {
   '
 }
 
+# inline_table_cells: Macht aus dem Inhalt einer Tabellenzelle reinen Fließtext.
+#
+# Warum das nötig ist: Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Enthält
+# eine Zelle einen Zeilenumbruch (`<br>`), zwei Absätze oder eine Liste, kann
+# pandoc sie dort nicht unterbringen — und weil `raw_html` bewusst abgeschaltet
+# ist, schreibt es statt der ganzen Tabelle den Text `[TABLE]`. Die Tabelle war
+# damit restlos weg, und mit `--replace` stand genau dieses Wort im Clipboard
+# (Review-Fund 2026-09-03; `<td>eins<br>zwei</td>` reicht dafür schon aus).
+#
+# Statt alles zu verlieren, geben wir die Struktur INNERHALB der Zelle auf: Jede
+# Blockgrenze und jeder `<br>` wird zu einem Leerzeichen, der Text bleibt
+# vollständig und in seiner Reihenfolge erhalten. Bewusst ein Leerzeichen und
+# kein erfundenes Trennzeichen wie „; " — das stünde nachher im Text, ohne je im
+# Original gestanden zu haben.
+#
+# Beim Ziel `markdown` passiert nichts: Dort schreibt pandoc solche Zellen als
+# Gittertabelle, in der Absätze und Umbrüche vollständig erhalten bleiben.
+#
+# Eine Zelle mit einer verschachtelten Tabelle bleibt unangetastet — sie flach
+# zu ziehen würde die innere Tabelle zerreißen, und der äußere Fall ist selten.
+inline_table_cells() {
+  local target_format="${1:-gfm}"
+  if [ "$target_format" = "markdown" ]; then
+    cat
+    return 0
+  fi
+
+  perl -0pe '
+    s{(<(t[dh])\b[^>]*>)(.*?)(</\2\s*>)}{
+      my ($open, $inner, $close) = ($1, $3, $4);
+      if ($inner =~ /<table\b/i) {
+        $open . $inner . $close;
+      } else {
+        # Erst die Grenzen zu Leerzeichen machen, dann die Blocktags entfernen.
+        # Umgekehrt klebten „a</p><p>b" zu „ab" zusammen.
+        $inner =~ s{<br\s*/?>}{ }gi;
+        $inner =~ s{</(?:p|div|li|h[1-6]|blockquote|pre)\s*>}{ }gi;
+        $inner =~ s{</?(?:p|div|ul|ol|li|h[1-6]|blockquote|pre)\b[^>]*>}{}gi;
+        $inner =~ s{\s+}{ }g;
+        $inner =~ s{^\s+}{};
+        $inner =~ s{\s+$}{};
+        $open . $inner . $close;
+      }
+    }gise
+  '
+}
+
 # tidy_markdown: Räumt pandocs Markdown-Ausgabe auf. Das ist die einzige
 # Stelle, an der wir das fertige Markdown noch anfassen.
 #
@@ -714,9 +761,40 @@ pandoc_supports_sandbox() {
 # benutzen; ein zweiter, getrennt gesetzter Zustand darf es nicht geben.
 # Deshalb ist das hier eine Funktion und keine zweimal hingeschriebene
 # Optionsliste: Wer die Optionen ändert, ändert sie für beide Wege zugleich.
+
+# Tabellen-Erweiterungen je Zielformat. Sie sorgen dafür, dass eine Tabelle in
+# JEDEM Ziel als Pipe- oder Gittertabelle herauskommt — also mit `|` am Anfang
+# jeder Inhaltszeile. Genau daran erkennt tidy_markdown eine Tabellenzeile und
+# lässt deren Escapes stehen. Ohne diese Angleichung:
+#
+#   markdown    schrieb „simple"- und „multiline"-Tabellen, deren Zeilen mit
+#               dem Zellinhalt beginnen. tidy_markdown hielt sie für Fließtext,
+#               nahm das `\` vor einem `|` weg, und weil die Spalten dort über
+#               die Zeichenposition definiert sind, rutschte der Text der
+#               nächsten Spalte um ein Zeichen nach links: aus den Zellen
+#               `x|y` und `ok` wurde `x|y o` und `k` (im AST belegt,
+#               Review-Fund 2026-09-03).
+#   commonmark  kennt ohne `pipe_tables` gar keine Tabellensyntax. Weil
+#               `raw_html` bewusst abgeschaltet ist, schrieb pandoc statt der
+#               Tabelle den Text `[TABLE]` — die Tabelle war komplett weg.
+pandoc_table_extensions() {
+  case "${1:-gfm}" in
+    # Gittertabellen bleiben an: Nur sie können eine Zelle mit mehreren
+    # Absätzen oder einem Zeilenumbruch abbilden, und ihre Inhaltszeilen
+    # beginnen ebenfalls mit `|`.
+    markdown)   printf '%s' '-simple_tables-multiline_tables' ;;
+    commonmark) printf '%s' '+pipe_tables' ;;
+    *)          printf '%s' '' ;;
+  esac
+}
+
 run_pandoc() {
   local target_format="${1:-gfm}"
-  pandoc -f html -t "${target_format}-raw_html" --wrap=none --sandbox
+  local table_extensions
+  table_extensions="$(pandoc_table_extensions "$target_format")"
+  pandoc -f html \
+    -t "${target_format}-raw_html${table_extensions}" \
+    --wrap=none --sandbox
 }
 
 # Pandoc schreibt auch für HTML ohne darstellbaren Inhalt ein Schluss-LF.
@@ -731,12 +809,20 @@ require_nonempty_markdown() {
   # Unsichtbares. Deshalb wird der Text zum Prüfen als UTF-8 dekodiert und
   # gegen die Unicode-Eigenschaft White_Space geprüft; ausgegeben werden
   # weiterhin exakt die eingelesenen Bytes.
+  #
+  # `utf8::decode` statt `Encode::decode`: Debian und Ubuntu liefern das Modul
+  # Encode NICHT im Paket `perl-base` aus, sondern erst mit dem vollen
+  # `perl`-Paket. Auf einem schlanken System (Container, Server) besteht
+  # `command -v perl` deshalb, und trotzdem brach danach JEDE Konvertierung mit
+  # „Can't locate Encode.pm" ab (im Ubuntu-24.04-Container belegt, Review-Fund
+  # 2026-09-03). `utf8::decode` ist dagegen im Perl-Kern eingebaut, dekodiert
+  # in-place und liefert wie das frühere FB_CROAK genau dann falsch, wenn die
+  # Bytes kein gültiges UTF-8 sind.
   perl -0e '
-    use Encode ();
     my $text = do { local $/; <STDIN> };
     print $text;
-    my $decoded = eval { Encode::decode("UTF-8", $text, Encode::FB_CROAK()) };
-    $decoded = $text unless defined $decoded;   # kein gültiges UTF-8
+    my $decoded = $text;
+    $decoded = $text unless utf8::decode($decoded);   # kein gültiges UTF-8
     # Neben Unicode-Whitespace zählen auch die breitenlosen und
     # Steuerzeichen als unsichtbar. Statt einer handgepflegten Liste
     # (früher nur U+200B..U+200D, U+2060, U+FEFF) steht hier die
@@ -760,6 +846,7 @@ convert_html() {
     | preprocess_google_classroom \
     | clean_html \
     | fill_empty_html_links \
+    | inline_table_cells "$target_format" \
     | run_pandoc "$target_format" \
     | tidy_markdown "$target_format" \
     | require_nonempty_markdown
@@ -768,13 +855,14 @@ convert_html() {
 convert_rtf() {
   local target_format="${1:-gfm}"
   if declare -F vlog >/dev/null 2>&1; then
-    vlog "Pfad: RTF → HTML → flatten → pandoc → tidy"
+    vlog "Pfad: RTF → HTML → flatten → inline-Zellen → pandoc → tidy"
   fi
   rtf_to_html \
     | flatten_layout_tables \
     | unwrap_list_paragraphs \
     | clean_html \
     | fill_empty_html_links \
+    | inline_table_cells "$target_format" \
     | run_pandoc "$target_format" \
     | tidy_markdown "$target_format" \
     | require_nonempty_markdown

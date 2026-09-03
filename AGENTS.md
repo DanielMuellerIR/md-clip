@@ -42,6 +42,41 @@
   sonst bliebe im Fließtext dahinter ein sichtbares `\#` stehen. Beide Regeln
   stammen aus dem Review vom 2026-08-05 und sind in
   `tests/fixtures/escaped-markers.*` festgehalten.
+- **Eine Tabellenzeile beginnt nur deshalb immer mit `|`, weil `run_pandoc` es
+  erzwingt.** `pandoc_table_extensions` in `lib/pipeline.sh` schaltet dafür beim
+  Ziel `markdown` die „simple"- und „multiline"-Tabellen ab (die Gittertabelle
+  bleibt, ihre Inhaltszeilen beginnen ebenfalls mit `|`) und beim Ziel
+  `commonmark` die Erweiterung `pipe_tables` an. Wer diese Zeilen entfernt,
+  hebelt den Tabellenschutz von `tidy_markdown` aus: In einer „simple"-Tabelle
+  stehen die Spalten an festen Zeichenpositionen, ein entfernter Backslash macht
+  die Zeile ein Zeichen kürzer, und der Text der Folgespalte rutscht in die
+  Nachbarzelle — aus `x|y` und `ok` wurde `x|y o` und `k` (Review-Fund
+  2026-09-03). Ohne `pipe_tables` schreibt pandoc beim Ziel `commonmark` gar
+  keine Tabelle, sondern den Text `[TABLE]`.
+- **Eine Tabellenzelle muss vor pandoc Inline-Inhalt sein — außer beim Ziel
+  `markdown`.** Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Enthält eine
+  Zelle einen `<br>`, zwei Absätze oder eine Liste, kann pandoc sie dort nicht
+  unterbringen und schreibt statt der **ganzen** Tabelle den Text `[TABLE]` —
+  mit `--replace` stand danach genau dieses Wort im Clipboard. `<td>eins<br>zwei
+  </td>` reichte dafür schon (Review-Fund 2026-09-03). `inline_table_cells`
+  macht deshalb aus jeder Blockgrenze innerhalb einer Zelle ein Leerzeichen: Der
+  Text bleibt vollständig, nur die Struktur *innerhalb* der Zelle geht verloren.
+  Bewusst ein Leerzeichen und kein erfundenes Trennzeichen wie „; ". Beim Ziel
+  `markdown` passiert nichts — dort trägt die Gittertabelle Absätze und
+  Umbrüche. Festgehalten in Test 10f2 von `tests/run-tests.sh`.
+- **Die Perl-Schnipsel benutzen nur Kernbordmittel — kein `use <Modul>`.**
+  Debian und Ubuntu liefern als Pflichtpaket nur `perl-base` aus; Module wie
+  `Encode` stecken erst im vollen `perl`-Paket. `command -v perl` bestand auf
+  einem schlanken System deshalb, und trotzdem brach jede Konvertierung mit
+  „Can't locate Encode.pm in @INC" ab (Review-Fund 2026-09-03, im
+  Ubuntu-24.04-Container belegt; die CI merkt es nicht, weil der GitHub-Runner
+  das volle `perl`-Paket hat). Statt `Encode::decode` steht dort jetzt das
+  eingebaute `utf8::decode`. Test 10f3 prüft beides: einen Lauf mit einem
+  absichtlich kaputten `Encode.pm` ganz vorn in `@INC` und den Vertrag, dass
+  außer `strict` und `warnings` kein Modul geladen wird. Aus demselben Grund
+  ermittelt `wrappers/verified-cache.sh` die Prüfsumme über `sha256_of`:
+  `shasum` gibt es auf macOS, aber auf einem schlanken Linux nur mit dem vollen
+  `perl`-Paket; `sha256sum` ist dort umgekehrt immer da.
 - **Zeilenumbruch im Absatz = zwei Leerzeichen, kein `\`.** pandoc schreibt
   Hard-Breaks als sichtbaren Backslash; `tidy_markdown` ersetzt ihn. Umbrüche,
   die nur Layout waren (vor Leerzeile, vor Listenpunkt, am Dokumentende),
