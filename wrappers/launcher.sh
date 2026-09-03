@@ -102,6 +102,23 @@ decide_cli_action() {
   echo "install-ok"
 }
 
+# Zeigt eine Fehlermeldung als Dialog. md-clip.app ist eine LSUIElement-App:
+# kein Fenster, kein Dock-Symbol, und ihr stderr sieht beim Dock-Klick niemand.
+# Ohne Dialog bliebe ein Fehler für den Nutzer schlicht unsichtbar.
+#
+# Der Text kommt über die Umgebung und nicht als Zeichenkette in die
+# AppleScript-Quelle: So kann er weder Anführungszeichen ausbrechen noch
+# eigenen Code einschleusen. `|| true`, weil eine gescheiterte Meldung nichts
+# schlimmer machen darf als den Fehler, den sie melden wollte.
+show_error_dialog() {
+  MD_CLIP_DIALOG_TEXT="$1" osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+tell application "System Events"
+  activate
+  display dialog (system attribute "MD_CLIP_DIALOG_TEXT") buttons {"OK"} default button "OK" with title "md-clip" with icon caution
+end tell
+APPLESCRIPT
+}
+
 # Erstellt /usr/local/bin/md-clip als Symlink ins Bundle. Die Pfade werden
 # als Umgebungsvariablen an AppleScript übergeben und dort mit `quoted form
 # of` für die Shell maskiert. Dadurch bleibt auch ein App-Pfad mit Apostroph
@@ -134,12 +151,7 @@ APPLESCRIPT
     return 0
   fi
 
-  osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
-tell application "System Events"
-  activate
-  display dialog "Der Kommandozeilen-Befehl konnte nicht in /usr/local/bin eingerichtet werden. Die Clipboard-Konvertierung läuft trotzdem weiter." buttons {"OK"} default button "OK" with title "md-clip" with icon caution
-end tell
-APPLESCRIPT
+  show_error_dialog "Der Kommandozeilen-Befehl konnte nicht in /usr/local/bin eingerichtet werden. Die Clipboard-Konvertierung läuft trotzdem weiter."
   return 1
 }
 
@@ -231,6 +243,17 @@ launcher_main() {
       : # nichts tun
       ;;
   esac
+
+  # Fehlt die eingebettete CLI, ist das Bundle beschädigt. Ohne diese Prüfung
+  # gäbe es überhaupt keine Rückmeldung: bash schriebe „No such file or
+  # directory" nach stderr, und das sieht beim Dock-Klick niemand — der Klick
+  # sähe für den Nutzer aus, als täte die App gar nichts. Exit 2 wie bei einer
+  # fehlenden Abhängigkeit in bin/md-clip. Die Update-Suche darunter bleibt
+  # aus: Bei einem kaputten Bundle ist die Meldung das Einzige, was zählt.
+  if [ ! -x "$BUNDLE_CLI" ]; then
+    show_error_dialog "md-clip ist unvollständig: Der eingebettete Befehl fehlt oder ist nicht ausführbar. Bitte die App neu installieren."
+    return 2
+  fi
 
   # Jetzt der eigentliche md-clip-Lauf. --replace ersetzt das Clipboard,
   # --notify zeigt eine macOS-Benachrichtigung bei Erfolg.

@@ -40,13 +40,16 @@ MD_CLIP_HOST_PATH="$PATH"
 mkdir -p "$TEST_ROOT/fake-bin" "$TEST_ROOT/capture"
 cat > "$TEST_ROOT/fake-bin/osascript" <<'SH'
 #!/bin/sh
-if [ "${MD_CLIP_OSASCRIPT_FAIL_INSTALL:-0}" = "1" ]; then
-  if [ -n "${BUNDLE_CLI:-}" ]; then
-    cat > "$MD_CLIP_CAPTURE/source"
-    exit 7
-  fi
+# Der Meldungsdialog ist am gesetzten MD_CLIP_DIALOG_TEXT erkennbar: Nur
+# show_error_dialog reicht Text über die Umgebung weiter.
+if [ -n "${MD_CLIP_DIALOG_TEXT:-}" ]; then
+  printf '%s' "$MD_CLIP_DIALOG_TEXT" > "$MD_CLIP_CAPTURE/error-text"
   cat > "$MD_CLIP_CAPTURE/error-source"
   exit 0
+fi
+if [ "${MD_CLIP_OSASCRIPT_FAIL_INSTALL:-0}" = "1" ]; then
+  cat > "$MD_CLIP_CAPTURE/source"
+  exit 7
 fi
 printf '%s' "$BUNDLE_CLI" > "$MD_CLIP_CAPTURE/bundle"
 printf '%s' "$SYSTEM_CLI" > "$MD_CLIP_CAPTURE/system"
@@ -77,8 +80,15 @@ if install_cli; then
   echo "✗ Launcher meldet eine fehlgeschlagene CLI-Installation als Erfolg" >&2
   exit 1
 fi
-grep -Fq 'display dialog "Der Kommandozeilen-Befehl konnte nicht' \
-  "$TEST_ROOT/capture/error-source"
+grep -Fq 'Der Kommandozeilen-Befehl konnte nicht' "$TEST_ROOT/capture/error-text"
+# Wie beim privilegierten Befehl gilt auch hier: Der Text darf nur als Daten
+# ankommen. Stünde er im AppleScript-Quelltext, könnte ein Anführungszeichen
+# darin den Parser verlassen.
+grep -Fq 'system attribute "MD_CLIP_DIALOG_TEXT"' "$TEST_ROOT/capture/error-source"
+if grep -Fq 'Der Kommandozeilen-Befehl konnte nicht' "$TEST_ROOT/capture/error-source"; then
+  echo "✗ Launcher interpoliert den Meldungstext in AppleScript-Quelltext" >&2
+  exit 1
+fi
 unset MD_CLIP_OSASCRIPT_FAIL_INSTALL
 echo "✓ Launcher zeigt einen Fehler der privilegierten CLI-Installation an"
 
@@ -506,6 +516,34 @@ grep -Fxq -- '--replace' "$UPDATE_ROOT/capture/cli-args"
 grep -Fxq 'cli-zuerst' "$UPDATE_ROOT/capture/order"
 echo "✓ Launcher konvertiert zuerst und reicht den CLI-Exit-Status durch"
 
+# Fehlt die eingebettete CLI, muss der Nutzer das erfahren. Die App hat kein
+# Fenster; ohne Dialog sähe der Dock-Klick aus, als täte sie nichts.
+DIALOG_CAPTURE="$UPDATE_ROOT/capture/dialog"
+show_error_dialog() {
+  printf '%s\n' "$1" > "$DIALOG_CAPTURE"
+}
+rm -f "$UPDATE_ROOT/capture/args" "$UPDATE_ROOT/capture/cli-args" "$DIALOG_CAPTURE"
+BUNDLE_CLI="$UPDATE_ROOT/gibt-es-nicht"
+set +e
+launcher_main
+MISSING_CLI_STATUS=$?
+set -e
+if [ "$MISSING_CLI_STATUS" -ne 2 ]; then
+  echo "✗ Launcher meldet eine fehlende CLI nicht mit Exit 2 (war $MISSING_CLI_STATUS)" >&2
+  exit 1
+fi
+if [ ! -f "$DIALOG_CAPTURE" ]; then
+  echo "✗ Launcher zeigt bei fehlender CLI keinen Dialog" >&2
+  exit 1
+fi
+grep -Fq 'md-clip ist unvollständig' "$DIALOG_CAPTURE"
+if [ -e "$UPDATE_ROOT/capture/args" ]; then
+  echo "✗ Launcher startet bei kaputtem Bundle trotzdem die Update-Suche" >&2
+  exit 1
+fi
+echo "✓ Launcher meldet ein Bundle ohne eingebettete CLI sichtbar"
+unset -f show_error_dialog
+
 # --- Updater: genau ein eindeutiger Modus. ---
 # Der Testmodus schließt AppKit und Sparkle beim Kompilieren aus, führt aber
 # denselben Swift-Parser aus wie das Bundle-Programm. Damit sind nicht nur die
@@ -562,6 +600,37 @@ assert_updater_mode_rejected widersprüchliche-modi --background --interactive
 assert_updater_mode_rejected unbekannten-modus --unbekannt
 assert_updater_mode_rejected zusätzliches-argument --background --unbekannt
 echo "✓ Updater akzeptiert genau einen bekannten Modus"
+
+# --- HUD: genau ein nicht leerer Meldungstext. ---
+# Der zweite Cocoa-Helfer im Bundle hatte bisher keinen Vertragstest, obwohl
+# bin/md-clip ihn bei jedem Erfolg und jedem Fehler aufruft. Geprüft werden nur
+# die Ablehnungen: Sie enden mit Exit 64, bevor der Helfer AppKit anfasst.
+# Der Erfolgsfall bliebe zwei Sekunden als Fenster stehen und hat in einem
+# automatischen Lauf nichts zu suchen.
+HUD_BINARY="$TEST_ROOT/md-clip-hud-contract-test"
+PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" "$PROJECT_ROOT/helpers/md-clip-hud.swift" -o "$HUD_BINARY"
+
+assert_hud_rejected() {
+  local label="$1"
+  shift
+  local stderr="$TEST_ROOT/hud-$label.err"
+  local status
+
+  set +e
+  "$HUD_BINARY" "$@" >/dev/null 2> "$stderr"
+  status=$?
+  set -e
+  if [ "$status" -ne 64 ]; then
+    echo "✗ HUD akzeptiert $label oder meldet falschen Exit $status" >&2
+    exit 1
+  fi
+  grep -Fq 'Aufruf: md-clip-hud <Meldungstext>' "$stderr"
+}
+
+assert_hud_rejected fehlenden-text
+assert_hud_rejected leeren-text ""
+assert_hud_rejected zwei-texte "eins" "zwei"
+echo "✓ HUD verlangt genau einen nicht leeren Meldungstext"
 fi   # Ende des swiftc-Blocks
 
 grep -Fq 'private let maximumDialogLifetime: TimeInterval = 30 * 60' "$UPDATER_MODE_SOURCE"
