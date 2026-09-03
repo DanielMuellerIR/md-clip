@@ -4,7 +4,7 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 2026-08-28)
+## Status (Stand: 2026-09-03)
 
 - Verbindlich für die Version sind zwei Quellen, nicht dieses Dokument:
   `bin/md-clip --version` nennt die Produktversion im Quellcode,
