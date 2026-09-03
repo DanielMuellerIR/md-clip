@@ -180,14 +180,17 @@ jobs:
           fi
 
           # Tag, DMG-Name und Produktquelle muessen dieselbe Version meinen.
-          # Die Datei aus dem Tag wird nur gelesen, nie gesourct oder gestartet;
-          # gesourct wird allein die gepinnte Tooling-Revision. md_clip_version
-          # ist dieselbe Grammatik, die auch Build und Bundle-Pruefung benutzen —
-          # frueher stand hier eine dritte Schreibweise ohne `head`, die bei zwei
-          # VERSION-Zeilen etwas anderes gelesen haette als der Build.
-          source tooling/wrappers/version.sh
+          # Die Datei aus dem Tag wird nur gelesen, nie gesourct oder gestartet.
+          #
+          # Bewusst dieselbe awk-Grammatik wie md_clip_version in
+          # wrappers/version.sh, aber ausgeschrieben: Die Funktion kaeme aus der
+          # fest gepinnten Tooling-Revision, und ein Pin ist aelter als jede neue
+          # Datei darin — ein `source tooling/wrappers/version.sh` scheiterte hier
+          # mit "No such file or directory" (belegt 2026-09-03). Der Pin bleibt
+          # unangetastet; dafuer haelt tests/test-wrapper-safety.sh fest, dass
+          # hier genau dieselbe Grammatik steht.
           version="${RELEASE_TAG#v}"
-          product_version="$(md_clip_version release-source/bin/md-clip)"
+          product_version="$(awk -F'"' '/^VERSION=/{print $2; exit}' release-source/bin/md-clip)"
           if [[ "$product_version" != "$version" ]]; then
             echo "FEHLER: bin/md-clip meldet $product_version, das Tag sagt $version." >&2
             exit 1
@@ -239,11 +242,10 @@ jobs:
             exit 1
           fi
 
-          # Jeder Schritt ist eine eigene Shell — die Funktion muss hier erneut
-          # geladen werden.
-          source tooling/wrappers/version.sh
+          # Dieselbe Grammatik wie im Schritt "Download release data"; die
+          # Begruendung, warum hier nicht die Funktion steht, ist dort notiert.
           version="${RELEASE_TAG#v}"
-          product_version="$(md_clip_version release-source/bin/md-clip)"
+          product_version="$(awk -F'"' '/^VERSION=/{print $2; exit}' release-source/bin/md-clip)"
           expected_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/md-clip-${version}.dmg"
 
           # BEGIN APPCAST_GENERATOR_RUNNER

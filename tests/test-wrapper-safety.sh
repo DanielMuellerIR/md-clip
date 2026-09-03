@@ -440,6 +440,11 @@ if [ "$PLIST_ONE" = "$PLIST_TWO" ]; then
 fi
 echo "✓ Release-Skript bekommt fuer jede Plist einen eindeutigen Pfad"
 
+# Pfad des privilegierten Workflows. Steht hier, weil ihn schon der
+# Versionsvertrag unten braucht — weiter unten benutzen ihn die
+# Appcast-Prüfungen weiter.
+APPCAST_WORKFLOW="$PROJECT_ROOT/.github/workflows/publish-appcast.yml"
+
 # --- Version: eine Grammatik für alle sechs Leser. ---
 # bin/md-clip trägt die Produktversion; gelesen wird sie in build.sh,
 # build-app-bundled.sh, verify-bundle.sh, install-app.sh, sign-and-release.sh
@@ -479,10 +484,11 @@ assert_version_unreadable() {
 assert_version_unreadable "eine Datei ohne VERSION-Zeile" 'nur Text\n'
 assert_version_unreadable "einen leeren Wert" 'VERSION=""\n'
 
-# Keine eigene Grammatik mehr neben der Funktion.
+# Die fünf Shell-Einstiegspunkte benutzen die Funktion und haben keine eigene
+# Grammatik mehr.
 for version_reader in "$PROJECT_ROOT/build.sh" "$PROJECT_ROOT/install-app.sh" \
   "$PROJECT_ROOT/wrappers/build-app-bundled.sh" "$PROJECT_ROOT/wrappers/verify-bundle.sh" \
-  "$PROJECT_ROOT/wrappers/sign-and-release.sh" "$PROJECT_ROOT/.github/workflows/publish-appcast.yml"; do
+  "$PROJECT_ROOT/wrappers/sign-and-release.sh"; do
   if ! grep -Fq 'md_clip_version' "$version_reader"; then
     echo "✗ $version_reader liest die Version nicht über md_clip_version" >&2
     exit 1
@@ -493,6 +499,31 @@ for version_reader in "$PROJECT_ROOT/build.sh" "$PROJECT_ROOT/install-app.sh" \
     exit 1
   fi
 done
+
+# Der Appcast-Workflow kann die Funktion NICHT sourcen: Sie käme aus der fest
+# gepinnten Tooling-Revision, und ein Pin ist älter als jede neu dort angelegte
+# Datei. Genau das ließ den Lauf am 2026-09-03 mit „No such file or directory"
+# scheitern. Er schreibt die Grammatik deshalb aus — zeichengleich zur Funktion,
+# damit beide Seiten nicht auseinanderlaufen.
+WORKFLOW_VERSION_READ="awk -F'\"' '/^VERSION=/{print \$2; exit}' release-source/bin/md-clip"
+if [ "$(grep -Fc -- "$WORKFLOW_VERSION_READ" "$APPCAST_WORKFLOW")" -ne 2 ]; then
+  echo "✗ Der Appcast-Workflow liest die Version nicht zweimal mit der Grammatik von md_clip_version" >&2
+  exit 1
+fi
+grep -Fq "awk -F'\"' '/^VERSION=/{print \$2; exit}'" "$PROJECT_ROOT/wrappers/version.sh"
+
+# Und er darf nur Tooling-Dateien sourcen, die es an der gepinnten Revision
+# schon gibt. Eine neue Datei dort verlangt zuerst einen geprüften neuen Pin.
+ALLOWED_TOOLING_SOURCE="source tooling/wrappers/verified-cache.sh"
+# Nur echte Aufrufe am Zeilenanfang zaehlen; die Begruendung im Workflow nennt
+# den gescheiterten Aufruf beim Namen und ist selbst kein Aufruf.
+UNEXPECTED_SOURCE=$(grep -nE '^[[:space:]]*source tooling/' "$APPCAST_WORKFLOW" \
+  | grep -Fv "$ALLOWED_TOOLING_SOURCE" || true)
+if [ -n "$UNEXPECTED_SOURCE" ]; then
+  echo "✗ Der Appcast-Workflow sourct Tooling, das die gepinnte Revision nicht sicher enthält:" >&2
+  printf '%s\n' "$UNEXPECTED_SOURCE" >&2
+  exit 1
+fi
 echo "✓ Alle sechs Leser der Produktversion benutzen dieselbe Grammatik"
 
 # --- Cache: manipulierte Downloads werden verworfen, gültige atomar gesetzt. ---
@@ -609,7 +640,21 @@ DIALOG_CAPTURE="$UPDATE_ROOT/capture/dialog"
 show_error_dialog() {
   printf '%s\n' "$1" > "$DIALOG_CAPTURE"
 }
-rm -f "$UPDATE_ROOT/capture/args" "$UPDATE_ROOT/capture/cli-args" "$DIALOG_CAPTURE"
+# Erst abwarten, bis die Updater-Attrappe des vorigen Falls fertig ist. Sie
+# laeuft im Hintergrund und schreibt `args` sofort, `done` nach zwei Sekunden.
+# Wer hier zu frueh loescht, bekommt ihr `args` NACH dem Loeschen zurueck — die
+# Pruefung unten hielte das faelschlich fuer eine neu angestossene Update-Suche
+# (in dieser Form einmal rot gelaufen, 2026-09-03).
+for _ in $(seq 1 50); do
+  [ -f "$UPDATE_ROOT/capture/done" ] && break
+  sleep 0.2
+done
+if [ ! -f "$UPDATE_ROOT/capture/done" ]; then
+  echo "✗ Updater-Attrappe des vorigen Falls wurde nicht fertig" >&2
+  exit 1
+fi
+rm -f "$UPDATE_ROOT/capture/args" "$UPDATE_ROOT/capture/done" \
+  "$UPDATE_ROOT/capture/cli-args" "$DIALOG_CAPTURE"
 BUNDLE_CLI="$UPDATE_ROOT/gibt-es-nicht"
 set +e
 launcher_main
@@ -688,12 +733,20 @@ assert_updater_mode_rejected unbekannten-modus --unbekannt
 assert_updater_mode_rejected zusätzliches-argument --background --unbekannt
 echo "✓ Updater akzeptiert genau einen bekannten Modus"
 
+fi   # Ende des swiftc-Blocks
+
 # --- HUD: genau ein nicht leerer Meldungstext. ---
 # Der zweite Cocoa-Helfer im Bundle hatte bisher keinen Vertragstest, obwohl
 # bin/md-clip ihn bei jedem Erfolg und jedem Fehler aufruft. Geprüft werden nur
 # die Ablehnungen: Sie enden mit Exit 64, bevor der Helfer AppKit anfasst.
 # Der Erfolgsfall bliebe zwei Sekunden als Fenster stehen und hat in einem
 # automatischen Lauf nichts zu suchen.
+#
+# Anders als der Updater hat das HUD KEINEN modulfreien Testmodus: Es importiert
+# AppKit schon in der ersten Zeile. Der Block braucht deshalb macOS und nicht nur
+# einen Swift-Compiler — der Ubuntu-Runner der CI hat swiftc, aber kein AppKit,
+# und der Lauf scheiterte dort mit „no such module 'AppKit'" (2026-09-03).
+if [ "$(uname -s)" = "Darwin" ] && [ -n "$SWIFTC" ]; then
 HUD_BINARY="$TEST_ROOT/md-clip-hud-contract-test"
 PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" "$PROJECT_ROOT/helpers/md-clip-hud.swift" -o "$HUD_BINARY"
 
@@ -718,7 +771,9 @@ assert_hud_rejected fehlenden-text
 assert_hud_rejected leeren-text ""
 assert_hud_rejected zwei-texte "eins" "zwei"
 echo "✓ HUD verlangt genau einen nicht leeren Meldungstext"
-fi   # Ende des swiftc-Blocks
+else
+  echo "⚠ HUD-Vertragstest übersprungen: der Helfer ist AppKit-basiert und damit macOS-only." >&2
+fi
 
 grep -Fq 'private let maximumDialogLifetime: TimeInterval = 30 * 60' "$UPDATER_MODE_SOURCE"
 grep -Fq 'DispatchQueue.main.asyncAfter(' "$UPDATER_MODE_SOURCE"
@@ -778,7 +833,6 @@ fi
 echo "✓ notify() zeigt das HUD entkoppelt, osascript nur ohne Bundle-Helfer"
 
 # --- Appcast: Tooling und Release-Tag bleiben getrennte Vertrauenszonen. ---
-APPCAST_WORKFLOW="$PROJECT_ROOT/.github/workflows/publish-appcast.yml"
 APPCAST_REQUEST_WORKFLOW="$PROJECT_ROOT/.github/workflows/request-appcast.yml"
 grep -Fq 'workflow_run:' "$APPCAST_WORKFLOW"
 grep -Fq "github.ref_name == github.event.repository.default_branch" "$APPCAST_WORKFLOW"
