@@ -695,6 +695,30 @@ trap cleanup_output EXIT
 trap 'cleanup_output; exit 130' INT
 trap 'cleanup_output; exit 143' TERM
 
+# use_plain_text: Plain-Text-Flavor in die Ausgabedatei holen — die letzte
+# Nutzdatenquelle des Skripts. Fünf Stellen brauchen sie: der --plain-Modus,
+# `--from plain` und die drei Auto-Wege, auf denen kein Rich-Text zu einem
+# Ergebnis führt.
+#
+# Eine Funktion und nicht fünfmal derselbe Dreisatz: Die Leerprüfung darf auf
+# keinem dieser Wege fehlen. Ein leeres Ergebnis würde mit --replace sonst das
+# Clipboard löschen — und genau diese Prüfung ist es, die man beim Ergänzen
+# eines sechsten Weges übersieht.
+#
+# $1 = Fehlermeldung, wenn auch der Plain-Text leer ist (Exit 1).
+# $2 = optionale Verbose-Zeile für den Erfolgsfall.
+use_plain_text() {
+  # `|| true`: Ein fehlender Plain-Flavor ist hier kein Fehler, sondern eine
+  # Antwort — die leere Datei darunter entscheidet.
+  clip_read_text > "$OUTPUT_FILE" || true
+  if [ ! -s "$OUTPUT_FILE" ]; then
+    die 1 "$1"
+  fi
+  if [ -n "${2:-}" ]; then
+    vlog "$2"
+  fi
+}
+
 # Lief eine Konvertierung (HTML/RTF) oder wurde nur Plain-Text durchgereicht?
 # Die beiden Fälle haben unterschiedliche Regeln für das Schluss-Newline:
 # durchgereichter Text bleibt bytegenau, konvertierter wird normalisiert
@@ -704,10 +728,7 @@ CONVERTED=0
 # Sonderpfad: --plain überspringt jede Konvertierung.
 if [ "$PLAIN" -eq 1 ]; then
   vlog "Plain-Modus: Clipboard-Text durchreichen"
-  clip_read_text > "$OUTPUT_FILE" || true
-  if [ ! -s "$OUTPUT_FILE" ]; then
-    die 1 "Clipboard ist leer."
-  fi
+  use_plain_text "Clipboard ist leer."
 else
   # Quelle bestimmen anhand --from.
   case "$FROM" in
@@ -722,8 +743,7 @@ else
       CONVERTED=1
       ;;
     plain)
-      clip_read_text > "$OUTPUT_FILE" || true
-      [ ! -s "$OUTPUT_FILE" ] && die 1 "Clipboard ist leer (--from plain)."
+      use_plain_text "Clipboard ist leer (--from plain)."
       ;;
     auto)
       # Reihenfolge per Blueprint: HTML zuerst (häufigster Fall),
@@ -761,29 +781,23 @@ else
           # Ein vorhandener Rich-Flavor kann leer oder für pandoc nicht
           # darstellbar sein. Im Auto-Modus ist der Plain-Flavor dann die
           # sichere Nutzdatenquelle; --from html/rtf bleibt dagegen strikt.
-          clip_read_text > "$OUTPUT_FILE" || true
-          if [ ! -s "$OUTPUT_FILE" ]; then
-            die 1 "Rich-Text war leer oder nicht konvertierbar; kein Plain-Text als Fallback."
-          fi
-          vlog "Rich-Text ergab keinen Inhalt — Plain-Text durchgereicht"
+          use_plain_text \
+            "Rich-Text war leer oder nicht konvertierbar; kein Plain-Text als Fallback." \
+            "Rich-Text ergab keinen Inhalt — Plain-Text durchgereicht"
         fi
       elif rtf=$(try_rtf); then
         if printf '%s' "$rtf" | convert_rtf "$TO" > "$OUTPUT_FILE"; then
           CONVERTED=1
         else
-          clip_read_text > "$OUTPUT_FILE" || true
-          if [ ! -s "$OUTPUT_FILE" ]; then
-            die 1 "RTF war leer oder nicht konvertierbar; kein Plain-Text als Fallback."
-          fi
-          vlog "RTF ergab keinen Inhalt — Plain-Text durchgereicht"
+          use_plain_text \
+            "RTF war leer oder nicht konvertierbar; kein Plain-Text als Fallback." \
+            "RTF ergab keinen Inhalt — Plain-Text durchgereicht"
         fi
       else
         # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
-        clip_read_text > "$OUTPUT_FILE" || true
-        if [ ! -s "$OUTPUT_FILE" ]; then
-          die 1 "Clipboard leer oder kein konvertierbares Format."
-        fi
-        vlog "Pfad: Plain-Text durchgereicht"
+        use_plain_text \
+          "Clipboard leer oder kein konvertierbares Format." \
+          "Pfad: Plain-Text durchgereicht"
       fi
       ;;
   esac
