@@ -37,3 +37,9 @@
 - **Alter AppleScript-Applet-Ordner.** `wrappers/md-clip.app/` liegt ungetrackt
   im Arbeitsbaum und wird von `.gitignore` als „früherer Ausgabeort" geführt.
   Der heutige Build schreibt nach `build/md-clip.app`. Ebenfalls nicht gelöscht.
+
+## Geplante Erweiterung
+
+- **Einmaliges Undo mit vollständiger Formatsicherung.** Noch nicht implementiert;
+  die vorhandenen Text-Clipboard-Werkzeuge erfüllen den Vertrag nicht.
+  Plattformgrenzen und prüfbare Prototyp-Schritte: [docs/CLIPBOARD-UNDO.md](docs/CLIPBOARD-UNDO.md).
