@@ -46,6 +46,8 @@ copy_install_test_project() {
   cp "$PROJECT_ROOT/install.sh" "$destination/install.sh"
   cp "$PROJECT_ROOT/bin/md-clip" "$destination/bin/md-clip"
   cp "$PROJECT_ROOT/lib/pipeline.sh" "$destination/lib/pipeline.sh"
+  cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$destination/lib/tidy-markdown.pl"
+  cp "$PROJECT_ROOT/lib/tables.lua" "$destination/lib/tables.lua"
   cp "$PROJECT_ROOT/helpers/clipboard-html.swift" "$destination/helpers/clipboard-html.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-rtf.swift" "$destination/helpers/clipboard-rtf.swift"
 }
@@ -74,7 +76,7 @@ for arg in "$@"; do
       ;;
     --*)
       case "$arg" in
-        --version|--list-input-formats|--wrap=*|--from=*|--to=*) ;;
+        --version|--list-input-formats|--wrap=*|--from=*|--to=*|--lua-filter=*) ;;
         *) echo "Unknown option $arg." >&2; exit 2 ;;
       esac
       ;;

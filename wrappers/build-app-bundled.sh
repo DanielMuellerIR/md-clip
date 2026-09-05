@@ -208,6 +208,8 @@ mkdir -p "$APP_BUNDLE/Contents/Resources/Licenses"
 # md-clip-Skript und Helper kopieren
 cp "$PROJECT_ROOT/bin/md-clip"     "$APP_BUNDLE/Contents/Resources/bin/md-clip"
 cp "$PROJECT_ROOT/lib/pipeline.sh" "$APP_BUNDLE/Contents/Resources/bin/pipeline.sh"
+cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$APP_BUNDLE/Contents/Resources/bin/tidy-markdown.pl"
+cp "$PROJECT_ROOT/lib/tables.lua" "$APP_BUNDLE/Contents/Resources/bin/tables.lua"
 cp "$BUILD_DIR/clipboard-html"     "$APP_BUNDLE/Contents/Resources/bin/clipboard-html"
 cp "$BUILD_DIR/clipboard-rtf"      "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"
 cp "$BUILD_DIR/pandoc"             "$APP_BUNDLE/Contents/Resources/bin/pandoc"

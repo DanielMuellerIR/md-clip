@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — 2026-09-05
+
+- Tabellen werden vor dem Writer strukturell geprüft; nicht darstellbare
+  Verschachtelungen und verbundene Zellen werden abgelehnt. Komplexe Zellen
+  werden für GFM/CommonMark lesbar zusammengeführt.
+- Die Markdown-Nachbearbeitung liegt in einer eigenen Perl-Datei; Bundle und
+  isolierte Wrapper-Tests führen alle Pipeline-Ressourcen mit.
+
 ## 1.2.9 — 2026-09-03
 
 Fünf Fixes aus dem Code-Review vom 2026-09-03. Die ersten vier trafen den

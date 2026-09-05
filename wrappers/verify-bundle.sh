@@ -67,6 +67,12 @@ for tool in md-clip pipeline.sh pandoc clipboard-html clipboard-rtf; do
     exit 66
   }
 done
+for resource in tidy-markdown.pl tables.lua; do
+  [ -s "$APP/Contents/Resources/bin/$resource" ] && [ -r "$APP/Contents/Resources/bin/$resource" ] || {
+    echo "Pipeline-Ressource fehlt oder ist leer: $resource" >&2
+    exit 66
+  }
+done
 for license in pandoc-COPYRIGHT.txt Sparkle-LICENSE.txt README.txt; do
   [ -s "$APP/Contents/Resources/Licenses/$license" ] || {
     echo "Lizenzdatei fehlt im Bundle: $license" >&2

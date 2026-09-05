@@ -11,15 +11,23 @@
 # markdown-Liste, während tidy_markdown sie als GFM aufräumte und deren
 # Schutz-Backslashes stehen ließ (Review-Fund 2026-08-17).
 
+case "${BASH_SOURCE[0]}" in
+  */*) _MD_CLIP_LIB_DIR="${BASH_SOURCE[0]%/*}" ;;
+  *) _MD_CLIP_LIB_DIR=. ;;
+esac
+case "$_MD_CLIP_LIB_DIR" in
+  /*) ;;
+  *) _MD_CLIP_LIB_DIR="$PWD/$_MD_CLIP_LIB_DIR" ;;
+esac
+
 preprocess_claude_desktop() {
-  perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs' \
-    | perl -0pe '
+  perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs;
+
         s{(<pre[^>]*>.*?</pre>)}{
           my $block = $1;
           $block =~ s{</?div[^>]*>}{}g;
           $block;
-        }gse' \
-    | perl -0pe '
+        }gse;
         # Claude-Desktop-Attribute nur aus echten HTML-Tags entfernen. Eine
         # globale Ersetzung traf bisher auch Fließtext und maskiertes HTML in
         # Code-Beispielen. pre-/code-INHALTE bleiben deshalb roh; deren
@@ -169,6 +177,11 @@ flatten_layout_tables() {
         $replacement =~ s{</?tr\b[^>]*>}{}gi;
         $replacement =~ s{<t[dh]\b[^>]*>}{<p>}gi;
         $replacement =~ s{</t[dh]>}{</p>}gi;
+        if (my $path = $ENV{MD_CLIP_RESULT_FILE}) {
+          open(my $status, q{>}, $path) or die "Statusdatei: $!";
+          print {$status} "simplified\n";
+          close($status) or die "Statusdatei: $!";
+        }
         substr($_, $start, $end - $start, $replacement);
         $cursor = $start + length($replacement);
       } else {
@@ -181,53 +194,6 @@ flatten_layout_tables() {
 unwrap_list_paragraphs() {
   perl -0pe '
     s{<li([^>]*)>\s*<p[^>]*>((?:(?!<p\b|</p>).)*)</p>\s*</li>}{<li$1>$2</li>}gis
-  '
-}
-
-# inline_table_cells: Macht aus dem Inhalt einer Tabellenzelle reinen Fließtext.
-#
-# Warum das nötig ist: Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Enthält
-# eine Zelle einen Zeilenumbruch (`<br>`), zwei Absätze oder eine Liste, kann
-# pandoc sie dort nicht unterbringen — und weil `raw_html` bewusst abgeschaltet
-# ist, schreibt es statt der ganzen Tabelle den Text `[TABLE]`. Die Tabelle war
-# damit restlos weg, und mit `--replace` stand genau dieses Wort im Clipboard
-# (Review-Fund 2026-09-03; `<td>eins<br>zwei</td>` reicht dafür schon aus).
-#
-# Statt alles zu verlieren, geben wir die Struktur INNERHALB der Zelle auf: Jede
-# Blockgrenze und jeder `<br>` wird zu einem Leerzeichen, der Text bleibt
-# vollständig und in seiner Reihenfolge erhalten. Bewusst ein Leerzeichen und
-# kein erfundenes Trennzeichen wie „; " — das stünde nachher im Text, ohne je im
-# Original gestanden zu haben.
-#
-# Beim Ziel `markdown` passiert nichts: Dort schreibt pandoc solche Zellen als
-# Gittertabelle, in der Absätze und Umbrüche vollständig erhalten bleiben.
-#
-# Eine Zelle mit einer verschachtelten Tabelle bleibt unangetastet — sie flach
-# zu ziehen würde die innere Tabelle zerreißen, und der äußere Fall ist selten.
-inline_table_cells() {
-  local target_format="${1:-gfm}"
-  if [ "$target_format" = "markdown" ]; then
-    cat
-    return 0
-  fi
-
-  perl -0pe '
-    s{(<(t[dh])\b[^>]*>)(.*?)(</\2\s*>)}{
-      my ($open, $inner, $close) = ($1, $3, $4);
-      if ($inner =~ /<table\b/i) {
-        $open . $inner . $close;
-      } else {
-        # Erst die Grenzen zu Leerzeichen machen, dann die Blocktags entfernen.
-        # Umgekehrt klebten „a</p><p>b" zu „ab" zusammen.
-        $inner =~ s{<br\s*/?>}{ }gi;
-        $inner =~ s{</(?:p|div|li|h[1-6]|blockquote|pre)\s*>}{ }gi;
-        $inner =~ s{</?(?:p|div|ul|ol|li|h[1-6]|blockquote|pre)\b[^>]*>}{}gi;
-        $inner =~ s{\s+}{ }g;
-        $inner =~ s{^\s+}{};
-        $inner =~ s{\s+$}{};
-        $open . $inner . $close;
-      }
-    }gise
   '
 }
 
@@ -260,479 +226,7 @@ tidy_markdown() {
       ;;
   esac
 
-  perl -e '
-    use strict;
-    use warnings;
-
-    my $target_format = shift @ARGV;
-    my $text = do { local $/; <STDIN> };
-    my $trailing_newline = ($text =~ /\n\z/) ? 1 : 0;
-    $text =~ s/\n\z//;
-    my @lines = split(/\n/, $text, -1);
-
-    # GFM und CommonMark kennen an dieser Stelle nur normale Bullet- und
-    # Dezimalmarker. Alphabetische/römische sowie Definitionslisten sind
-    # pandoc-Markdown-Erweiterungen und dürfen in den anderen Zieldialekten
-    # keinen gewöhnlichen Text zum Listencontainer machen.
-    my $base_list_marker = qr/(?:[-*+]|\d{1,9}[.)])/;
-    # Nur `1.`/`1)` kann aus einem laufenden Absatz heraus einen neuen
-    # geordneten Listenblock beginnen. Weitere Zahlen sind erst dann
-    # Listenpunkte, wenn Durchlauf 1 ihren Listenkontext belegt hat.
-    my $block_list_marker = qr/(?:[-*+]|1[.)])/;
-    # Darf ein solcher Marker einen laufenden Absatz unterbrechen?
-    # GFM und CommonMark: ja. `<p>Text<br>- x</p>` wird dort zu Absatz plus
-    # Liste, egal ob der Hard-Break stehen bleibt — die zwei Leerzeichen
-    # wirken nicht mehr und wären nur toter Weißraum.
-    # pandoc-Markdown: nein. Dort bleibt `Text  \n- x` EIN Absatz mit echtem
-    # LineBreak; wird der Break weggelassen, degradiert er zum SoftBreak und
-    # der bewusst gesetzte Umbruch ist weg (Review-Fund 2026-08-21, an allen
-    # drei Zieldialekten mit `pandoc -t native` gegengeprüft). Deshalb zählt
-    # dort nur der in Durchlauf 1 belegte Listenkontext.
-    my $block_list_interrupts_paragraph = $target_format ne q{markdown};
-    my $markdown_special_marker =
-        qr/(?:[:~]|[IVXLCDM]+[.)]|[ivxlcdm]+[.)]|[A-Za-z][.)])/;
-    my $list_marker = $target_format eq q{markdown}
-        ? qr/(?:$base_list_marker|$markdown_special_marker)/
-        : $base_list_marker;
-
-    # Blockquote-Marker abschneiden. Innerhalb eines Zitats gelten dieselben
-    # Regeln, nur eben hinter dem "> ".
-    sub quote_prefix {
-        my ($line) = @_;
-        return ($line =~ /^((?: {0,3}>[ ]?)+)/) ? $1 : q{};
-    }
-
-    # Zitattiefe = Anzahl der `>`. Zwei Zeilen desselben Zitats haben nicht
-    # unbedingt denselben Präfix-Text: pandoc schreibt die Leerzeile als `>`
-    # und die Textzeile als `> Text`. Verglichen wird deshalb die Tiefe.
-    sub quote_depth {
-        my ($prefix) = @_;
-        return scalar(() = $prefix =~ />/g);
-    }
-
-    # Die Term-Zeile über einem Definitionsmarker: die nächste nichtleere Zeile
-    # derselben Zitattiefe oberhalb von $i. Leerzeilen des Zitats werden
-    # übersprungen, ein Wechsel der Tiefe beendet die Suche.
-    sub term_above {
-        my ($i, $depth, $lines_ref) = @_;
-        my $index = $i - 1;
-        while ($index >= 0) {
-            my $prefix = quote_prefix($lines_ref->[$index]);
-            last if quote_depth($prefix) != $depth;
-            my $candidate = substr($lines_ref->[$index], length($prefix));
-            return $candidate if $candidate !~ /^[ \t]*$/;
-            $index--;
-        }
-        return undef;
-    }
-
-    # Einrückung in Spalten. Ein Tab zählt wie vier Leerzeichen.
-    sub indent_width {
-        my ($body) = @_;
-        my ($space) = $body =~ /^([ \t]*)/;
-        $space =~ s/\t/    /g;
-        return length($space);
-    }
-
-    # Endet die Zeile auf einem Hard-Break-Marker? pandoc schreibt einen
-    # einzelnen Backslash; zwei Leerzeichen kommen aus fremden Quellen.
-    # Eine gerade Anzahl Backslashes ist ein escapter Backslash, kein Umbruch.
-    sub has_break {
-        my ($body) = @_;
-        return 1 if $body =~ /[ ]{2,}$/;
-        my ($tail) = $body =~ /(\\*)$/;
-        return (length($tail) % 2) == 1;
-    }
-
-    sub strip_break {
-        my ($body) = @_;
-        my ($tail) = $body =~ /(\\*)$/;
-        $body =~ s/\\$// if (length($tail) % 2) == 1;
-        $body =~ s/[ \t]+$//;
-        return $body;
-    }
-
-    # Nimmt die überzähligen Escapes vor `|` und `#` zurück — aber nur
-    # außerhalb von Inline-Code. Zwischen Backticks ist ein Backslash echter
-    # Inhalt: `` `\#` `` bedeutet dort wirklich Backslash-Raute, und wer den
-    # Backslash entfernt, ändert den Code.
-    #
-    # Die Zeile wird dafür von links nach rechts gelesen, und die
-    # Backslash-Maskierung gilt dabei nur AUSSERHALB von Code:
-    #
-    #   * Außerhalb ist `` \` `` ein wörtlicher Backtick und beginnt keinen
-    #     Code-Span. Ohne diese Regel hielt die Funktion den Bereich dahinter
-    #     für Inline-Code und ließ ein `\#` darin escaped stehen, obwohl es
-    #     gewöhnlicher Fließtext war (Review-Fund 2026-08-05).
-    #   * Innerhalb eines Code-Spans hat der Backslash dagegen KEINE
-    #     Escape-Wirkung. Ein gleich langer Backtick-Lauf schließt den Span
-    #     deshalb auch dann, wenn direkt davor ein Backslash steht. Früher
-    #     verschluckte die Zerlegung diesen Abschluss, der Span blieb offen,
-    #     und sein Inhalt wurde als Fließtext entescapt — aus dem Code
-    #     `` `\#foo\` `` wurde `` `#foo\` `` (Review-Fund 2026-08-06).
-
-    # Sucht das Ende eines Code-Spans: den ersten Backtick-Lauf GLEICHER Länge
-    # ab $start. Läufe anderer Länge sind innerhalb des Spans gewöhnlicher
-    # Inhalt. Rückgabe: Index hinter dem schließenden Lauf — oder -1, wenn es
-    # keinen gibt; dann war der öffnende Lauf gar kein Code-Anfang, sondern
-    # selbst gewöhnlicher Text.
-    sub find_code_span_end {
-        my ($text, $start, $run_len) = @_;
-        my $len = length $text;
-        my $i   = $start;
-
-        while ($i < $len) {
-            if (substr($text, $i, 1) eq q{`}) {
-                my ($run) = substr($text, $i) =~ /^(`+)/;
-                return $i + length($run) if length($run) == $run_len;
-                $i += length $run;
-            } else {
-                $i++;
-            }
-        }
-        return -1;
-    }
-
-    # Nimmt in gewöhnlichem Text die Backslashes vor `|` und `#` weg. Läuft
-    # über Escape-PAARE, nicht über einzelne Zeichen: sonst würde der zweite
-    # Backslash eines echten `\\` als Anfang eines neuen Escapes gelesen.
-    sub unescape_plain {
-        my ($text) = @_;
-        $text =~ s{\\(.)}{ ($1 eq q{|} || $1 eq q{#}) ? $1 : qq{\\$1} }gse;
-        return $text;
-    }
-
-    sub unescape_pipe_hash {
-        my ($text) = @_;
-        my $out   = q{};   # fertiges Ergebnis
-        my $plain = q{};   # gesammelter Fließtext, noch nicht entescapt
-        my $i     = 0;
-        my $len   = length $text;
-
-        while ($i < $len) {
-            my $c = substr($text, $i, 1);
-            if ($c eq q{\\} && $i + 1 < $len) {
-                $plain .= substr($text, $i, 2);   # Escape-Paar am Stück
-                $i += 2;
-            } elsif ($c eq q{`}) {
-                my ($run) = substr($text, $i) =~ /^(`+)/;
-                my $end = find_code_span_end($text, $i + length($run), length($run));
-                if ($end < 0) {
-                    $plain .= $run;               # kein Abschluss: bloßer Text
-                    $i += length $run;
-                } else {
-                    $out .= unescape_plain($plain);
-                    $plain = q{};
-                    $out .= substr($text, $i, $end - $i);   # Code bleibt roh
-                    $i = $end;
-                }
-            } else {
-                $plain .= $c;
-                $i++;
-            }
-        }
-
-        return $out . unescape_plain($plain);
-    }
-
-    # ---- Durchlauf 1: Code-Zeilen markieren ----
-    my @is_code = map { 0 } @lines;
-    # Zeilen, die nachweislich ein Listenpunkt sind. Durchlauf 2b braucht
-    # dieselbe Auskunft wie Durchlauf 1 — sonst behandelt der eine `b.  zwei`
-    # als Listenpunkt und der andere als Absatztext (Review-Fund 2026-08-17).
-    my @is_list_item = map { 0 } @lines;
-    # Zeilen, die INNERHALB eines offenen Listenpunktes stehen — also der
-    # Markerzeile selbst UND ihren eingerückten Fortsetzungszeilen. Durchlauf
-    # 2b braucht diese weitere Auskunft: Ein Hard-Break am Ende eines
-    # mehrzeiligen Listenpunktes ist ebenso pandocs Layout wie einer am Ende
-    # einer einzeiligen Markerzeile (Review-Fund 2026-08-28).
-    my @in_list_container = map { 0 } @lines;
-    my $fence_char;                 # undef = kein offener Zaun
-    my $fence_len    = 0;
-    my $fence_indent = 0;
-    my @item_indents = ();          # Inhalts-Einrückung offener Listenpunkte
-    my @item_markers = ();          # Marker-Einrückung derselben Punkte
-
-    for my $i (0 .. $#lines) {
-        my $prefix = quote_prefix($lines[$i]);
-        my $body   = substr($lines[$i], length($prefix));
-
-        if (defined $fence_char) {
-            $is_code[$i] = 1;
-            # Der Abschluss darf bis zu drei Spalten weiter eingerückt sein
-            # als der Anfang und mindestens genauso lang, aber nie kürzer.
-            my $close = "^ {0," . ($fence_indent + 3) . "}"
-                . quotemeta($fence_char) . "{$fence_len,}[ \t]*\$";
-            $fence_char = undef if $body =~ /$close/;
-            next;
-        }
-
-        next if $body =~ /^[ \t]*$/;   # Leerzeilen schließen keinen Container
-
-        my $indent = indent_width($body);
-        # Steht diese Zeile auf der Marker-Spalte eines noch offenen Punktes,
-        # ist sie dessen Geschwister — also selbst ein Listenpunkt, auch wenn
-        # die Vorzeile mit einem Hard-Break endet. Vor dem Schließen unten
-        # ermitteln, denn genau dieser Punkt wird dabei zugeklappt.
-        my $sibling_of_open_item = grep { $_ == $indent } @item_markers;
-        # Die Zeile verlässt jeden Listenpunkt, dessen Inhalt weiter rechts
-        # beginnt — dessen Einrückung zählt danach nicht mehr als Container.
-        while (@item_indents && $indent < $item_indents[-1]) {
-            pop @item_indents;
-            pop @item_markers;
-        }
-        my $container = @item_indents ? $item_indents[-1] : 0;
-        # Nach dem Zuklappen offener Punkte gilt: Bleibt ein Punkt offen,
-        # gehört diese Zeile zu seinem Inhalt.
-        $in_list_container[$i] = 1 if @item_indents;
-
-        # Vier Spalten jenseits des Containers: eingerückter Code-Block.
-        if ($indent >= $container + 4) {
-            $is_code[$i] = 1;
-            next;
-        }
-
-        if ($body =~ /^[ \t]*(`{3,}|~{3,})(.*)$/) {
-            my ($delim, $info) = ($1, $2);
-            # Ein Backtick-Zaun darf im Info-String keinen Backtick haben.
-            unless (substr($delim, 0, 1) eq q{`} && $info =~ /`/) {
-                $fence_char   = substr($delim, 0, 1);
-                $fence_len    = length($delim);
-                $fence_indent = $indent;
-                $is_code[$i]  = 1;
-                next;
-            }
-        }
-
-        if ($body =~ /^[ \t]*($list_marker)([ \t]+)/) {
-            my ($marker, $gap) = ($1, $2);
-            my $proven_list_item = 1;
-            my $depth = quote_depth($prefix);
-
-            # Dokumentanfang oder Leerzeile derselben Zitattiefe beginnen
-            # einen neuen Block. Dezimalmarker >1 dürfen dort eine Liste
-            # starten, aber keinen laufenden Absatz unterbrechen.
-            my $block_start = ($i == 0);
-            if (!$block_start) {
-                my $previous_prefix = quote_prefix($lines[$i - 1]);
-                my $previous_body = substr(
-                    $lines[$i - 1], length($previous_prefix)
-                );
-                $block_start = quote_depth($previous_prefix) == $depth
-                    && $previous_body =~ /^[ \t]*$/;
-            }
-
-            if ($marker =~ /^\d{1,9}[.)]$/ && $marker !~ /^1[.)]$/) {
-                $proven_list_item = $block_start || $sibling_of_open_item;
-            }
-
-            if ($target_format eq q{markdown}
-                && $marker =~ /^$markdown_special_marker$/) {
-                # Steht direkt darüber eine Leerzeile derselben Zitattiefe?
-                # Dann eröffnet der Marker einen neuen Block. Die Tiefe wird
-                # gezählt und nicht bytegleich verglichen: pandoc schreibt die
-                # Leerzeile eines Zitats als `>`, die Textzeilen als `> Text`
-                # (Review-Fund 2026-08-17).
-                if ($marker eq q{:} || $marker eq q{~}) {
-                    # Ein Definitionsmarker steht bei pandoc IMMER hinter einer
-                    # Leerzeile, und darüber muss ein Term stehen. Beides
-                    # zusammen trennt die echte Definitionsliste sauber vom
-                    # Absatz `Begriff\` + `: Text`, der nur so aussieht. Die
-                    # frühere Regel „Term darf keinen Hard-Break haben" verwarf
-                    # dagegen eine echte Liste, deren Term auf `<br>` endet.
-                    $proven_list_item = $block_start
-                        && defined(term_above($i, $depth, \@lines));
-                } else {
-                    # Alphabetische und römische Marker: entweder Blockanfang
-                    # oder Geschwister eines schon offenen Punktes. Nur Letzteres
-                    # erkennt den zweiten Punkt `b.` einer engen Liste, dessen
-                    # Vorzeile mit einem Hard-Break endet.
-                    $proven_list_item = $block_start || $sibling_of_open_item;
-                }
-            }
-
-            if ($proven_list_item) {
-                $is_list_item[$i] = 1;
-                $in_list_container[$i] = 1;
-                push @item_indents,
-                    $indent + length($marker) + indent_width($gap);
-                push @item_markers, $indent;
-            }
-        }
-    }
-
-    # Eine Leerzeile mitten in einem eingerückten Code-Block ist selbst noch
-    # Code — sie wird ja nicht eingerückt geschrieben und wäre oben deshalb
-    # als Fließtext durchgegangen. Also nachträglich einsammeln: jeder
-    # Leerzeilen-Lauf zwischen zwei Code-Zeilen gehört zum Code-Block.
-    my $run_start;
-    for my $i (0 .. $#lines) {
-        if (!$is_code[$i] && $lines[$i] =~ /^[ \t]*$/) {
-            $run_start = $i unless defined $run_start;
-            next;
-        }
-        if (defined $run_start) {
-            if ($run_start > 0 && $is_code[$run_start - 1] && $is_code[$i]) {
-                $is_code[$_] = 1 for ($run_start .. $i - 1);
-            }
-            $run_start = undef;
-        }
-    }
-
-    # ---- Durchlauf 2a: leere Absätze zu echten Leerzeilen ----
-    # Eine leere Zeile aus Word kommt als Hard-Break ohne Inhalt an, oft mit
-    # leerer Auszeichnung davor (`****\`).
-    for my $i (0 .. $#lines) {
-        next if $is_code[$i];
-        my $prefix = quote_prefix($lines[$i]);
-        my $body   = substr($lines[$i], length($prefix));
-        next unless has_break($body);
-        my $content = strip_break($body);
-        $content =~ s/^[ \t]+//;
-        next unless $content eq q{} || $content =~ /^[*_]+$/;
-        $prefix =~ s/[ \t]+$//;
-        $lines[$i] = $prefix;
-    }
-
-    # ---- Durchlauf 2b: Hard-Breaks entscheiden ----
-    for my $i (0 .. $#lines) {
-        next if $is_code[$i];
-        my $prefix = quote_prefix($lines[$i]);
-        my $body   = substr($lines[$i], length($prefix));
-        next unless has_break($body);
-        my $content = strip_break($body);
-
-        my $drop = 0;
-        if ($i == $#lines) {
-            $drop = 1;                            # Umbruch am Dokumentende
-        } elsif (!$is_code[$i + 1]) {
-            my $next_prefix = quote_prefix($lines[$i + 1]);
-            my $next_body   = substr($lines[$i + 1], length($next_prefix));
-            if ($next_body =~ /^[ \t]*$/) {
-                $drop = 1;                        # Umbruch vor einer Leerzeile
-            # Ein Markdown-Sondermarker allein reicht hier nicht als Beleg:
-            # Direkt hinter dem Hard-Break ist er Teil desselben Absatzes
-            # (`a. Text`) und darf den echten Umbruch nicht verlieren. Deshalb
-            # gilt derselbe Nachweis wie in Durchlauf 1 (`@is_list_item`) —
-            # sonst behielte der zweite Punkt einer engen Sonderliste einen
-            # reinen Layout-Umbruch (Review-Fund 2026-08-17).
-            #
-            # In einem Dialekt, in dem ein Marker den laufenden Absatz NICHT
-            # unterbricht, zählt zusätzlich, was in der Zeile davor steht:
-            # Gehört sie selbst zur Liste, ist der Umbruch pandocs Layout am
-            # Ende eines Listenpunktes und darf weg. Ist sie gewöhnlicher
-            # Absatztext (`<p>Text<br>- x</p>`), bleibt der Umbruch ein echter
-            # LineBreak und muss stehen bleiben — sonst degradiert er zum
-            # SoftBreak (Review-Fund 2026-08-21).
-            # Maßgeblich ist die Zugehörigkeit zum offenen Listencontainer,
-            # nicht „die Zeile beginnt mit einem Marker": Sonst behielte die
-            # letzte Fortsetzungszeile eines mehrzeiligen Punktes ihren
-            # Layout-Umbruch, während dieselbe Stelle nach einer einzeiligen
-            # Markerzeile bereinigt wird (Review-Fund 2026-08-28).
-            } elsif ($is_list_item[$i + 1]
-                     && ($block_list_interrupts_paragraph
-                         || $in_list_container[$i])) {
-                $drop = 1;                        # Umbruch vor einem Listenpunkt
-            } elsif ($block_list_interrupts_paragraph
-                     && $next_body =~ /^[ \t]*$block_list_marker[ \t]+/) {
-                $drop = 1;                        # Marker unterbricht den Absatz
-            }
-        }
-
-        $lines[$i] = $drop ? $prefix . $content : $prefix . $content . q{  };
-    }
-
-    # ---- Durchlauf 2c: unnötige Escapes zurücknehmen ----
-    for my $i (0 .. $#lines) {
-        next if $is_code[$i];
-        my $prefix = quote_prefix($lines[$i]);
-        my $body   = substr($lines[$i], length($prefix));
-        my ($space) = $body =~ /^([ \t]*)/;
-        my $rest = substr($body, length($space));
-
-        # Ein Absatz, der nur aus einem Bullet-Zeichen besteht, war ein
-        # getippter Listenpunkt. \xe2\x80\xa2 ist •, \xc2\xa0 ein geschütztes
-        # Leerzeichen (beides UTF-8-Bytes, weil perl hier auf Bytes arbeitet).
-        my $plain = $rest;
-        $plain =~ s/[*_]//g;
-        $plain =~ s/^(?:[ \t]|\xc2\xa0)+//;
-        $plain =~ s/(?:[ \t]|\xc2\xa0)+$//;
-
-        my $original = $rest;
-
-        if ($plain eq "\xe2\x80\xa2") {
-            $rest = q{-};
-        } elsif ($rest =~ /^(?:\\_){3,}$/) {
-            $rest = q{_} x (length($rest) / 2);
-        } elsif ($rest =~ /^\\-/) {
-            $rest = substr($rest, 1);
-        }
-
-        # Pipe und Raute escaped pandoc immer, obwohl beide nur in einem
-        # einzigen Zusammenhang Markdown-Zeichen sind: `|` trennt Zellen in
-        # einer Tabellenzeile, `#` beginnt eine Überschrift. Überall sonst ist
-        # der Backslash überzählig und im Ergebnis sichtbar.
-        # Eine Tabellenzeile bleibt komplett, wie pandoc sie geschrieben hat:
-        # sie beginnt immer mit `|` (die Trennzeile eingeschlossen), und ihre
-        # Escapes gehören dort zur Spaltenbreite. Ein Zeichen daraus zu
-        # entfernen würde die Ausrichtung der Tabelle verschieben.
-        unless ($rest =~ /^\|/) {
-            # Eine Überschrift beginnt am Anfang ihres Blocks — das ist der
-            # Zeilenanfang ODER die Stelle direkt hinter einem Listenmarker.
-            # `- \# Text` ohne Backslash wäre eine Überschrift IM Listenpunkt,
-            # also bleibt der Backslash auch dort stehen.
-            #
-            # MEHRERE Marker hintereinander, weil pandoc verschachtelte Listen
-            # in einer Zeile schreibt: `- - \# tief`. Erkannte die Regel nur den
-            # ersten, fiel der Backslash weg und aus dem Text wurde eine
-            # Überschrift — im AST belegt (Review-Fund 2026-08-05). Alphabetische
-            # Marker (`a.`, `b)`) kommen beim Ziel `markdown` dazu; ein
-            # unmaskiertes `a)` am Zeilenanfang ist dort immer ein Listenmarker,
-            # gewöhnlichen Text hätte pandoc als `a\)` geschrieben. `:` und `~`
-            # sind die Definitionslisten-Marker desselben Ziels — auch dort
-            # wurde aus dem Text sonst eine Überschrift.
-            #
-            # RÖMISCHE Marker sind mehrstellig: aus `<ol type="i" start="4">`
-            # schreibt pandoc beim Ziel `markdown` ein `iv.`. Ein einzelner
-            # Buchstabe deckt das nicht ab, und ohne den Marker fiel der
-            # Backslash weg — aus dem Listentext wurde wieder eine Überschrift
-            # (im AST belegt, Review-Fund 2026-08-06). Groß und klein getrennt,
-            # weil pandoc römische Zahlen nie mischt.
-            #
-            # Im Zweifel lieber einen Marker zu viel erkennen: dann bleibt ein
-            # überzähliger Backslash stehen (sichtbarer Schönheitsfehler), statt
-            # dass sich die Dokumentstruktur ändert.
-            my ($marker) = $rest =~ /^((?:$list_marker[ \t]+)+)/;
-            $marker = defined($marker) ? $marker : q{};
-            my $tail = substr($rest, length($marker));
-
-            my $keep = q{};
-            if ($tail =~ /^\\#/) {
-                $keep = q{\#};  # Raute am Blockanfang bleibt escaped
-                $tail = substr($tail, 2);
-            }
-            $rest = $marker . $keep . unescape_pipe_hash($tail);
-        }
-
-        $lines[$i] = $prefix . $space . $rest if $rest ne $original;
-    }
-
-    # ---- Durchlauf 2d: Leerzeilen-Läufe zusammenziehen ----
-    my @out;
-    my $blank_run = 0;
-    for my $i (0 .. $#lines) {
-        if (!$is_code[$i] && $lines[$i] =~ /^[ \t]*$/) {
-            $blank_run++;
-            push @out, q{} if $blank_run == 1;
-            next;
-        }
-        $blank_run = 0;
-        push @out, $lines[$i];
-    }
-
-    print join("\n", @out);
-    print "\n" if $trailing_newline;
-  ' "$target_format"
+  perl "$_MD_CLIP_LIB_DIR/tidy-markdown.pl" "$target_format"
 }
 
 pandoc_supports_rtf() {
@@ -746,6 +240,14 @@ pandoc_supports_rtf() {
 # deshalb nicht still entfallen, sondern muss vorab geprüft werden.
 pandoc_supports_sandbox() {
   printf '' | pandoc --sandbox -f html -t plain >/dev/null 2>&1
+}
+
+# Doctor prüft mit einem echten Tabellenknoten die verwendete Lua-API.
+# Kein eigener Dokumentinhalt, keine Netzwerk- oder Clipboard-Operation.
+pandoc_supports_table_filter() {
+  printf '%s' '<table><tr><th>A</th></tr><tr><td>x<br>y</td></tr></table>' \
+    | MD_CLIP_RESULT_FILE= pandoc --sandbox -f html -t gfm-raw_html \
+      --lua-filter="$_MD_CLIP_LIB_DIR/tables.lua" >/dev/null 2>&1
 }
 
 # Der einzige pandoc-Aufruf der HTML→Markdown-Strecke. Beide Konvertierungen
@@ -789,12 +291,22 @@ pandoc_table_extensions() {
 }
 
 run_pandoc() {
-  local target_format="${1:-gfm}"
-  local table_extensions
+  local target_format="${1:-gfm}" table_extensions
   table_extensions="$(pandoc_table_extensions "$target_format")"
-  pandoc -f html \
-    -t "${target_format}-raw_html${table_extensions}" \
-    --wrap=none --sandbox
+  # Ein einziger gepufferter Scan statt Tempdatei, cat und grep. Die
+  # Entscheidung über Darstellbarkeit trifft weiterhin allein der AST-Filter.
+  # Kommentare/Attribute dürfen falsch positiv treffen; mehrzeilige Tags
+  # müssen erfasst werden. Listenform von open übergibt Argumente ohne Shell.
+  perl -0777 -e '
+    my ($target, $filter) = @ARGV;
+    my $html = do { local $/; <STDIN> } // q{};
+    my @args = (q{pandoc}, q{-f}, q{html}, q{-t}, $target,
+                q{--wrap=none}, q{--sandbox});
+    push @args, qq{--lua-filter=$filter} if $html =~ /<table(?=[\s\/>])/i;
+    open(my $writer, q{|-}, @args) or die "pandoc: $!";
+    print {$writer} $html or die "pandoc stdin: $!";
+    close($writer) or exit 1;
+  ' "${target_format}-raw_html${table_extensions}" "$_MD_CLIP_LIB_DIR/tables.lua"
 }
 
 # Pandoc schreibt auch für HTML ohne darstellbaren Inhalt ein Schluss-LF.
@@ -850,7 +362,6 @@ html_to_markdown() {
   local target_format="${1:-gfm}"
   clean_html \
     | fill_empty_html_links \
-    | inline_table_cells "$target_format" \
     | run_pandoc "$target_format" \
     | tidy_markdown "$target_format" \
     | require_nonempty_markdown
@@ -869,7 +380,7 @@ convert_html() {
 convert_rtf() {
   local target_format="${1:-gfm}"
   if declare -F vlog >/dev/null 2>&1; then
-    vlog "Pfad: RTF → HTML → flatten → inline-Zellen → pandoc → tidy"
+    vlog "Pfad: RTF → HTML → Layouttabellen → pandoc mit Tabellenprüfung → tidy"
   fi
   rtf_to_html \
     | flatten_layout_tables \

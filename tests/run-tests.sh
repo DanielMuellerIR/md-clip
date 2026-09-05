@@ -15,6 +15,13 @@
 # Wenn ein Test fehlschlägt, zeigen wir das Diff zur erwarteten Ausgabe.
 
 set -euo pipefail
+case "${1:-}" in
+  --help|-h)
+    printf '%s\n' 'MD_CLIP_SKIP_CLIPBOARD=1 ./tests/run-tests.sh: Fixtures ohne Host-Clipboard.'
+    exit 0 ;;
+  "") ;;
+  *) echo "Unbekanntes Testargument: $1" >&2; exit 2 ;;
+esac
 
 # Projekt-Root: das Verzeichnis ÜBER tests/.
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +37,8 @@ TEST_RUNTIME=$(mktemp -d)
 mkdir -p "$TEST_RUNTIME/bin"
 cp "$PROJECT_ROOT/bin/md-clip" "$TEST_RUNTIME/bin/md-clip"
 cp "$PROJECT_ROOT/lib/pipeline.sh" "$TEST_RUNTIME/bin/pipeline.sh"
+cp "$PROJECT_ROOT/lib/tables.lua" "$TEST_RUNTIME/bin/tables.lua"
+cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$TEST_RUNTIME/bin/tidy-markdown.pl"
 PRODUCT_CLI="$TEST_RUNTIME/bin/md-clip"
 CLIPBOARD_BACKUP=""
 ENCODING_HTML=""
@@ -714,7 +723,7 @@ for target_format in gfm markdown commonmark; do
     printf '%s' "$table_roundtrip" | grep -Fq '<td>Erste Zeile<br />Zweite Zeile</td>' || table_ok=0
     printf '%s' "$table_roundtrip" | grep -Fq '<td><p>Absatz eins</p><p>Absatz zwei</p></td>' || table_ok=0
   else
-    # Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. inline_table_cells
+    # Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Der Lua-Filter
     # macht aus jeder Blockgrenze ein Leerzeichen — der Text bleibt vollständig.
     printf '%s' "$table_roundtrip" | grep -Fq '<td>Erste Zeile Zweite Zeile</td>' || table_ok=0
     printf '%s' "$table_roundtrip" | grep -Fq '<td>Absatz eins Absatz zwei</td>' || table_ok=0
@@ -778,7 +787,7 @@ fi
 # das nächste Modul ab, für das es hier kein eigenes kaputtes Encode.pm gibt.
 perl_module_uses=$(
   grep -nE "^[[:space:]]*(use|require)[[:space:]]+[A-Z]" \
-    "$PROJECT_ROOT/lib/pipeline.sh" "$PROJECT_ROOT/bin/md-clip" \
+    "$PROJECT_ROOT/lib/pipeline.sh" "$PROJECT_ROOT/lib/tidy-markdown.pl" "$PROJECT_ROOT/bin/md-clip" \
     | grep -vE "(use|require)[[:space:]]+(strict|warnings)\b" || true
 )
 if [ -n "$perl_module_uses" ]; then
