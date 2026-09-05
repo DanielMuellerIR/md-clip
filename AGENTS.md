@@ -53,17 +53,20 @@
   Nachbarzelle — aus `x|y` und `ok` wurde `x|y o` und `k` (Review-Fund
   2026-09-03). Ohne `pipe_tables` schreibt pandoc beim Ziel `commonmark` gar
   keine Tabelle, sondern den Text `[TABLE]`.
-- **Eine Tabellenzelle muss vor pandoc Inline-Inhalt sein — außer beim Ziel
-  `markdown`.** Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Enthält eine
-  Zelle einen `<br>`, zwei Absätze oder eine Liste, kann pandoc sie dort nicht
-  unterbringen und schreibt statt der **ganzen** Tabelle den Text `[TABLE]` —
-  mit `--replace` stand danach genau dieses Wort im Clipboard. `<td>eins<br>zwei
-  </td>` reichte dafür schon (Review-Fund 2026-09-03). `inline_table_cells`
-  macht deshalb aus jeder Blockgrenze innerhalb einer Zelle ein Leerzeichen: Der
-  Text bleibt vollständig, nur die Struktur *innerhalb* der Zelle geht verloren.
-  Bewusst ein Leerzeichen und kein erfundenes Trennzeichen wie „; ". Beim Ziel
-  `markdown` passiert nichts — dort trägt die Gittertabelle Absätze und
-  Umbrüche. Festgehalten in Test 10f2 von `tests/run-tests.sh`.
+- **Tabellenstruktur vor dem Writer prüfen.** `lib/tables.lua` läuft in pandoc
+  und lehnt verschachtelte Tabellen und verbundene Zellen strukturell ab. Keine
+  Suche nach dem Ausgabetext `[TABLE]`: dieser Text darf wörtlich vorkommen.
+  Für GFM/CommonMark werden Zellblöcke rekursiv zu Inline-Inhalt mit Leerzeichen
+  zwischen Blöcken; Code-Newlines dürfen keine neue Tabellenzeile erzeugen.
+  `markdown` behält Zellblöcke als Gittertabelle. Neue Fälle müssen im Roundtrip
+  dieselbe Anzahl Zellen/Zeilen und den vollständigen Zelltext nachweisen.
+- **Runtime-Ressourcen reisen gemeinsam.** `lib/pipeline.sh` bleibt Einstieg;
+  `lib/tidy-markdown.pl` und `lib/tables.lua` liegen im Bundle daneben. Build,
+  Bundle-Prüfer und isolierte Testkopien müssen neue Ressourcen mitführen.
+- **Quelle, Konvertierung, Bewertung und Ausgabe bleiben getrennt.** Clipboard-
+  Auto versucht HTML/RTF/Plain, bei Word RTF/HTML/Plain; explizites `--from` ist
+  strikt. Datei/stdin ohne `--replace` darf keine Clipboard-Werkzeuge verlangen
+  oder aufrufen. Plain-Text bleibt ohne pandoc bytegenau.
 - **Die Perl-Schnipsel benutzen nur Kernbordmittel — kein `use <Modul>`.**
   Debian und Ubuntu liefern als Pflichtpaket nur `perl-base` aus; Module wie
   `Encode` stecken erst im vollen `perl`-Paket. `command -v perl` bestand auf

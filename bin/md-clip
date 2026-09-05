@@ -168,6 +168,11 @@ fi
 # ---------- Flag-Defaults ----------
 
 # Globale Flags, die wir per Argument setzen. Default-Werte hier.
+INPUT_MODE=clipboard
+INPUT_PATH=""
+PREVIEW=0
+DOCTOR=0
+JSON=0
 REPLACE=0       # --replace: Ergebnis ins Clipboard schreiben statt stdout
 PLAIN=0         # --plain: Plain-Text-Modus, kein Convert
 FROM="auto"     # --from: auto|html|rtf|plain
@@ -203,7 +208,7 @@ err() {
 # notify: Desktop-Notification anzeigen, wenn --notify gesetzt ist.
 # Auf macOS via osascript (Bordmittel), auf Linux via notify-send (libnotify).
 notify() {
-  if [ "$NOTIFY" -eq 0 ]; then
+  if [ "$NOTIFY" -eq 0 ] || [ "$QUIET" -eq 1 ]; then
     return 0
   fi
 
@@ -263,6 +268,12 @@ USAGE
   md-clip [OPTIONS]
 
 OPTIONS
+      --stdin          Eingabe von stdin; --from html|rtf|plain erforderlich.
+      --input DATEI    Datei lesen; auto erkennt .html/.htm/.rtf/.txt/.md.
+      --doctor         Fähigkeiten und Abhängigkeiten prüfen, ohne Clipboard.
+      --json           JSON-Ausgabe für --doctor.
+      --preview        Vor --replace Ergebnis auf stderr zeigen und am Terminal
+                       bestätigen; Abbruch liefert Exit 4.
   -r, --replace        Markdown-Ergebnis zurück ins Clipboard schreiben
                        (statt nach stdout).
   -p, --plain          Plain-Text-Modus: keine Konvertierung, nur Clipboard-
@@ -285,9 +296,10 @@ OPTIONS
 
 EXIT-CODES
   0  Erfolg
-  1  Nichts Konvertierbares auf dem Clipboard
-  2  Dependency fehlt (pandoc; macOS: Swift-Helper, Linux: xclip/wl-clipboard)
-  3  Konvertierungsfehler (pandoc o.ä. mit non-zero exit)
+  1  Quelle fehlt, ist leer oder nicht lesbar
+  2  Ungültige Argumente, Datei oder fehlende benötigte Dependency
+  3  Konvertierung nicht darstellbar oder Ausgabe fehlgeschlagen
+  4  Vorschau abgebrochen
 
 BEISPIELE
   md-clip                     # nach stdout
@@ -466,6 +478,17 @@ rtf_to_html() {
 # `getopts` (Bash-Builtin) kann nur kurze Optionen — daher manuell.
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --stdin)
+      [ "$INPUT_MODE" = clipboard ] || die 2 "Nur eine Eingabequelle erlaubt."
+      INPUT_MODE=stdin ;;
+    --input)
+      [ "$INPUT_MODE" = clipboard ] || die 2 "Nur eine Eingabequelle erlaubt."
+      shift
+      [ -n "${1:-}" ] || die 2 "--input benötigt einen Dateipfad."
+      INPUT_MODE=file; INPUT_PATH="$1" ;;
+    --doctor) DOCTOR=1 ;;
+    --json) JSON=1 ;;
+    --preview) PREVIEW=1 ;;
     -r|--replace)   REPLACE=1 ;;
     -p|--plain)     PLAIN=1 ;;
     -f|--from)
@@ -543,73 +566,89 @@ done
 
 # command -v $cmd liefert leeren Output und Exit 1, wenn $cmd nicht im PATH ist.
 # Wir prüfen hier alle Pflicht-Binaries — early-fail mit klarem Fehlertext.
+# Nur Werkzeuge des tatsächlich ausgeführten Weges prüfen. Rückgabe statt
+# exit: auto darf einen nicht verfügbaren Rich-Weg überspringen.
 check_dependencies() {
-  local missing=()
-  local hint=""
+  local kind="$1" tool
+  local required=()
+  case "$kind" in
+    html|rtf) required=(pandoc perl) ;;
+  esac
+  if [ "$kind" = rtf ] && [ "$PLATFORM" = macos ]; then required+=(textutil); fi
+  if [ "$kind" = read ] || [ "$kind" = write ]; then
+    case "$PLATFORM:$CLIP_BACKEND:$kind" in
+      macos:*:read)
+        case "$FROM" in
+          html) [ -x "$HTML_HELPER" ] || { err "HTML-Helper fehlt (install.sh ausführen)."; return 2; } ;;
+          rtf) [ -x "$RTF_HELPER" ] || { err "RTF-Helper fehlt (install.sh ausführen)."; return 2; } ;;
+          plain) required=(pbpaste) ;;
+          auto) ;; # Fehlende einzelne Flavor-Werkzeuge überspringen.
+        esac ;;
+      macos:*:write) required=(pbcopy) ;;
+      linux:wayland:read) required=(wl-paste) ;;
+      linux:wayland:write) required=(wl-copy) ;;
+      linux:x11:*) required=(xclip) ;;
+    esac
+  fi
+  for tool in ${required[@]+"${required[@]}"}; do
+    command -v "$tool" >/dev/null 2>&1 || {
+      err "Fehlende Dependency: $tool"; return 2;
+    }
+  done
+  case "$kind" in
+    html|rtf)
+      if ! pandoc_supports_sandbox; then
+        err "Das installierte pandoc kennt die Option --sandbox nicht. Bitte pandoc >= 2.15 installieren."
+        return 2
+      fi ;;
+  esac
+  if [ "$kind" = rtf ] && [ "$PLATFORM" = linux ] && ! pandoc_supports_rtf; then
+    err "Pandoc unterstützt das Eingabeformat RTF nicht. Bitte pandoc >= 2.15 installieren."
+    return 2
+  fi
+}
 
-  # Auf beiden Plattformen nötig: die eigentliche Konvertierungs-Pipeline.
-  command -v pandoc >/dev/null 2>&1 || missing+=("pandoc")
-  command -v perl   >/dev/null 2>&1 || missing+=("perl")
-
-  if [ "$PLATFORM" = "macos" ]; then
-    command -v textutil >/dev/null 2>&1 || missing+=("textutil")
-    command -v pbpaste  >/dev/null 2>&1 || missing+=("pbpaste")
-    command -v pbcopy   >/dev/null 2>&1 || missing+=("pbcopy")
-    hint="Installation: brew install pandoc"
+# Doctor liefert ausschließlich Werkzeugdaten, niemals Zwischenablage-Inhalte.
+doctor() {
+  local tool available version path sep="" sandbox=false rtf=false lua=false
+  pandoc_supports_sandbox && sandbox=true
+  pandoc_supports_rtf && rtf=true
+  pandoc_supports_table_filter && lua=true
+  if [ "$JSON" -eq 1 ]; then
+    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"undo":false,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua"
   else
-    # iconv wandelt Firefox' UTF-16-HTML nach UTF-8 (siehe to_utf8).
-    # Teil von glibc, fehlt praktisch nie — geprüft wird es trotzdem,
-    # weil ein stiller Ausfall hier Mojibake statt Fehlermeldung bedeutet.
-    command -v iconv >/dev/null 2>&1 || missing+=("iconv")
-
-    # Nur das Werkzeug der tatsächlich laufenden Sitzung verlangen: Wer
-    # unter X11 arbeitet, braucht kein wl-clipboard und umgekehrt.
-    if [ "$CLIP_BACKEND" = "wayland" ]; then
-      command -v wl-paste >/dev/null 2>&1 || missing+=("wl-paste")
-      command -v wl-copy  >/dev/null 2>&1 || missing+=("wl-copy")
-      hint="Installation: sudo apt install pandoc wl-clipboard  (Wayland-Sitzung erkannt)"
+    printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
+    printf 'stdin/Datei: ja; Vorschau: Terminal; Undo: nein\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$sandbox" "$rtf" "$lua"
+  fi
+  for tool in pandoc perl textutil pbpaste pbcopy xclip wl-paste wl-copy iconv clipboard-html clipboard-rtf; do
+    available=false; version=""
+    case "$tool" in
+      clipboard-html) path="$HTML_HELPER" ;;
+      clipboard-rtf) path="$RTF_HELPER" ;;
+      *) path=$(command -v "$tool" || true) ;;
+    esac
+    if [ -n "$path" ] && [ -x "$path" ]; then
+      available=true
+      case "$tool" in
+        pandoc) version=$(pandoc --version 2>/dev/null | head -1 || true) ;;
+        perl) version=$(perl -e 'printf "%vd", $^V' 2>/dev/null || true) ;;
+        wl-copy|wl-paste) version=$("$tool" --version 2>/dev/null | head -1 || true) ;;
+        xclip) version=$(xclip -version 2>&1 | head -1 || true) ;;
+        *) version="Systemwerkzeug (Version separat nicht verfuegbar)" ;;
+      esac
+    fi
+    version=$(printf '%s' "$version" | LC_ALL=C tr -cd '[:print:]')
+    # Shell-Escaping für die einzigen dynamischen JSON-Strings.
+    version=${version//\\/\\\\}; version=${version//\"/\\\"}
+    version=${version//$'\n'/ }; version=${version//$'\r'/ }; version=${version//$'\t'/ }
+    if [ "$JSON" -eq 1 ]; then
+      printf '%s"%s":{"available":%s,"version":"%s"}' "$sep" "$tool" "$available" "$version"
+      sep=,
     else
-      command -v xclip >/dev/null 2>&1 || missing+=("xclip")
-      hint="Installation: sudo apt install pandoc xclip  (X11-Sitzung erkannt)"
+      printf '%s: %s %s\n' "$tool" "$available" "$version"
     fi
-
-    # notify-send nur verlangen, wenn --notify wirklich gesetzt ist —
-    # sonst müsste jeder CLI-Nutzer libnotify installieren, obwohl er nie
-    # eine Notification sehen will.
-    if [ "$NOTIFY" -eq 1 ]; then
-      command -v notify-send >/dev/null 2>&1 || missing+=("notify-send (Paket libnotify-bin)")
-    fi
-  fi
-
-  if [ "${#missing[@]}" -gt 0 ]; then
-    die 2 "Fehlende Dependencies: ${missing[*]}. $hint"
-  fi
-
-  # Der Linux-Pfad benötigt pandocs RTF-Reader. Ältere Distributionen
-  # liefern zwar ein `pandoc`-Binary, aber noch kein Eingabeformat `rtf`.
-  if [ "$PLATFORM" = "linux" ] && ! pandoc_supports_rtf; then
-    die 2 "Pandoc unterstützt das Eingabeformat RTF nicht. Bitte pandoc >= 2.15 installieren (die Ubuntu-22.04-Paketversion ist zu alt)."
-  fi
-
-  # `--sandbox` gibt es erst ab pandoc 2.15 und steckt in JEDEM
-  # HTML→Markdown-Aufruf. Ohne diese Prüfung bestünde die Dependency-
-  # Prüfung, und erst die eigentliche Konvertierung bräche mit
-  # „Unknown option --sandbox" ab.
-  if ! pandoc_supports_sandbox; then
-    die 2 "Das installierte pandoc kennt die Option --sandbox nicht. Bitte pandoc >= 2.15 installieren."
-  fi
-
-  # Swift-Helper separat prüfen — die werden im Projekt mitgeliefert,
-  # nicht im PATH. Wenn einer fehlt, deuten wir auf install.sh hin.
-  # Nur auf macOS: Auf Linux liest xclip/wl-paste das Clipboard, die
-  # Helper werden dort nie aufgerufen.
-  if [ "$PLATFORM" = "macos" ]; then
-    for helper in "$HTML_HELPER" "$RTF_HELPER"; do
-      if [ ! -x "$helper" ]; then
-        die 2 "Swift-Helper nicht gefunden oder nicht ausführbar: $helper (install.sh ausführen)"
-      fi
-    done
-  fi
+  done
+  [ "$JSON" -eq 0 ] || printf '}}\n'
 }
 
 # ---------- Gemeinsame Konvertierungs-Pipeline ----------
@@ -675,133 +714,116 @@ try_rtf() {
   clip_read_rtf
 }
 
-# ---------- Hauptlogik ----------
+# ---------- Quellenwahl und Eingabevertrag ----------
 
-check_dependencies
-
-# Datei statt Shell-Variable: Command-Substitution entfernt alle abschließenden
-# Newlines. Besonders im Plain-Modus müssen die Clipboard-Bytes jedoch exakt
-# erhalten bleiben (kein, ein oder mehrere Newlines).
-OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/md-clip-output.XXXXXX")
-cleanup_output() {
-  rm -f "$OUTPUT_FILE"
-}
-# Bei Strg-C oder `kill` reicht Aufräumen nicht: Ohne eigenes `exit` läuft das
-# Skript hinter dem Trap einfach weiter — dann arbeitete es mit einer gerade
-# gelöschten Ausgabedatei weiter. 130/143 sind die üblichen Codes für Abbruch
-# per INT beziehungsweise TERM (128 + Signalnummer); dieselbe Schreibweise
-# benutzen install-app.sh, wrappers/sign-and-release.sh und tests/run-tests.sh.
-trap cleanup_output EXIT
-trap 'cleanup_output; exit 130' INT
-trap 'cleanup_output; exit 143' TERM
-
-# use_plain_text: Plain-Text-Flavor in die Ausgabedatei holen — die letzte
-# Nutzdatenquelle des Skripts. Fünf Stellen brauchen sie: der --plain-Modus,
-# `--from plain` und die drei Auto-Wege, auf denen kein Rich-Text zu einem
-# Ergebnis führt.
-#
-# Eine Funktion und nicht fünfmal derselbe Dreisatz: Die Leerprüfung darf auf
-# keinem dieser Wege fehlen. Ein leeres Ergebnis würde mit --replace sonst das
-# Clipboard löschen — und genau diese Prüfung ist es, die man beim Ergänzen
-# eines sechsten Weges übersieht.
-#
-# $1 = Fehlermeldung, wenn auch der Plain-Text leer ist (Exit 1).
-# $2 = optionale Verbose-Zeile für den Erfolgsfall.
-use_plain_text() {
-  # `|| true`: Ein fehlender Plain-Flavor ist hier kein Fehler, sondern eine
-  # Antwort — die leere Datei darunter entscheidet.
-  clip_read_text > "$OUTPUT_FILE" || true
-  if [ ! -s "$OUTPUT_FILE" ]; then
-    die 1 "$1"
-  fi
-  if [ -n "${2:-}" ]; then
-    vlog "$2"
-  fi
-}
-
-# Lief eine Konvertierung (HTML/RTF) oder wurde nur Plain-Text durchgereicht?
-# Die beiden Fälle haben unterschiedliche Regeln für das Schluss-Newline:
-# durchgereichter Text bleibt bytegenau, konvertierter wird normalisiert
-# (siehe unten beim Schreiben ins Clipboard).
-CONVERTED=0
-
-# Sonderpfad: --plain überspringt jede Konvertierung.
+[ "$JSON" -eq 0 ] || [ "$DOCTOR" -eq 1 ] || die 2 "--json benötigt --doctor."
+if [ "$DOCTOR" -eq 1 ]; then
+  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] || die 2 "--doctor ist nicht mit Eingabe oder Ersetzen kombinierbar."
+  doctor
+  exit 0
+fi
+[ "$PREVIEW" -eq 0 ] || [ "$REPLACE" -eq 1 ] || die 2 "--preview benötigt --replace."
 if [ "$PLAIN" -eq 1 ]; then
-  vlog "Plain-Modus: Clipboard-Text durchreichen"
-  use_plain_text "Clipboard ist leer."
-else
-  # Quelle bestimmen anhand --from.
-  case "$FROM" in
-    html)
-      html=$(try_html) || die 1 "Kein HTML auf dem Clipboard (--from html)."
-      printf '%s' "$html" | convert_html "$TO" > "$OUTPUT_FILE" || die 3 "Pandoc-Konvertierung fehlgeschlagen."
-      CONVERTED=1
-      ;;
-    rtf)
-      rtf=$(try_rtf) || die 1 "Kein RTF auf dem Clipboard (--from rtf)."
-      printf '%s' "$rtf" | convert_rtf "$TO" > "$OUTPUT_FILE" || die 3 "RTF-Konvertierung fehlgeschlagen."
-      CONVERTED=1
-      ;;
-    plain)
-      use_plain_text "Clipboard ist leer (--from plain)."
-      ;;
-    auto)
-      # Reihenfolge per Blueprint: HTML zuerst (häufigster Fall),
-      # dann RTF, dann Plain-Text-Durchreichung.
-      #
-      # AUSNAHME: Microsoft Word legt eigenes HTML aufs Clipboard, das
-      # voller MSO-Namespaces ist und Pandoc komplett überfordert. Wenn
-      # wir das erkennen und RTF auch da ist, nehmen wir RTF.
-      if html=$(try_html); then
-        # MSO-Erkennung nur einmal ausführen und Ergebnis im Flag cachen.
-        # Zwei Aufrufe von is_mso_html() auf demselben String (Bedingung + vlog)
-        # wären unnötig — beide durchlaufen denselben case-Block und ggf. grep.
-        # Hinweis: `local` ist hier nicht erlaubt, wir sind im Toplevel-Skript,
-        # nicht in einer Funktion.
-        mso_flag=0
-        is_mso_html "$html" && mso_flag=1
-
-        conversion_succeeded=0
-        if [ "$mso_flag" -eq 1 ] && rtf=$(try_rtf); then
-          vlog "HTML ist Microsoft-Word-Format — verwende stattdessen RTF"
-          if printf '%s' "$rtf" | convert_rtf "$TO" > "$OUTPUT_FILE"; then
-            conversion_succeeded=1
-          fi
-        else
-          if [ "$mso_flag" -eq 1 ]; then
-            vlog "HTML ist Microsoft-Word-Format, aber kein RTF da — versuche HTML trotzdem (Ergebnis vermutlich unsauber)"
-          fi
-          if printf '%s' "$html" | convert_html "$TO" > "$OUTPUT_FILE"; then
-            conversion_succeeded=1
-          fi
-        fi
-        if [ "$conversion_succeeded" -eq 1 ]; then
-          CONVERTED=1
-        else
-          # Ein vorhandener Rich-Flavor kann leer oder für pandoc nicht
-          # darstellbar sein. Im Auto-Modus ist der Plain-Flavor dann die
-          # sichere Nutzdatenquelle; --from html/rtf bleibt dagegen strikt.
-          use_plain_text \
-            "Rich-Text war leer oder nicht konvertierbar; kein Plain-Text als Fallback." \
-            "Rich-Text ergab keinen Inhalt — Plain-Text durchgereicht"
-        fi
-      elif rtf=$(try_rtf); then
-        if printf '%s' "$rtf" | convert_rtf "$TO" > "$OUTPUT_FILE"; then
-          CONVERTED=1
-        else
-          use_plain_text \
-            "RTF war leer oder nicht konvertierbar; kein Plain-Text als Fallback." \
-            "RTF ergab keinen Inhalt — Plain-Text durchgereicht"
-        fi
-      else
-        # Plain-Text-Fallback. Wenn auch der leer ist → Exit 1.
-        use_plain_text \
-          "Clipboard leer oder kein konvertierbares Format." \
-          "Pfad: Plain-Text durchgereicht"
-      fi
-      ;;
+  case "$FROM" in auto|plain) FROM=plain ;; *) die 2 "--plain widerspricht --from $FROM." ;; esac
+fi
+if [ "$INPUT_MODE" != clipboard ] && [ "$FROM" = auto ]; then
+  case "$INPUT_MODE:$INPUT_PATH" in
+    file:*.html|file:*.htm) FROM=html ;;
+    file:*.rtf) FROM=rtf ;;
+    file:*.txt|file:*.md) FROM=plain ;;
+    *) die 2 "Für diese Eingabe --from html|rtf|plain angeben." ;;
   esac
 fi
+if [ "$INPUT_MODE" = file ]; then
+  [ -f "$INPUT_PATH" ] && [ -r "$INPUT_PATH" ] || die 2 "Eingabedatei ist keine lesbare reguläre Datei: $INPUT_PATH"
+fi
+if [ "$INPUT_MODE" = clipboard ]; then check_dependencies read || exit 2; fi
+if [ "$REPLACE" -eq 1 ]; then check_dependencies write || exit 2; fi
+
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/md-clip.XXXXXX")
+OUTPUT_FILE="$WORK_DIR/output"
+export MD_CLIP_RESULT_FILE="$WORK_DIR/result"
+cleanup_output() { rm -rf "$WORK_DIR"; }
+trap cleanup_output EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Dateien erhalten auch NUL-Bytes und abschließende Newlines. Kein Nutzdaten-
+# Transport über Shell-Variablen; nur die Word-Heuristik liest einen HTML-String.
+read_source() {
+  local kind="$1" dest="$2"
+  if [ "$INPUT_MODE" = stdin ]; then cat > "$dest"
+  elif [ "$INPUT_MODE" = file ]; then cat < "$INPUT_PATH" > "$dest"
+  else
+    case "$kind" in
+      html) clip_read_html > "$dest" ;;
+      rtf) clip_read_rtf > "$dest" ;;
+      plain) clip_read_text > "$dest" ;;
+    esac
+  fi
+}
+
+# Quellen einmal lesen, dann in fester Reihenfolge versuchen. Ein fehlender
+# Flavor ist keine erfolgreiche leere Eingabe und darf nicht ersetzen.
+ORDER="$FROM"
+if [ "$FROM" = auto ]; then
+  read_source html "$WORK_DIR/html" 2>/dev/null || rm -f "$WORK_DIR/html"
+  read_source rtf "$WORK_DIR/rtf" 2>/dev/null || rm -f "$WORK_DIR/rtf"
+  read_source plain "$WORK_DIR/plain" 2>/dev/null || rm -f "$WORK_DIR/plain"
+  ORDER="html rtf plain"
+  if [ -s "$WORK_DIR/html" ] && is_mso_html "$(cat "$WORK_DIR/html")"; then
+    ORDER="rtf html plain"
+    vlog "Microsoft Word: Reihenfolge RTF → HTML → Klartext"
+  fi
+else
+  read_source "$FROM" "$WORK_DIR/$FROM" || die 1 "Quelle $FROM konnte nicht gelesen werden."
+fi
+
+# ---------- Konvertierung und Ergebnisbewertung ----------
+CONVERTED=0
+RESULT=""
+convert_source() {
+  local kind="$1" status
+  : > "$MD_CLIP_RESULT_FILE"
+  if [ "$kind" = plain ]; then
+    cat "$WORK_DIR/plain" > "$OUTPUT_FILE" || return 3
+    RESULT="Klartext übernommen"
+    return 0
+  fi
+  check_dependencies "$kind" || return 2
+  if "convert_$kind" "$TO" < "$WORK_DIR/$kind" > "$OUTPUT_FILE"; then
+    [ -s "$OUTPUT_FILE" ] || return 3
+  else
+    return 3
+  fi
+  CONVERTED=1
+  RESULT="Markdown erzeugt"
+  if [ -s "$MD_CLIP_RESULT_FILE" ]; then RESULT="Struktur vereinfacht; Markdown erzeugt"; fi
+}
+
+HAD_SOURCE=0
+for source_kind in $ORDER; do
+  if [ ! -s "$WORK_DIR/$source_kind" ]; then
+    [ "$FROM" = auto ] && continue
+    die 1 "Quelle $source_kind ist leer."
+  fi
+  HAD_SOURCE=1
+  if convert_source "$source_kind" 2> "$WORK_DIR/diagnostic"; then
+    if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
+    vlog "Quelle: $source_kind"
+    break
+  else
+    status=$?
+    if [ "$FROM" != auto ]; then
+      cat "$WORK_DIR/diagnostic" >&2
+      die "$status" "Konvertierung von $source_kind fehlgeschlagen."
+    fi
+    vlog "Quelle $source_kind nicht konvertierbar (Exit $status); nächste Quelle"
+    if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
+  fi
+done
+[ "$HAD_SOURCE" -eq 1 ] || die 1 "Keine Quelle liefert Inhalt; Clipboard bleibt unverändert."
+[ -n "$RESULT" ] || die 3 "Keine Quelle liefert Inhalt; Clipboard bleibt unverändert."
 
 # Output ausliefern: entweder Clipboard ersetzen oder stdout.
 if [ "$REPLACE" -eq 1 ]; then
@@ -833,13 +855,24 @@ if [ "$REPLACE" -eq 1 ]; then
   # interpretiert Input-Bytes als MacRoman, wenn LC_ALL leer oder C ist,
   # und legt dann FALSCHE Zeichen aufs Clipboard, was beim Einfügen in
   # andere Apps Mojibake produziert.
-  clip_write_text < "$OUTPUT_FILE"
+  if [ "$PREVIEW" -eq 1 ]; then
+    # Eingabe bleibt auf stdin nutzbar; die Entscheidung kommt separat vom TTY.
+    [ -t 2 ] && ( : < /dev/tty ) 2>/dev/null || die 2 "Vorschau benötigt ein interaktives Terminal."
+    printf '%s\n' '--- Vorschau ---' >&2
+    cat "$OUTPUT_FILE" >&2
+    printf '\nClipboard ersetzen? [ja/Nein] ' >&2
+    answer=""
+    IFS= read -r answer < /dev/tty || exit 4
+    [ "$answer" = ja ] || exit 4
+  fi
+  clip_write_text < "$OUTPUT_FILE" || die 3 "Clipboard konnte nicht geschrieben werden."
   OUTPUT_CHARS=$(wc -m < "$OUTPUT_FILE" | tr -d '[:space:]')
-  log "md-clip: Clipboard ersetzt (${OUTPUT_CHARS} Zeichen)."
-  notify "Clipboard nach Markdown konvertiert."
+  log "md-clip: $RESULT; Clipboard ersetzt (${OUTPUT_CHARS} Zeichen)."
+  notify "$RESULT; im Clipboard."
 else
   cat "$OUTPUT_FILE"
-  notify "Markdown auf stdout geschrieben."
+  log "md-clip: $RESULT."
+  notify "$RESULT; auf stdout."
 fi
 
 exit 0

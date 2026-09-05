@@ -4,7 +4,7 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 2026-09-03)
+## Status (Stand: 2026-09-05)
 
 - Verbindlich für die Version sind zwei Quellen, nicht dieses Dokument:
   `bin/md-clip --version` nennt die Produktversion im Quellcode,
@@ -97,6 +97,8 @@ Terminal-Wissen läuft. Im Bundle liegen:
   `--replace --notify`.
 - `Contents/Resources/bin/md-clip` — Kopie des Hauptskripts
 - `Contents/Resources/bin/pipeline.sh` — gemeinsame Produkt-/Test-Pipeline
+- `Contents/Resources/bin/tidy-markdown.pl` — Markdown-Strukturerkennung und Aufräumregeln
+- `Contents/Resources/bin/tables.lua` — strukturelle Tabellenprüfung in pandoc
 - `Contents/Resources/bin/pandoc` — pandoc 3.9.0.2, arm64-only
 - `Contents/Resources/bin/clipboard-html`, `clipboard-rtf` — kompilierte
   Swift-Helper

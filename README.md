@@ -133,6 +133,10 @@ Alle Optionen im Überblick:
 
 | Option | Kurzform | Wirkung |
 |---|---|---|
+| `--stdin` | | Eingabe von stdin; Format ausdrücklich angeben |
+| `--input DATEI` | | Datei lesen, ohne Clipboard-Zugriff |
+| `--doctor [--json]` | | Backend, Werkzeuge, Versionen und Fähigkeiten; keine Inhalte |
+| `--preview` | | Ergebnis vor `--replace` am Terminal bestätigen |
 | `--replace` | `-r` | Ergebnis zurück ins Clipboard schreiben |
 | `--plain` | `-p` | Keine Konvertierung, nur Klartext durchreichen |
 | `--from FORMAT` | `-f` | Eingabe erzwingen: `auto`, `html`, `rtf`, `plain` |
@@ -143,55 +147,90 @@ Alle Optionen im Überblick:
 | `--version` | `-v` | Versionsnummer |
 | `--help` | `-h` | Hilfetext |
 
-## Nutzung durch KI-Agenten und in Skripten (Headless)
+## Dateien, stdin und Skripte
 
-`md-clip` ist für die nicht-interaktive Nutzung ausgelegt — etwa durch KI-Agenten, in Shell-Skripten oder in CI-Schritten. Es stellt nie eine interaktive Rückfrage und verhält sich vollständig über Argumente, Exit-Codes und Standard-Streams steuerbar.
+Clipboard bleibt die Standardquelle. Dateien und stdin benötigen weder einen
+Desktop noch Clipboard-Werkzeuge:
 
-**Ein- und Ausgabe**
+```bash
+printf '<p>Hallo <strong>Welt</strong></p>' | md-clip --stdin --from html
+md-clip --input artikel.html > artikel.md
+md-clip --input notizen.txt --plain > kopie.txt
+md-clip --doctor --json
+```
 
-- **Eingabe ist immer das Clipboard** (macOS: NSPasteboard, Linux: X11-/Wayland-Auswahl), nicht stdin. `md-clip` liest den Inhalt selbst aus dem Clipboard; es nimmt keinen Text über die Standardeingabe entgegen. Ein Agent, der eigenen Text konvertieren will, legt ihn vorher dort ab — per `pbcopy` (macOS), `xclip -selection clipboard` (X11) oder `wl-copy` (Wayland).
-- **Ausgabe geht per Default nach stdout** — reines Markdown, ohne Zusätze. Damit lässt sich das Ergebnis direkt in einer Variablen einfangen:
-  ```bash
-  markdown="$(md-clip --quiet)"
-  ```
-- **`--quiet` / `-q` hält stdout sauber:** Status- und Diagnosemeldungen laufen ausschließlich über stderr. Mit `--quiet` entfallen sie ganz, sodass stdout garantiert nur das konvertierte Markdown enthält — wichtig, wenn ein Agent die Ausgabe maschinell weiterverarbeitet.
-- **`--replace` / `-r` schreibt das Ergebnis zurück ins Clipboard** statt nach stdout. Für reine Pipelines ist die stdout-Variante (ohne `--replace`) meist die richtige.
-- **Plain-Text ist bytegenau:** `--plain` und `--from plain` erhalten auch
-  kein, ein oder mehrere abschließende Newlines; stdout fügt keinen hinzu.
+`--stdin` und `--input` schließen sich aus. stdin verlangt `--from html|rtf|plain`
+oder `--plain`. Bei Dateien erkennt `auto` die Endungen `.html`, `.htm`, `.rtf`,
+`.txt` und `.md` (kleingeschrieben); andere Namen benötigen `--from`. HTML-Dateien
+verwenden UTF-8. Es gibt keine Inhaltsheuristik, die Klartext versehentlich als
+HTML interpretiert. Verzeichnisse, fehlende oder unlesbare Dateien sind Fehler.
+`--plain` widerspricht `--from html` und `--from rtf`.
 
-**Deterministisches Verhalten erzwingen**
+stdout enthält ausschließlich Nutzdaten, auch ohne `--quiet`. Status und
+Diagnose stehen auf stderr. `--quiet` unterdrückt Status, Verbose und HUD;
+Fehler bleiben sichtbar. `--verbose` nennt Quellen, Konvertierungsweg und
+übersprungene Fehler. Erfolgsmeldungen unterscheiden „Markdown erzeugt“,
+„Klartext übernommen“ und „Struktur vereinfacht“.
 
-- **`--from FORMAT` / `-f`** umgeht die Auto-Erkennung und legt die Quelle fest: `html`, `rtf` oder `plain`. Nützlich, wenn ein Agent genau weiß, welches Format auf dem Clipboard liegt, und keine Heuristik will.
-- **`--to FORMAT` / `-t`** wählt den Markdown-Dialekt: `gfm` (Default), `markdown` oder `commonmark`.
+Klartext bleibt bytegenau, einschließlich NUL-Bytes und aller Schlusszeilen,
+und benötigt kein pandoc oder Perl. HTML benötigt pandoc mit Sandbox und
+Lua-Filter-Unterstützung sowie Perl ohne Zusatzmodule. RTF benötigt außerdem
+`textutil` auf macOS bzw. pandocs RTF-Reader unter Linux. Der Installer prüft
+weiterhin die vollständige Clipboard-Installation; die CLI prüft nur den
+benötigten Weg.
 
-**Exit-Codes** (für Verzweigungen im aufrufenden Skript)
+### Reihenfolge und Inhaltsgrenzen
+
+Bei Clipboard-`auto` liest md-clip die vorhandenen HTML-, RTF- und Klartext-
+Quellen einmal ein. Es versucht HTML → RTF → Klartext. Erkennt es Microsoft-
+Word-HTML, gilt RTF → HTML → Klartext. Eine leere, unsichtbare, nicht verfügbare
+oder fehlgeschlagene Rich-Text-Quelle führt zum nächsten Versuch. Ein explizites
+`--from` bleibt strikt und fällt auf keine andere Quelle zurück.
+
+Verschachtelte Tabellen und verbundene Zellen werden strukturell im pandoc-
+Dokument erkannt und abgelehnt. Im Auto-Modus bleibt der Rückfall verfügbar;
+mit expliziter Quelle bleibt das Clipboard bei Fehlern unverändert. Der
+wörtliche Text `[TABLE]` ist erlaubt und löst keine Sonderbehandlung aus.
+Für `gfm` und `commonmark` werden Absätze, Listen, Zitate und Codeblöcke innerhalb
+einer Tabellenzelle durch Leerzeichen getrennt zusammengeführt. Links und
+Inline-Auszeichnung bleiben erhalten. Das Ziel `markdown` behält Zellblöcke als
+Gittertabelle. Die bisherige RTF-Behandlung vereinfacht Layouttabellen weiterhin.
+
+### Ersetzen und Vorschau
+
+`--replace` schreibt auch bei Datei-/stdin-Eingaben ausdrücklich ins Clipboard;
+dann wird zusätzlich das Schreibwerkzeug der Sitzung benötigt. Ohne die Option
+berühren diese Eingaben das Clipboard nicht. Leere oder abgelehnte Ergebnisse
+werden niemals geschrieben. Bei konvertiertem Markdown entfällt vor dem
+Schreiben genau pandocs letztes LF; durchgereichter Klartext bleibt bytegenau.
+
+```bash
+md-clip --preview --replace
+```
+
+Nur `--preview` stellt eine Rückfrage: Es zeigt das Ergebnis auf stderr und
+liest `ja` von `/dev/tty`. Jede andere Antwort oder EOF bricht mit Exit 4 ab.
+Ohne interaktives Terminal ist Vorschau ein Argumentfehler. Der direkte
+Standardweg bleibt ohne Rückfrage. Die Vorschau zeigt den zuvor eingelesenen
+Stand; sie sperrt das Clipboard während der Entscheidung nicht.
+
+Ein Undo ist derzeit nicht verfügbar. Die vorhandenen Schreibwerkzeuge können
+nicht sämtliche ursprünglichen Clipboard-Formate und deren Eigentümer wieder-
+herstellen. Grenzen und Implementierungsschritte stehen in
+[docs/CLIPBOARD-UNDO.md](docs/CLIPBOARD-UNDO.md).
 
 | Code | Bedeutung |
 |---|---|
-| `0` | Erfolg |
-| `1` | Nichts Konvertierbares auf dem Clipboard (z.B. leer) |
-| `2` | Fehlende Abhängigkeit (pandoc; macOS: textutil/Swift-Helper, Linux: xclip bzw. wl-clipboard) oder ungültiges Argument |
-| `3` | Konvertierungsfehler (pandoc o.ä. mit Non-Zero-Exit) |
+| `0` | Nutzdaten ausgegeben/geschrieben oder Diagnose erfolgreich |
+| `1` | Quelle fehlt, ist leer oder konnte nicht gelesen werden |
+| `2` | Ungültige Argumente/Datei oder benötigte Abhängigkeit fehlt |
+| `3` | Konvertierung nicht darstellbar, alle vorhandenen Quellen scheitern oder Schreiben fehlgeschlagen |
+| `4` | Vorschau abgebrochen |
 
-**Beispiel — Agent konvertiert eigenen HTML-Text:**
-
-```bash
-printf '%s' "$html" | pbcopy            # macOS: eigenen Inhalt ins Clipboard legen
-if markdown="$(md-clip --from html --quiet)"; then
-  printf '%s\n' "$markdown"             # nur sauberes Markdown auf stdout
-else
-  echo "md-clip fehlgeschlagen (Exit $?)" >&2
-fi
-```
-
-Unter Linux tritt an die Stelle von `pbcopy` das Werkzeug der Sitzung, mit explizitem HTML-Flavor:
-
-```bash
-printf '%s' "$html" | xclip -selection clipboard -t text/html   # X11
-printf '%s' "$html" | wl-copy --type text/html                  # Wayland
-```
-
-**Voraussetzung:** `md-clip` greift auf das Clipboard der GUI-Sitzung zu. In einer angemeldeten macOS- oder Linux-Desktop-Sitzung (auch im Terminal) funktioniert das. In einer reinen SSH- oder Hintergrund-Umgebung ohne Clipboard-Zugriff steht keines zur Verfügung — unter Linux lässt sich das für Skripte und CI mit `xvfb-run md-clip …` umgehen, das startet einen unsichtbaren X-Server samt Clipboard.
+`--doctor [--json]` prüft Werkzeuge und die tatsächlichen pandoc-Fähigkeiten.
+Fehlende Funktionen erscheinen als `false`; der Diagnoseaufruf selbst liefert
+Exit 0. `--json` ist nur mit `--doctor` erlaubt. Doctor lässt sich nicht mit
+Datei-/stdin-Eingabe, Vorschau oder Ersetzen kombinieren.
 
 ## Dock-App (macOS)
 
@@ -302,6 +341,24 @@ Bundle-Layout; ein sauberer Checkout braucht keine ignorierten Alt-Binaries.
 Der RTF-Test läuft auf beiden Plattformen gegen dieselbe Erwartungsdatei,
 obwohl dahinter zwei verschiedene RTF-Parser stecken (`textutil` auf macOS,
 pandoc auf Linux).
+
+Zusätzliche Tests ohne Host-Clipboard:
+
+```bash
+MD_CLIP_SKIP_CLIPBOARD=1 ./tests/run-tests.sh
+./tests/test-plain-newlines.sh
+./tests/test-install-safety.sh
+./tests/test-dependencies.sh
+./tests/test-wrapper-safety.sh
+python3 tests/test-cli-inputs.py
+python3 tests/benchmark.py --runs 5
+```
+
+`tests/run-wayland.sh` startet als unprivilegierter Linux-Benutzer einen eigenen
+headless sway-Compositor (Pakete `sway`, `wl-clipboard`, `pandoc`). Es lehnt eine
+bereits gesetzte `WAYLAND_DISPLAY` ab und beendet den eigenen Compositor nach
+dem Test. Die CI prüft Ubuntu mit X11 und Wayland sowie macOS mit Fixtures und
+isolierten Clipboard-Attrappen.
 
 ## Mitwirken
 

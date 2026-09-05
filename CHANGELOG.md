@@ -2,11 +2,25 @@
 
 ## 1.3.0 — 2026-09-05
 
-- Tabellen werden vor dem Writer strukturell geprüft; nicht darstellbare
-  Verschachtelungen und verbundene Zellen werden abgelehnt. Komplexe Zellen
-  werden für GFM/CommonMark lesbar zusammengeführt.
-- Die Markdown-Nachbearbeitung liegt in einer eigenen Perl-Datei; Bundle und
-  isolierte Wrapper-Tests führen alle Pipeline-Ressourcen mit.
+- Verschachtelte Tabellen und verbundene Zellen werden vor der Ausgabe anhand
+  von pandocs Dokumentstruktur abgelehnt. Auto versucht danach die übrigen
+  Quellen; explizites `--from` lässt das Clipboard unverändert. Wörtliches
+  `[TABLE]` bleibt normaler Text.
+- GFM-/CommonMark-Zellen behalten Text aus Absätzen, Listen, Zitaten und Code
+  mit Leerzeichen zwischen Blöcken. Die Statusmeldung nennt die Vereinfachung.
+- Auto versucht HTML → RTF → Klartext; bei Word RTF → HTML → Klartext. Status
+  und HUD unterscheiden Konvertierung, Klartextübernahme und Vereinfachung.
+- `--stdin` und `--input DATEI` funktionieren ohne Desktop. Klartext benötigt
+  kein pandoc und bleibt bytegenau. Dependencies werden je Weg geprüft.
+- `--doctor [--json]` zeigt Werkzeuge und geprüfte Fähigkeiten ohne Inhalte.
+  `--preview --replace` zeigt das Ergebnis und verlangt `ja` am Terminal.
+- Markdown-Aufräumregeln liegen in `lib/tidy-markdown.pl`; die gemeinsame
+  Pipeline bleibt Einstieg. Bundle-Bau und Tests führen die Ressourcen mit.
+- Wrapper-Tests sind nach Verantwortung aufgeteilt; Tabellen-Roundtrips,
+  CLI-Attrappen für drei Backends, macOS-CI und ein isolierter Wayland-Test
+  ergänzen die bestehende Abdeckung.
+- Vollständiges Undo bleibt offen; `docs/CLIPBOARD-UNDO.md` beschreibt die
+  Format-/Eigentümergrenzen und den Folgeplan.
 
 ## 1.2.9 — 2026-09-03
 

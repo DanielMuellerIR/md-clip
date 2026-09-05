@@ -13,6 +13,8 @@ FAKE_BIN="$TEST_ROOT/fake-bin"
 mkdir -p "$RUNTIME" "$FAKE_BIN"
 cp "$PROJECT_ROOT/bin/md-clip" "$RUNTIME/md-clip"
 cp "$PROJECT_ROOT/lib/pipeline.sh" "$RUNTIME/pipeline.sh"
+cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$RUNTIME/tidy-markdown.pl"
+cp "$PROJECT_ROOT/lib/tables.lua" "$RUNTIME/tables.lua"
 
 cat > "$RUNTIME/xclip" <<'SH'
 #!/bin/sh
@@ -28,7 +30,7 @@ write_pandoc_mock "$RUNTIME"
 chmod +x "$RUNTIME/"*
 
 export PATH="$FAKE_BIN:/usr/bin:/bin"
-if "$RUNTIME/md-clip" --plain --quiet > "$TEST_ROOT/product.out" 2> "$TEST_ROOT/product.err"; then
+if "$RUNTIME/md-clip" --stdin --from rtf --quiet <<< '{\rtf1 text}' > "$TEST_ROOT/product.out" 2> "$TEST_ROOT/product.err"; then
   echo "✗ Produkt akzeptiert pandoc ohne RTF-Reader" >&2
   exit 1
 fi
@@ -55,7 +57,7 @@ export MD_CLIP_TEST_PANDOC_SANDBOX=0
 write_install_platform_mocks "$FAKE_BIN"
 write_pandoc_mock "$RUNTIME"
 
-if "$RUNTIME/md-clip" --plain --quiet > "$TEST_ROOT/product2.out" 2> "$TEST_ROOT/product2.err"; then
+if "$RUNTIME/md-clip" --stdin --from html --quiet <<< '<p>text</p>' > "$TEST_ROOT/product2.out" 2> "$TEST_ROOT/product2.err"; then
   echo "✗ Produkt akzeptiert pandoc ohne --sandbox" >&2
   exit 1
 fi

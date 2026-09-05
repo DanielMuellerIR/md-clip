@@ -115,3 +115,7 @@ aktuelle stabile Release, etwa wenn dessen automatischer Appcast-Lauf
 fehlgeschlagen ist. Ein älteres Tag, Prerelease oder Entwurf wird abgelehnt.
 Das Release muss genau ein `*.dmg` enthalten; der Feed enthält nur das aktuelle
 Vollupdate und keine Deltas.
+
+Die Pipeline-Ressourcen `pipeline.sh`, `tidy-markdown.pl` und `tables.lua`
+liegen gemeinsam unter `Contents/Resources/bin/`. Der Bundle-Prüfer lehnt
+fehlende oder leere Perl-/Lua-Ressourcen vor dem Start des Produktcodes ab.
