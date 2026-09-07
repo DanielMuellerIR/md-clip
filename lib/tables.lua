@@ -1,4 +1,4 @@
--- Tabellen vor dem Markdown-Writer prüfen. HTML-Regulärausdrücke können weder
+-- Inhalt und Tabellen vor dem Markdown-Writer prüfen. HTML-Regulärausdrücke können weder
 -- verschachtelte Zellen noch Kommentare/Attribute zuverlässig unterscheiden.
 local simplified = false
 
@@ -85,6 +85,26 @@ function Table(tbl)
 end
 
 function Pandoc(doc)
+  -- Nur Nutzinhalt sammeln: Strong/Emph, Listenmarker, Linkziele und
+  -- Codezäune dürfen einen unsichtbaren Text nicht als sichtbar ausweisen.
+  local content = {}
+  local function text(node) content[#content + 1] = node.text end
+  local function visible() content[#content + 1] = 'visible' end
+  -- Metadaten (etwa der HTML-Titel) erscheinen nicht im Markdown-Body.
+  pandoc.Pandoc(doc.blocks):walk {
+    Str = text, Code = text, CodeBlock = text, Math = text,
+    Image = visible, HorizontalRule = visible, Table = visible
+  }
+  -- Perl bringt die Unicode-Eigenschaften bereits als Kernbordmittel mit.
+  -- pandoc.pipe übergibt Text über stdin, ohne Shell oder temporäre Datei.
+  local verdict = pandoc.pipe('perl', { '-0e', [[
+    my $text = do { local $/; <STDIN> } // q{};
+    utf8::decode($text);
+    print $text =~ /[^\s\p{White_Space}\p{Default_Ignorable_Code_Point}]/ ? 'yes' : 'no';
+  ]] }, table.concat(content, '\n'))
+  if verdict ~= 'yes' then
+    error('Dokument enthält keinen sichtbaren Inhalt.')
+  end
   if simplified then
     local path = os.getenv('MD_CLIP_RESULT_FILE')
     if path and path ~= '' then

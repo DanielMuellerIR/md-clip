@@ -110,7 +110,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.3.0"
+VERSION="1.3.1"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -665,12 +665,6 @@ fi
 # shellcheck source=../lib/pipeline.sh
 source "$PIPELINE_LIB"
 
-# try_html: Versucht HTML aus dem Clipboard zu holen.
-# Liefert HTML auf stdout und Exit 0, wenn vorhanden; sonst Exit 1.
-try_html() {
-  clip_read_html
-}
-
 # is_mso_html: Prüft, ob ein HTML-Blob aus Microsoft Word stammt.
 # Word legt seine eigene HTML-Variante aufs Clipboard, voller Office-XML-
 # Namespaces und mso-*-CSS — strukturell so verbogen, dass Pandoc damit
@@ -706,12 +700,6 @@ is_mso_html() {
   [ "${count:-0}" -ge 10 ] && return 0
 
   return 1
-}
-
-# try_rtf: Versucht RTF aus dem Clipboard zu holen.
-# Liefert RTF auf stdout und Exit 0, wenn vorhanden; sonst Exit 1.
-try_rtf() {
-  clip_read_rtf
 }
 
 # ---------- Quellenwahl und Eingabevertrag ----------
@@ -870,7 +858,7 @@ if [ "$REPLACE" -eq 1 ]; then
   log "md-clip: $RESULT; Clipboard ersetzt (${OUTPUT_CHARS} Zeichen)."
   notify "$RESULT; im Clipboard."
 else
-  cat "$OUTPUT_FILE"
+  cat "$OUTPUT_FILE" || die 3 "stdout konnte nicht geschrieben werden."
   log "md-clip: $RESULT."
   notify "$RESULT; auf stdout."
 fi

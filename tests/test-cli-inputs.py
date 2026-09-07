@@ -58,7 +58,23 @@ sys.stdout.buffer.write(f.read_bytes())
     f=base/'file with space.txt';f.write_bytes(b'file\n\n')
     assert run(['--input',str(f)]).stdout==f.read_bytes()
     run(['--stdin','--plain'],b'',1)
+    # Ein nur lesbarer stdout muss als Ausgabefehler (3) gemeldet werden.
+    with (base/'file with space.txt').open('rb') as readonly:
+        failed=subprocess.run([str(runtime/'md-clip'),'--stdin','--plain'],
+                              input=b'x',stdout=readonly,stderr=subprocess.PIPE,env=env,timeout=20)
+    assert failed.returncode==3,(failed.returncode,failed.stderr)
+    assert b'stdout' in failed.stderr
+    invisible_html=[b'<p><strong>&lrm;</strong></p>',
+                    b'<p><em>&#x200B;</em></p>',b'<p><strong>&nbsp;</strong></p>',
+                    b'<blockquote><p><em>&rlm;</em></p></blockquote>',
+                    b'<pre><code>&#x2061;</code></pre>',
+                    b'<html><head><title>Title</title></head><body><b>&lrm;</b></body></html>']
     for target in ('gfm','markdown','commonmark'):
+        for html in invisible_html:
+            run(['--stdin','--from','html','--to',target],html,3)
+        for html in (b'<p><strong>visible</strong></p>',b'<p><code>**</code></p>',
+                     b'<img src="image.png">',b'<hr>'):
+            assert run(['--stdin','--from','html','--to',target],html).stdout.strip()
         run(['--stdin','--from','html','--to',target],NESTED,3)
         run(['--stdin','--from','html','--to',target],NESTED.replace(b'<table>',b'<TaBlE\n>'),3)
         p=run(['--stdin','--from','html','--to',target],b'<p>[TABLE]</p>')
@@ -111,6 +127,14 @@ sys.stdout.buffer.write(f.read_bytes())
             assert b'Klartext' in p.stderr and not p.stdout
             (base/'written').write_bytes(b'protected')
             run(['--replace','--from','html','--to',target],rc=3)
+            assert (base/'written').read_bytes()==b'protected'
+        for html in invisible_html:
+            (base/'html').write_bytes(html)
+            assert run().stdout==b'plain\n\n'
+            run(['--replace'])
+            assert (base/'written').read_bytes()==b'plain\n\n'
+            (base/'written').write_bytes(b'protected')
+            run(['--replace','--from','html'],rc=3)
             assert (base/'written').read_bytes()==b'protected'
         (base/'html').write_bytes(b'<html xmlns:o="urn:schemas-microsoft-com:office:office"><p>HTML rescue</p></html>')
         (base/'rtf').write_bytes(b'{\\rtf1\\ansi }')

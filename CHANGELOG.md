@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1 — 2026-09-08
+
+- Formatierte unsichtbare Zeichen gelten vor der Markdown-Ausgabe als leer.
+  Auto verwendet dann die nächste Quelle; explizites `--from html` bricht
+  bei solchem Inhalt vor dem Ersetzen des Clipboards ab. Bilder, Trennlinien und sichtbarer Code bleiben erhalten.
+- Schreibfehler auf stdout liefern wie dokumentiert Exit 3.
+- Zwei unbenutzte Wrapper der früheren Quellenwahl entfernt.
+
 ## 1.3.0 — 2026-09-05
 
 - Verschachtelte Tabellen und verbundene Zellen werden vor der Ausgabe anhand

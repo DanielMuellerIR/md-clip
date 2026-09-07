@@ -293,20 +293,10 @@ pandoc_table_extensions() {
 run_pandoc() {
   local target_format="${1:-gfm}" table_extensions
   table_extensions="$(pandoc_table_extensions "$target_format")"
-  # Ein einziger gepufferter Scan statt Tempdatei, cat und grep. Die
-  # Entscheidung über Darstellbarkeit trifft weiterhin allein der AST-Filter.
-  # Kommentare/Attribute dürfen falsch positiv treffen; mehrzeilige Tags
-  # müssen erfasst werden. Listenform von open übergibt Argumente ohne Shell.
-  perl -0777 -e '
-    my ($target, $filter) = @ARGV;
-    my $html = do { local $/; <STDIN> } // q{};
-    my @args = (q{pandoc}, q{-f}, q{html}, q{-t}, $target,
-                q{--wrap=none}, q{--sandbox});
-    push @args, qq{--lua-filter=$filter} if $html =~ /<table(?=[\s\/>])/i;
-    open(my $writer, q{|-}, @args) or die "pandoc: $!";
-    print {$writer} $html or die "pandoc stdin: $!";
-    close($writer) or exit 1;
-  ' "${target_format}-raw_html${table_extensions}" "$_MD_CLIP_LIB_DIR/tables.lua"
+  # Der AST-Filter prüft auch Dokumente ohne Tabellen auf sichtbaren Inhalt.
+  # Erst danach darf der Writer Auszeichnungsmarker hinzufügen.
+  pandoc -f html -t "${target_format}-raw_html${table_extensions}" \
+    --wrap=none --sandbox --lua-filter="$_MD_CLIP_LIB_DIR/tables.lua"
 }
 
 # Pandoc schreibt auch für HTML ohne darstellbaren Inhalt ein Schluss-LF.

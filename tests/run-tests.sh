@@ -788,6 +788,7 @@ fi
 perl_module_uses=$(
   grep -nE "^[[:space:]]*(use|require)[[:space:]]+[A-Z]" \
     "$PROJECT_ROOT/lib/pipeline.sh" "$PROJECT_ROOT/lib/tidy-markdown.pl" "$PROJECT_ROOT/bin/md-clip" \
+    "$PROJECT_ROOT/lib/tables.lua" \
     | grep -vE "(use|require)[[:space:]]+(strict|warnings)\b" || true
 )
 if [ -n "$perl_module_uses" ]; then
