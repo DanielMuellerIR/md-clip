@@ -38,6 +38,14 @@
   im Arbeitsbaum und wird von `.gitignore` als „früherer Ausgabeort" geführt.
   Der heutige Build schreibt nach `build/md-clip.app`. Ebenfalls nicht gelöscht.
 
+## Release-Lücke nach 1.2.9
+
+- Entscheiden, ob der bestehende Tag `v1.3.0` veröffentlicht oder ein neu
+  gebauter und getaggter Release `v1.3.1` daraus wird. Für die gewählte Version
+  ein notarisiertes DMG mit festgelegtem Finder-Layout (oder ausdrücklich
+  `--no-finder-layout`) erzeugen und anschließend GitHub-Release sowie
+  signierten Appcast prüfen.
+
 ## Geplante Erweiterung
 
 - **Einmaliges Undo mit vollständiger Formatsicherung.** Noch nicht implementiert;
