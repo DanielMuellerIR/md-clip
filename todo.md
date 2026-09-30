@@ -5,9 +5,9 @@
 - Die beiden Reviews vom 2026-08-19 sind mit dem aktuellen Code abgeglichen:
   15 Funde im ersten und sechs im zweiten Review. Zitatlisten, HTML-Attributfolge
   und direkte Signaturprüfung der Clipboard-Helfer sind in 1.4.0 korrigiert.
-  Frühere Fixes wurden nicht erneut umgesetzt. Noch offen sind:
-  - Ein fehlendes Icon bleibt beim App-Build bewusst optional; eine Änderung
-    braucht eine Produktentscheidung.
+  Frühere Fixes wurden nicht erneut umgesetzt. Das App-Icon ist verpflichtend:
+  Der Build prüft es vor Downloads und dem Entfernen eines vorhandenen Bundles;
+  der Bundle-Prüfer lehnt fehlende, leere oder unlesbare Icon-Dateien ebenfalls ab.
   Zwei nur paraphrasiert erhaltene Installationsfunde lassen sich ohne
   ursprüngliche Reproduktion nicht als aktuelle Fehler bestätigen.
 

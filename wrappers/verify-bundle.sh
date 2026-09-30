@@ -61,6 +61,11 @@ SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
   echo "HUD-Helfer fehlt im Bundle." >&2
   exit 66
 }
+ICON="$APP/Contents/Resources/md-clip.icns"
+[ -f "$ICON" ] && [ -s "$ICON" ] && [ -r "$ICON" ] || {
+  echo "App-Icon fehlt, ist leer oder nicht lesbar: $ICON" >&2
+  exit 66
+}
 for tool in md-clip pipeline.sh pandoc clipboard-html clipboard-rtf clipboard-undo; do
   [ -x "$APP/Contents/Resources/bin/$tool" ] || {
     echo "Werkzeug fehlt im Bundle: Resources/bin/$tool" >&2

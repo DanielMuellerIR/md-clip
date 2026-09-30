@@ -71,6 +71,15 @@ BUILD_DIR="$PROJECT_ROOT/build"
 CACHE_DIR="$BUILD_DIR/cache"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
+# Das Icon gehört zum App-Vertrag. Vor Downloads, Compilerläufen und dem
+# Entfernen eines vorhandenen Bundles prüfen, damit ein unvollständiger
+# Quellstand keinen brauchbaren Build verdrängt.
+ICNS_SOURCE="$PROJECT_ROOT/assets/md-clip.icns"
+if [ ! -f "$ICNS_SOURCE" ] || [ ! -s "$ICNS_SOURCE" ] || [ ! -r "$ICNS_SOURCE" ]; then
+  echo "FEHLER: App-Icon fehlt, ist leer oder nicht lesbar: $ICNS_SOURCE" >&2
+  exit 66
+fi
+
 # ---------- Aufräumen + Verzeichnisse ----------
 
 # Cache überleben lassen — pandoc-Downloads sind groß (~50 MB pro Arch).
@@ -239,14 +248,10 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/md-clip-hud"
 # Icon-Datei mitliefern. .icns muss in Contents/Resources/ liegen und im
 # Info.plist als CFBundleIconFile referenziert werden, damit macOS es im
 # Dock, Finder und Launchpad anzeigt.
-ICNS_SOURCE="$PROJECT_ROOT/assets/md-clip.icns"
-if [ -f "$ICNS_SOURCE" ]; then
-  cp "$ICNS_SOURCE" "$APP_BUNDLE/Contents/Resources/md-clip.icns"
-  echo "✓ Icon mitgeliefert"
-else
-  echo "WARNUNG: kein Icon gefunden unter $ICNS_SOURCE" >&2
-  echo "         (App bekommt das macOS-Standard-Icon)" >&2
-fi
+# BEGIN APP_ICON_COPY
+cp "$ICNS_SOURCE" "$APP_BUNDLE/Contents/Resources/md-clip.icns"
+echo "✓ Icon mitgeliefert"
+# END APP_ICON_COPY
 
 chmod +x "$APP_BUNDLE/Contents/Resources/bin/"*
 

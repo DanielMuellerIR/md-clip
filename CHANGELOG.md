@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.2 — 2026-10-01
+
+- Das macOS-App-Icon ist verpflichtend. Fehlende, leere oder unlesbare
+  Icon-Dateien brechen den Build vor Downloads und dem Entfernen eines
+  vorhandenen Bundles ab. Die Bundle-Prüfung verlangt dasselbe Icon.
+
 ## 1.4.0 — 2026-09-30
 
 - `--replace` sichert vor der Konvertierung alle lesbaren Clipboard-Formate

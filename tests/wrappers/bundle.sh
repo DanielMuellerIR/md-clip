@@ -152,6 +152,7 @@ for executable in \
   : > "$executable"
   chmod +x "$executable"
 done
+printf 'icon\n' > "$XPC_TEST_APP/Contents/Resources/md-clip.icns"
 for resource in tidy-markdown.pl tables.lua; do
   printf 'resource\n' > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
 done
@@ -291,3 +292,86 @@ if verify_trusted_build_cli "$SMOKE_SOURCE" "$SMOKE_BUNDLE" 1.2.4 >/dev/null 2>&
   exit 1
 fi
 echo "✓ Lokaler Build bindet die CLI an die Quelle und führt --version aus"
+
+# Fehlendes Icon muss vor Downloads und dem Entfernen des Alt-Bundles scheitern.
+ICON_PROJECT="$TEST_ROOT/icon-project"
+mkdir -p "$ICON_PROJECT/wrappers" "$ICON_PROJECT/bin" "$ICON_PROJECT/assets" \
+  "$ICON_PROJECT/build/md-clip.app" "$ICON_PROJECT/fake-bin"
+cp "$PROJECT_ROOT/wrappers/build-app-bundled.sh" \
+  "$PROJECT_ROOT/wrappers/version.sh" "$PROJECT_ROOT/wrappers/verified-cache.sh" \
+  "$ICON_PROJECT/wrappers/"
+cp "$PROJECT_ROOT/bin/md-clip" "$ICON_PROJECT/bin/"
+printf 'alter Build\n' > "$ICON_PROJECT/build/md-clip.app/keep"
+export MD_CLIP_ICON_SIDE_EFFECT="$ICON_PROJECT/side-effect"
+for tool in rm curl swiftc; do
+  cat > "$ICON_PROJECT/fake-bin/$tool" <<'SH'
+#!/bin/sh
+printf '%s\n' "$0" >> "$MD_CLIP_ICON_SIDE_EFFECT"
+exit 77
+SH
+  chmod +x "$ICON_PROJECT/fake-bin/$tool"
+done
+for state in missing empty directory unreadable; do
+  icon_source="$ICON_PROJECT/assets/md-clip.icns"
+  case "$state" in
+    missing) ;;
+    empty) : > "$icon_source" ;;
+    directory) rm -f "$icon_source"; mkdir "$icon_source" ;;
+    unreadable) rmdir "$icon_source"; printf 'icon\n' > "$icon_source"; chmod 000 "$icon_source" ;;
+  esac
+  if [ "$state" = unreadable ] && [ -r "$icon_source" ]; then
+    echo "⚠ Unlesbares Quell-Icon übersprungen: Prozess kann chmod 000 lesen"
+    continue
+  fi
+  set +e
+  PATH="$ICON_PROJECT/fake-bin:$PATH" bash "$ICON_PROJECT/wrappers/build-app-bundled.sh" \
+    > "$ICON_PROJECT/build.out" 2> "$ICON_PROJECT/build.err"
+  icon_status=$?
+  set -e
+  [ "$icon_status" -eq 66 ]
+  grep -Fq 'App-Icon fehlt, ist leer oder nicht lesbar' "$ICON_PROJECT/build.err"
+  [ ! -e "$MD_CLIP_ICON_SIDE_EFFECT" ]
+  grep -Fxq 'alter Build' "$ICON_PROJECT/build/md-clip.app/keep"
+done
+chmod 644 "$icon_source"
+set +e
+PATH="$ICON_PROJECT/fake-bin:$PATH" bash "$ICON_PROJECT/wrappers/build-app-bundled.sh" \
+  > "$ICON_PROJECT/build.out" 2> "$ICON_PROJECT/build.err"
+icon_status=$?
+set -e
+[ "$icon_status" -eq 77 ]
+[ -s "$MD_CLIP_ICON_SIDE_EFFECT" ]
+echo "✓ App-Build verlangt ein lesbares, nicht leeres Icon vor Nebenwirkungen"
+
+ICON_COPY="$TEST_ROOT/icon-copy.sh"
+extract_shell_block "$PROJECT_ROOT/wrappers/build-app-bundled.sh" APP_ICON_COPY "$ICON_COPY"
+ICNS_SOURCE="$PROJECT_ROOT/assets/md-clip.icns"
+APP_BUNDLE="$TEST_ROOT/icon-copy.app"
+mkdir -p "$APP_BUNDLE/Contents/Resources"
+source "$ICON_COPY"
+cmp "$ICNS_SOURCE" "$APP_BUNDLE/Contents/Resources/md-clip.icns"
+echo "✓ App-Build kopiert das vorhandene Icon bytegenau"
+
+# Der eigenständige Prüfer muss denselben Vertrag auch bei fremden Bundles
+# durchsetzen, bevor Mach-O-Werkzeuge oder eingebetteter Produktcode laufen.
+for state in missing empty directory unreadable; do
+  bundle_icon="$XPC_TEST_APP/Contents/Resources/md-clip.icns"
+  case "$state" in
+    missing) rm -f "$bundle_icon" ;;
+    empty) : > "$bundle_icon" ;;
+    directory) rm -f "$bundle_icon"; mkdir "$bundle_icon" ;;
+    unreadable) rmdir "$bundle_icon"; printf 'icon\n' > "$bundle_icon"; chmod 000 "$bundle_icon" ;;
+  esac
+  if [ "$state" = unreadable ] && [ -r "$bundle_icon" ]; then
+    echo "⚠ Unlesbares Bundle-Icon übersprungen: Prozess kann chmod 000 lesen"
+    continue
+  fi
+  set +e
+  bash "$VERIFY_BUNDLE" "$XPC_TEST_APP" > "$TEST_ROOT/icon-verify.out" 2> "$TEST_ROOT/icon-verify.err"
+  icon_status=$?
+  set -e
+  [ "$icon_status" -eq 66 ]
+  grep -Fq 'App-Icon fehlt, ist leer oder nicht lesbar' "$TEST_ROOT/icon-verify.err"
+done
+chmod 644 "$bundle_icon"
+echo "✓ Bundle-Prüfer lehnt fehlende, leere und unlesbare Icons ab"
