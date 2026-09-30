@@ -42,9 +42,8 @@ SH
 chmod +x "$TEST_ROOT/runtime/"*
 
 # Clipboard-Attrappen für ALLE drei Plattform-Wege. Welchen md-clip nimmt,
-# entscheidet es selbst über `uname -s` und WAYLAND_DISPLAY — der Test schreibt
-# ihm das bewusst nicht vor, sondern prüft den Weg, der hier wirklich läuft.
-# Ohne die Linux-Attrappen wäre die Bytegenauigkeits-Garantie dort unbewiesen.
+# entscheidet es über `uname -s` und WAYLAND_DISPLAY. Die Matrix wählt jeden
+# Weg ausdrücklich; der Host allein würde die beiden anderen Wege nicht belegen.
 cat > "$TEST_ROOT/fake-bin/pbpaste" <<'SH'
 #!/bin/sh
 exec /bin/cat "$MD_CLIP_TEST_INPUT"
@@ -126,18 +125,46 @@ printf 'mehrere Newlines\n\n\n' > "$TEST_ROOT/many.input"
 printf '\n\n' > "$TEST_ROOT/only-newlines.input"
 : > "$TEST_ROOT/empty.input"
 
-check_case none "$TEST_ROOT/none.input"
-check_case one "$TEST_ROOT/one.input"
-check_case many "$TEST_ROOT/many.input"
-check_case only-newlines "$TEST_ROOT/only-newlines.input"
+check_plain_platform() {
+  local name="$1"
+  export MD_CLIP_TEST_UNAME="$2"
+  export WAYLAND_DISPLAY="$3"
+  local variant
+  for variant in none one many only-newlines; do
+    check_case "$name-$variant" "$TEST_ROOT/$variant.input"
+  done
 
-export MD_CLIP_TEST_INPUT="$TEST_ROOT/empty.input"
-export MD_CLIP_TEST_OUTPUT="$TEST_ROOT/empty.clipboard"
-if "$TEST_ROOT/runtime/md-clip" --plain --quiet > "$TEST_ROOT/empty.stdout" 2>/dev/null; then
-  echo "✗ plain-empty: leeres Clipboard wurde akzeptiert" >&2
-  exit 1
+  export MD_CLIP_TEST_INPUT="$TEST_ROOT/empty.input"
+  export MD_CLIP_TEST_OUTPUT="$TEST_ROOT/$name-empty.clipboard"
+  local mode status
+  for mode in stdout replace; do
+    printf 'unverändert\n' > "$MD_CLIP_TEST_OUTPUT"
+    cp "$MD_CLIP_TEST_OUTPUT" "$TEST_ROOT/$name-empty.expected"
+    set +e
+    if [ "$mode" = replace ]; then
+      "$TEST_ROOT/runtime/md-clip" --plain --replace --quiet \
+        > "$TEST_ROOT/$name-empty.stdout" 2> "$TEST_ROOT/$name-empty.stderr"
+    else
+      "$TEST_ROOT/runtime/md-clip" --plain --quiet \
+        > "$TEST_ROOT/$name-empty.stdout" 2> "$TEST_ROOT/$name-empty.stderr"
+    fi
+    status=$?
+    set -e
+    [ "$status" -eq 1 ]
+    [ ! -s "$TEST_ROOT/$name-empty.stdout" ]
+    cmp "$TEST_ROOT/$name-empty.expected" "$MD_CLIP_TEST_OUTPUT"
+    printf '✓ plain-%s-empty-%s (Exit 1, keine Ausgabe/Ersetzung)\n' "$name" "$mode"
+  done
+}
+
+if [ "$(/usr/bin/uname -s)" = Darwin ]; then
+  check_plain_platform macos Darwin ""
+else
+  printf '⊘ Darwin-Plain-Matrix: benötigt die macOS-Locale en_US.UTF-8\n'
 fi
-printf '✓ plain-empty (Exit 1)\n'
+check_plain_platform x11 Linux ""
+check_plain_platform wayland Linux wayland-test
+unset MD_CLIP_TEST_UNAME WAYLAND_DISPLAY
 
 # --quiet gewinnt auch dann, wenn --verbose zusätzlich gesetzt ist. Das ist
 # der dokumentierte Vertrag für maschinelle Aufrufer; geprüft werden alle drei

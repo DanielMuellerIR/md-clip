@@ -41,11 +41,29 @@ abs="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 ext="${file##*.}"
 ext="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
 
-# --- Loader-Helper im privaten Testverzeichnis kompilieren ---
-LOADER_SRC="tests/load-clipboard.swift"
+case "$ext" in
+  rtf|html|htm|txt) ;;
+  *)
+    echo "Unbekannte Endung: .$ext (unterstützt: .rtf, .html/.htm, .txt)" >&2
+    exit 2
+    ;;
+esac
+
+# Alle benötigten Helfer vor dem ersten Clipboard-Schreibzugriff bauen.
+# Das private Bundle-Layout verwendet dieselbe Pipeline wie das Produkt und
+# funktioniert auch im sauberen Checkout ohne install.sh und ignorierte Binaries.
 LOADER_BIN="$TEST_RUNTIME/load-clipboard"
-echo "==> Kompiliere $LOADER_SRC"
-swiftc "$LOADER_SRC" -o "$LOADER_BIN"
+echo "==> Kompiliere tests/load-clipboard.swift"
+swiftc "$PROJECT_ROOT/tests/load-clipboard.swift" -o "$LOADER_BIN"
+for helper in clipboard-html clipboard-rtf; do
+  echo "==> Kompiliere helpers/$helper.swift"
+  swiftc "$PROJECT_ROOT/helpers/$helper.swift" -o "$TEST_RUNTIME/$helper"
+done
+cp "$PROJECT_ROOT/bin/md-clip" "$TEST_RUNTIME/md-clip"
+for resource in pipeline.sh tidy-markdown.pl tables.lua; do
+  cp "$PROJECT_ROOT/lib/$resource" "$TEST_RUNTIME/$resource"
+done
+export MD_CLIP_COMPARE_RUNTIME="$TEST_RUNTIME"
 
 # --- Datei mit dem passenden Flavor aufs Clipboard laden ---
 case "$ext" in
@@ -60,10 +78,6 @@ case "$ext" in
   txt)
     echo "==> Lade $file als Plain Text (via pbcopy)"
     pbcopy < "$abs"
-    ;;
-  *)
-    echo "Unbekannte Endung: .$ext (unterstützt: .rtf, .html/.htm, .txt)" >&2
-    exit 2
     ;;
 esac
 

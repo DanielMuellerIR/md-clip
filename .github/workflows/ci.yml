@@ -86,6 +86,9 @@ jobs:
       - name: CLI-Dateien und strukturelle Tabellenregressionen
         run: python3 tests/test-cli-inputs.py
 
+      - name: Compare-Skripte ohne System-Clipboard
+        run: python3 tests/test-compare.py
+
       - name: Wayland mit isoliertem Compositor
         run: env -u WAYLAND_DISPLAY ./tests/run-wayland.sh
 
@@ -109,3 +112,4 @@ jobs:
           bash tests/test-dependencies.sh
           bash tests/test-wrapper-safety.sh
           python3 tests/test-cli-inputs.py
+          python3 tests/test-compare.py

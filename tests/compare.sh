@@ -23,11 +23,23 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CAPTURES_DIR="$PROJECT_ROOT/tests/captures"
 mkdir -p "$CAPTURES_DIR"
 cd "$PROJECT_ROOT"
+COMPARE_WORK=$(mktemp -d)
+trap 'rm -rf "$COMPARE_WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# Den ursprünglichen Plain-Text immer festhalten. Auch compare-file.sh gibt
-# einen Dateinamen vor; im manuellen AppleMD-Vergleich brauchen wir trotzdem
-# den Ausgangsinhalt, um einen ausgebliebenen Kurzbefehl zu erkennen.
-plain="$(pbpaste)"
+# compare-file.sh bringt aktuelle Leser und Pipeline in einem privaten Layout mit.
+RUNTIME_DIR="${MD_CLIP_COMPARE_RUNTIME:-$PROJECT_ROOT/bin}"
+if [ -n "${MD_CLIP_COMPARE_RUNTIME:-}" ]; then
+  HELPER_DIR="$RUNTIME_DIR"
+else
+  HELPER_DIR="$PROJECT_ROOT/helpers"
+fi
+
+# Dateien erhalten Schluss-LFs; ein identischer Inhalt beweist weder Erfolg
+# noch Ausbleiben des manuell ausgelösten Kurzbefehls.
+pbpaste > "$COMPARE_WORK/plain"
+plain="$(cat "$COMPARE_WORK/plain")"
 
 # --- 1. Dateinamen-Basis bestimmen ---
 # Wenn das Skript von compare-file.sh aufgerufen wird, kann dort eine
@@ -82,14 +94,14 @@ echo "==> Ausgabe-Ordner:  $CAPTURES_DIR"
 echo
 
 # --- 3. HTML-Flavor sichern ---
-HTML_HELPER="$PROJECT_ROOT/helpers/clipboard-html"
+HTML_HELPER="$HELPER_DIR/clipboard-html"
 if [ ! -x "$HTML_HELPER" ]; then
   echo "HTML-Helper nicht gebaut: $HTML_HELPER" >&2
   echo "Bitte zuerst ./install.sh ausführen." >&2
   exit 2
 fi
-if html="$("$HTML_HELPER" 2>/dev/null)"; then
-  printf '%s' "$html" > "$CAPTURES_DIR/${base}.html"
+if "$HTML_HELPER" > "$COMPARE_WORK/html" 2>/dev/null; then
+  mv "$COMPARE_WORK/html" "$CAPTURES_DIR/${base}.html"
   printf '✓ HTML    → %s.html (%d Bytes)\n' "$base" "$(wc -c < "$CAPTURES_DIR/${base}.html")"
 else
   printf '· HTML    — kein HTML-Flavor auf dem Clipboard\n'
@@ -100,14 +112,14 @@ fi
 # Grund: pbpaste weicht auf Plain Text aus, sobald zusätzlich RTFD auf
 # dem Clipboard liegt (z.B. TextEdit mit Bildern). Der Helper greift
 # direkt auf den .rtf-Flavor in NSPasteboard zu.
-RTF_HELPER="$PROJECT_ROOT/helpers/clipboard-rtf"
+RTF_HELPER="$HELPER_DIR/clipboard-rtf"
 if [ ! -x "$RTF_HELPER" ]; then
   echo "RTF-Helper nicht gebaut: $RTF_HELPER" >&2
   echo "Bitte zuerst ./install.sh ausführen." >&2
   exit 2
 fi
-if rtf="$("$RTF_HELPER" 2>/dev/null)"; then
-  printf '%s' "$rtf" > "$CAPTURES_DIR/${base}.rtf"
+if "$RTF_HELPER" > "$COMPARE_WORK/rtf" 2>/dev/null; then
+  mv "$COMPARE_WORK/rtf" "$CAPTURES_DIR/${base}.rtf"
   printf '✓ RTF     → %s.rtf (%d Bytes)\n' "$base" "$(wc -c < "$CAPTURES_DIR/${base}.rtf")"
 else
   printf '· RTF     — kein RTF-Flavor auf dem Clipboard\n'
@@ -116,10 +128,13 @@ fi
 # --- 5. md-clip-Konvertierung sichern ---
 # md-clip ohne --replace verändert das Clipboard NICHT — wichtig, weil
 # AppleMD danach noch dasselbe Clipboard lesen soll.
-if ./bin/md-clip --quiet > "$CAPTURES_DIR/${base}.mdclip.md" 2>/dev/null; then
+if "$RUNTIME_DIR/md-clip" --quiet > "$COMPARE_WORK/mdclip.md"; then
+  mv "$COMPARE_WORK/mdclip.md" "$CAPTURES_DIR/${base}.mdclip.md"
   printf '✓ md-clip → %s.mdclip.md\n' "$base"
 else
-  printf '✗ md-clip — Aufruf fehlgeschlagen\n'
+  status=$?
+  printf '✗ md-clip — Aufruf fehlgeschlagen (Exit %s)\n' "$status" >&2
+  exit "$status"
 fi
 
 # --- 6. AppleMD-Output abgreifen (nur im Manual-Modus) ---
@@ -140,19 +155,18 @@ if [ "${CAPTURE_APPLEMD_MANUAL:-0}" = "1" ]; then
   echo "============================================================"
   read -r _ < /dev/tty
 
-  applemd_out="$(pbpaste)"
+  pbpaste > "$COMPARE_WORK/applemd.md"
   applemd_file="$CAPTURES_DIR/${base}.applemd.md"
 
-  if [ -z "$applemd_out" ]; then
-    printf '✗ AppleMD — Clipboard war leer. Hat AppleMD wirklich gelaufen?\n'
-  elif [ "$applemd_out" = "${plain:-}" ]; then
-    printf '✗ AppleMD — Clipboard hat noch den Source-Inhalt. Apple hat\n'
-    printf '            wahrscheinlich nichts überschrieben (Schnellansicht\n'
-    printf '            statt „In Zwischenablage kopieren" am Ende?).\n'
-  else
-    printf '%s' "$applemd_out" > "$applemd_file"
-    printf '✓ AppleMD → %s.applemd.md (%d Zeichen)\n' "$base" "${#applemd_out}"
+  if [ ! -s "$COMPARE_WORK/applemd.md" ]; then
+    printf '✗ AppleMD — Clipboard war leer; kein Ergebnis gespeichert.\n' >&2
+    exit 1
   fi
+  if cmp -s "$COMPARE_WORK/plain" "$COMPARE_WORK/applemd.md"; then
+    printf '· AppleMD — Inhalt ist identisch; die Ausführung lässt sich daraus nicht erkennen.\n'
+  fi
+  mv "$COMPARE_WORK/applemd.md" "$applemd_file"
+  printf '✓ AppleMD → %s.applemd.md (%d Bytes)\n' "$base" "$(wc -c < "$applemd_file")"
 fi
 
 echo

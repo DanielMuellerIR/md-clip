@@ -368,8 +368,18 @@ MD_CLIP_SKIP_CLIPBOARD=1 ./tests/run-tests.sh
 ./tests/test-dependencies.sh
 ./tests/test-wrapper-safety.sh
 python3 tests/test-cli-inputs.py
+python3 tests/test-compare.py
 python3 tests/benchmark.py --runs 5
 ```
+
+`tests/test-plain-newlines.sh` prüft die Schluss-LFs und den Leertext-Fehlercode
+über macOS-, X11- und Wayland-Attrappen; die macOS-Matrix läuft auf macOS.
+`tests/test-compare.py` prüft die Vergleichsskripte in temporären Projektkopien,
+einschließlich manuellem AppleMD-Erfassen über ein isoliertes Terminal. Alle
+Clipboard-Werkzeuge sind dabei Attrappen. `tests/compare-file.sh` baut Loader und
+Lesehelfer selbst; der tatsächliche Vergleich benötigt macOS und verändert das
+Clipboard. Identische manuelle AppleMD-Ausgabe wird bytegenau gespeichert,
+belegt für sich allein aber keine Kurzbefehl-Ausführung.
 
 `tests/run-wayland.sh` startet als unprivilegierter Linux-Benutzer einen eigenen
 headless sway-Compositor (Pakete `sway`, `wl-clipboard`, `pandoc`). Es lehnt eine

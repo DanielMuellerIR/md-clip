@@ -9,16 +9,19 @@
   - Der CLI-Start ergänzt auch unter Linux den Homebrew-Pfad.
   - Die Linux-CI verwendet ein bewegliches Ubuntu-Image und pandoc aus dessen
     Paketquelle.
-  - `tests/compare-file.sh` baut nur den Lesehelfer; `tests/compare.sh` kann nach
-    einer fehlgeschlagenen Konvertierung weiterlaufen und verwirft identische
-    Apple-Markdown-Ausgabe.
-  - Der Leertext-Fehlertest akzeptiert jeden Fehlercode; die vollständigen
-    Schluss-LF-Fälle werden noch nicht auf allen drei Clipboard-Wegen geprüft.
   - Der Icon-Build räumt bei gewöhnlichem Fehler nicht auf. Ein fehlendes Icon
     bleibt beim App-Build bewusst optional; eine Änderung braucht eine
     Produktentscheidung.
   Zwei nur paraphrasiert erhaltene Installationsfunde lassen sich ohne
   ursprüngliche Reproduktion nicht als aktuelle Fehler bestätigen.
+
+Die Compare-/Testskript-Funde sind korrigiert: `compare-file.sh` baut Loader und
+beide Lesehelfer in einem privaten Laufzeitverzeichnis. `compare.sh` bricht bei
+Konvertierungsfehlern mit deren Exit-Code ab und speichert auch identische
+manuelle Apple-Markdown-Ausgabe einschließlich Schluss-LFs. Die isolierten
+Verträge stehen in `tests/test-compare.py`. `tests/test-plain-newlines.sh` prüft
+vier LF-Varianten über macOS/X11/Wayland-Attrappen sowie Leertext mit exakt Exit 1,
+ohne stdout-Ausgabe oder Clipboard-Ersetzung. Die macOS-Matrix läuft auf macOS.
 
 ## Aus dem Code-Review und der CodeQA-Kampagne 2026-09-03
 
