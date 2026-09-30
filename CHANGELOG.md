@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0 — 2026-09-30
+
+- `--replace` sichert vor der Konvertierung alle lesbaren Clipboard-Formate
+  und Items. `--undo` stellt die letzte erfolgreiche Ersetzung einmalig
+  innerhalb von zehn Minuten wieder her. Eine neue Kopie verwirft die
+  Sicherung auch bei identischem Inhalt; die Sicherung bleibt ausschließlich
+  im Speicher. Fehlende Formate, Dateiversprechen und erkannte Änderungen
+  führen vor dem Ersetzen zum Abbruch.
+- Native Helfer verwenden NSPasteboard auf macOS, XFixes auf X11 und
+  Data-Control auf unterstützten Wayland-Sitzungen. Der Doctor zeigt die
+  Undo-Verfügbarkeit; eine Linux-Installation benötigt keinen laufenden Desktop.
+- Zitatlisten beeinflussen nachfolgende eingerückte Codeblöcke nicht mehr.
+  Claude-Codeblöcke und Classroom-Anhangstitel werden auch bei anderer
+  Reihenfolge ihrer HTML-Attribute erkannt.
+
 ## 1.3.1 — 2026-09-08
 
 - Formatierte unsichtbare Zeichen gelten vor der Markdown-Ausgabe als leer.

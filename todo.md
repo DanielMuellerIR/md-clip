@@ -2,28 +2,30 @@
 
 ## Von Hand zu prüfen
 
-- **Echter Klickweg auf einem Linux-Desktop.** In Firefox oder Chromium einen
-  formatierten Abschnitt markieren, kopieren, `md-clip --replace` auslösen und
-  das Ergebnis wieder einfügen. Das braucht einen bedienten Desktop mit echtem
-  Browser und lässt sich deshalb weder in der CI noch im Container nachstellen —
-  es bleibt eine manuelle Sichtprüfung.
-
-  Die darunterliegenden Schnittstellen sind automatisiert abgedeckt:
-  `tests/run-tests.sh` prüft UTF-8- und UTF-16-HTML bytegenau. Der X11-Weg lief
-  am 2026-08-20 im Ubuntu-24.04-Container unter Xvfb mit 28/28 Tests, der
-  Wayland-Weg am 2026-07-16 mit sway headless mit 9/9 Tests.
+- **macOS-App-Abnahme für 1.4.0.** Das aktuelle notarisiert installierte Bundle
+  hat Replace und einmaliges Undo mit vollständigem Vergleich aller Items und
+  Formatbytes bestanden. Der App-Start und die sichtbare HUD-Meldung sind nach
+  einem Timeout der GUI-Steuerung noch offen.
 
 ## Aus der Handoff-Frontier übernommen (2026-08-29)
 
-- **Zwei nie importierte Code-Reviews vom 2026-08-19** (rund 19 Funde, unter
-  anderem `lib/pipeline.sh:319`, `install-app.sh:121`,
-  `wrappers/verify-bundle.sh:233`) sichten und importieren oder begründet
-  verwerfen. Aus einer früheren Aufräum-Sitzung übernommen.
-  Hinweis vom 2026-09-03: Der Code-Review und die CodeQA-Kampagne dieses Tages
-  haben genau diese drei Dateien vollständig durchgesehen (siehe CHANGELOG 1.2.9
-  und `.codeqa/coverage.json`). Beim Import lässt sich also abgleichen, welche
-  der rund 19 Funde noch offen sind — die Zeilennummern von damals passen
-  allerdings nicht mehr.
+- Die beiden Reviews vom 2026-08-19 sind mit dem aktuellen Code abgeglichen:
+  15 Funde im ersten und sechs im zweiten Review. Zitatlisten, HTML-Attributfolge
+  und direkte Signaturprüfung der Clipboard-Helfer sind in 1.4.0 korrigiert.
+  Frühere Fixes wurden nicht erneut umgesetzt. Noch offen sind:
+  - Der CLI-Start ergänzt auch unter Linux den Homebrew-Pfad.
+  - Die Linux-CI verwendet ein bewegliches Ubuntu-Image und pandoc aus dessen
+    Paketquelle.
+  - `tests/compare-file.sh` baut nur den Lesehelfer; `tests/compare.sh` kann nach
+    einer fehlgeschlagenen Konvertierung weiterlaufen und verwirft identische
+    Apple-Markdown-Ausgabe.
+  - Der Leertext-Fehlertest akzeptiert jeden Fehlercode; die vollständigen
+    Schluss-LF-Fälle werden noch nicht auf allen drei Clipboard-Wegen geprüft.
+  - Der Icon-Build räumt bei gewöhnlichem Fehler nicht auf. Ein fehlendes Icon
+    bleibt beim App-Build bewusst optional; eine Änderung braucht eine
+    Produktentscheidung.
+  Zwei nur paraphrasiert erhaltene Installationsfunde lassen sich ohne
+  ursprüngliche Reproduktion nicht als aktuelle Fehler bestätigen.
 
 ## Aus dem Code-Review und der CodeQA-Kampagne 2026-09-03
 
@@ -40,14 +42,23 @@
 
 ## Release-Lücke nach 1.2.9
 
-- Entscheiden, ob der bestehende Tag `v1.3.0` veröffentlicht oder ein neu
-  gebauter und getaggter Release `v1.3.1` daraus wird. Für die gewählte Version
+- Entscheiden, welche Version nach dem bestehenden Tag `v1.3.0` veröffentlicht
+  werden soll; der aktuelle Implementierungsstand ist 1.4.0. Für die gewählte Version
   ein notarisiertes DMG mit festgelegtem Finder-Layout (oder ausdrücklich
   `--no-finder-layout`) erzeugen und anschließend GitHub-Release sowie
   signierten Appcast prüfen.
 
-## Geplante Erweiterung
+## Abgenommen am 2026-09-30
 
-- **Einmaliges Undo mit vollständiger Formatsicherung.** Noch nicht implementiert;
-  die vorhandenen Text-Clipboard-Werkzeuge erfüllen den Vertrag nicht.
-  Plattformgrenzen und prüfbare Prototyp-Schritte: [docs/CLIPBOARD-UNDO.md](docs/CLIPBOARD-UNDO.md).
+- **Einmaliges Undo mit vollständiger Formatsicherung.** Implementiert für
+  macOS, X11 und unterstützte Wayland-Sitzungen; Vertrag und Grenzen:
+  [docs/CLIPBOARD-UNDO.md](docs/CLIPBOARD-UNDO.md).
+- **Echter Linux-Browserweg.** Firefox unter Cinnamon/X11: formatierten Text
+  mit Liste, Link und Tabelle kopiert, `--replace` ausgeführt, Markdown in
+  Firefox eingefügt; nach `--undo` ließ sich derselbe Abschnitt wieder mit
+  Fett-/Kursivformatierung, Liste, Link und Tabelle einfügen.
+- **Native Linux-Prüfungen.** Je 33 Undo-Vertragsprüfungen unter Xvfb und sway
+  headless bestanden; die gemeinsame Pipeline bestand je 43/43 Prüfungen.
+  Unabhängige xclip- und wl-clipboard-Roundtrips stellten auch große HTML- und
+  Binärformate bytegenau wieder her. Die macOS-Kernprüfungen und die CLI des
+  notarisierten Bundles bestanden; die oben genannte GUI-Abnahme bleibt offen.

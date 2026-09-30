@@ -21,7 +21,9 @@ case "$_MD_CLIP_LIB_DIR" in
 esac
 
 preprocess_claude_desktop() {
-  perl -0pe 's{<div\s+data-line="[^"]*"[^>]*>(.*?)</div>}{$1\n}gs;
+  # HTML-Attribute haben keine feste Reihenfolge. Der Zeilenmarker darf
+  # deshalb auch hinter style/class stehen; data-lineage ist kein Marker.
+  perl -0pe 's{<div\b(?=[^>]*\sdata-line="[^"]*")[^>]*>(.*?)</div>}{$1\n}gs;
 
         s{(<pre[^>]*>.*?</pre>)}{
           my $block = $1;
@@ -46,7 +48,9 @@ preprocess_google_classroom() {
     s{<a\b([^>]*)\bhref="([^"]*)"([^>]*)>(.*?)</a>}{
       my ($pre, $href, $post, $inner) = ($1, $2, $3, $4);
       if ($inner =~ m{classroom\.google\.com/webthumbnail}) {
-        my $title = ($inner =~ m{class="[^"]*\bmvRF3b\b[^"]*">(.*?)</div>}s) ? $1 : "";
+        # Die Klasse ist ein eigenes Token, kein Teil einer anderen Klasse;
+        # weitere Attribute vor oder hinter class ändern den Titel nicht.
+        my $title = ($inner =~ m{<div\b(?=[^>]*\sclass="(?:[^"]*\s)?mvRF3b(?:\s[^"]*)?")[^>]*>(.*?)</div>}s) ? $1 : "";
         $title =~ s/<[^>]+>//g;
         $title =~ s/^\s+|\s+$//g;
         # Den Google-Kontowähler entfernen, ohne Fragment oder folgende

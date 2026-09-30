@@ -61,7 +61,7 @@ SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
   echo "HUD-Helfer fehlt im Bundle." >&2
   exit 66
 }
-for tool in md-clip pipeline.sh pandoc clipboard-html clipboard-rtf; do
+for tool in md-clip pipeline.sh pandoc clipboard-html clipboard-rtf clipboard-undo; do
   [ -x "$APP/Contents/Resources/bin/$tool" ] || {
     echo "Werkzeug fehlt im Bundle: Resources/bin/$tool" >&2
     exit 66
@@ -188,6 +188,7 @@ verify_all_macos_compatibility() {
     "HUD-Helfer"
     "HTML-Helper"
     "RTF-Helper"
+    "Undo-Helper"
     "pandoc"
     "Sparkle-Framework"
     "Sparkle-Autoupdate"
@@ -198,6 +199,7 @@ verify_all_macos_compatibility() {
     "$APP/Contents/MacOS/md-clip-hud"
     "$APP/Contents/Resources/bin/clipboard-html"
     "$APP/Contents/Resources/bin/clipboard-rtf"
+    "$APP/Contents/Resources/bin/clipboard-undo"
     "$APP/Contents/Resources/bin/pandoc"
     "$SPARKLE_FRAMEWORK/Versions/B/Sparkle"
     "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
@@ -244,6 +246,7 @@ if [ "$SIGNED" -eq 1 ]; then
     local executable="$1"
     local label="$2"
     local signature_details
+    codesign --verify --strict "$executable" || return $?
     signature_details="$(codesign -d --verbose=4 "$executable" 2>&1)"
     if ! grep -q 'flags=.*runtime' <<<"$signature_details"; then
       echo "Hardened Runtime fehlt in der $label-Signatur." >&2
@@ -268,6 +271,7 @@ if [ "$SIGNED" -eq 1 ]; then
   verify_distribution_signature "$APP/Contents/MacOS/md-clip-hud" "HUD-Helfer"
   verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-html" "HTML-Helfer"
   verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-rtf" "RTF-Helfer"
+  verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-undo" "Undo-Helfer"
   # Sparkle kommt fertig gebaut von außen und wird beim Signieren neu
   # gesiegelt. Diese Prüfung stellt sicher, dass die eigene Developer ID
   # wirklich auf Framework, Updater-App und Autoupdate liegt — sonst

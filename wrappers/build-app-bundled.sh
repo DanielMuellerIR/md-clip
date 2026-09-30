@@ -158,7 +158,7 @@ echo "✓ pandoc bereit ($(du -h "$BUILD_DIR/pandoc" | cut -f1))"
 
 # ---------- 2. Swift-Helper kompilieren ----------
 
-for helper in clipboard-html clipboard-rtf md-clip-hud; do
+for helper in clipboard-html clipboard-rtf clipboard-undo md-clip-hud; do
   src="$PROJECT_ROOT/helpers/${helper}.swift"
   out="$BUILD_DIR/${helper}"
   echo "==> Kompiliere ${helper}"
@@ -212,6 +212,7 @@ cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$APP_BUNDLE/Contents/Resources/bin/tidy
 cp "$PROJECT_ROOT/lib/tables.lua" "$APP_BUNDLE/Contents/Resources/bin/tables.lua"
 cp "$BUILD_DIR/clipboard-html"     "$APP_BUNDLE/Contents/Resources/bin/clipboard-html"
 cp "$BUILD_DIR/clipboard-rtf"      "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"
+cp "$BUILD_DIR/clipboard-undo"     "$APP_BUNDLE/Contents/Resources/bin/clipboard-undo"
 cp "$BUILD_DIR/pandoc"             "$APP_BUNDLE/Contents/Resources/bin/pandoc"
 
 # Sparkle-Framework ins Bundle. `ditto` statt `cp -R`, weil Frameworks aus

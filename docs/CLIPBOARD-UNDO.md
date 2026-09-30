@@ -1,38 +1,74 @@
-# Grenze und Folgeplan für einmaliges Undo
+# Einmaliges Undo der vollständigen Clipboard-Ersetzung
 
-Stand: 2026-09-05. Noch nicht implementiert.
+`md-clip --replace` sichert vor dem Lesen der Konvertierungsquelle alle
+angebotenen Clipboard-Daten. Die Konvertierung, eine optionale Vorschau und das
+Schreiben bilden eine Operation. `md-clip --undo` nimmt die letzte erfolgreiche
+Ersetzung einmalig zurück; es lässt sich mit `--quiet` und `--notify`, aber
+nicht mit Konvertierungsoptionen kombinieren.
 
-`pbcopy`, `xclip` und `wl-copy` ersetzen die Auswahl durch ein Textangebot.
-Ein vorheriges `pbpaste` oder `wl-paste` sichert nur eine Darstellung. Damit
-lassen sich RTF, HTML, Bilder, Dateiverweise, mehrere Pasteboard-Items und
-anwendungseigene Formate nicht vollständig wiederherstellen.
+Die Sicherung enthält rohe Bytes aller unterstützten angebotenen Formate;
+unter macOS zusätzlich alle einzelnen Pasteboard-Items. HTML, RTF, Bilddaten,
+Dateiverweise, benutzerdefinierte Formate und leere Formatrepräsentationen werden
+nicht auf Klartext reduziert. Aktive Lieferanten können nicht rekonstruiert
+werden: macOS-Datei-Versprechen werden deshalb abgelehnt. Ein nicht lesbares
+Format, mehr als 128 Formate, mehr als 64 MiB oder ein Eigentümerwechsel während
+der Sicherung verhindert die Ersetzung. Die Zeit für Datenlieferungen ist
+begrenzt; ein blockierter Lieferant führt zum Abbruch.
 
-Auf macOS könnte ein nativer Helfer alle NSPasteboard-Items samt Typen und
-Daten lesen. Er müsste vor dem Ersetzen prüfen, ob wirklich jedes Format
-materialisiert werden konnte, und bei verzögert bereitgestellten oder nicht
-lesbaren Formaten abbrechen. changeCount müsste beim Sichern sowie unmittelbar
-vor dem Schreiben übereinstimmen. Undo dürfte nur bei unverändertem, nach dem
-Schreiben festgehaltenem changeCount angeboten werden. Ein neuer Kopiervorgang,
-auch mit gleichen Bytes, muss Undo ungültig machen. NSPasteboard bietet für
-Prüfen-und-Schreiben keine atomare Vergleichsoperation; diese Restlücke braucht
-eine ausdrückliche Produktentscheidung und belastbare Parallelitätstests.
+## Gültigkeit und Lebensdauer
 
-Unter X11 und Wayland besitzt ein Prozess das Datenangebot und liefert Bytes
-auf Anfrage. Ein Folgeschritt benötigt einen dauerhaft laufenden Eigentümer,
-der alle angebotenen Typen sichert und erneut anbietet. CLI-Werkzeuge für einen
-einzelnen Typ reichen dafür nicht. Sitzungswechsel, Eigentümerwechsel während
-der Sicherung, große/verzögerte Daten und das Beenden des Helfers müssen zum
-sicheren Abbruch führen. Eine vollständige plattformübergreifende Zusicherung
-ist mit der aktuellen Architektur nicht belegt.
+Die Sicherung liegt ausschließlich im Arbeitsspeicher eines lokalen Helfers,
+nicht in einer Clipboard-Historie oder einer Sicherungsdatei. Private lokale
+Sockets dienen nur der Kommunikation. Die ohnehin temporären Eingabe- und
+Ausgabedateien der Konvertierung sind keine dauerhafte Undo-Ablage.
 
-Umsetzbare nächste Schritte:
+Undo gilt höchstens zehn Minuten ab erfolgreichem Schreiben und endet schon
+vorher bei einem neuen Clipboard-Eigentümer. Eine neue Kopie mit identischen
+Bytes zählt ebenfalls als Änderung. Fehlgeschlagene Konvertierungen und
+abgelehnte Vorschauen schreiben nicht; ihre vorbereitete Sicherung wird
+verworfen. Parallel vorbereitete Ersetzungen werden abgelehnt. Auch eine
+Vorbereitung verfällt nach zehn Minuten, falls ihr Aufrufer verschwindet.
 
-1. macOS-Prototyp mit eigenem privaten Pasteboard: mehrere Items, HTML/RTF/Text,
-   Bild- und benutzerdefinierte Daten; fehlendes Format verhindert Ersetzen.
-2. Eigentümerwechsel und identische neue Kopien gezielt simulieren. Die atomare
-   Restlücke bewerten, bevor eine Nutzerfunktion freigegeben wird.
-3. Linux-Prototyp je Backend mit isoliertem Xvfb/sway: alle angebotenen MIME-
-   Typen sichern und als dauerhaftes Angebot wiederherstellen; verzögerte
-   Antwort und Prozessende testen.
-4. Erst bei belegtem Vertrag Speichergrenzen, private Ablage, Ablaufzeit und
-   einmaliges Löschen des Undo-Datensatzes festlegen und eine CLI ergänzen.
+Beim Undo werden alle gesicherten Daten wieder angeboten und die Undo-Operation
+verbraucht. Eine zweite Ausführung scheitert. Leere Ausgangs-Clipboards können
+bei Datei-/stdin-Eingaben wieder leer hergestellt werden. Nach dem Verlust oder
+Neustart des Helfers gibt es keine rekonstruierbare Sicherung.
+
+## Plattformen
+
+macOS verwendet einen nativen Swift-Helfer mit `NSPasteboard`. Jede Sicherung
+und jedes Schreiben prüft `changeCount`; Nutzdaten werden in kurzlebigen,
+zeitlich begrenzten Worker-Prozessen materialisiert. Der Helfer reist im
+App-Bundle mit und gehört zu Build-, Signatur- und Kompatibilitätsprüfungen.
+Die Quellinstallation baut ihn über `install.sh`.
+
+Linux verwendet Python 3 mit den nativen Clipboard-Protokollen. Unter X11 sind
+`libX11` und `libXfixes` erforderlich; die Auswahl und Eigentümerwechsel werden
+auf derselben Verbindung beobachtet. Unter Wayland braucht es `ext-data-control`
+oder `wlr-data-control`. Nicht unterstützte Compositoren und mehrdeutige
+Sitzungen verhindern das Ersetzen, statt eine unvollständige Sicherung zu
+versprechen. Ein Linux-Helfer bleibt Eigentümer und liefert seine Daten weiter,
+solange kein anderer Prozess die Auswahl übernimmt. Nach Ablauf des Undo hält
+er nur noch das aktuelle Angebot, nach Wiederherstellung die zurückgegebenen
+Daten; diese sind dann der aktuelle Clipboard-Inhalt. Wird er beendet oder die
+Desktop-Verbindung getrennt, kann das Angebot verloren gehen.
+
+## Konkurrenzgrenze
+
+Weder `NSPasteboard` noch die unterstützten Linux-Protokolle bieten hier eine
+atomare Operation „nur schreiben, wenn derselbe Eigentümer noch gilt“. Der
+Helfer prüft unmittelbar vor dem Schreiben und bindet Undo an seinen eigenen
+Schreibvorgang. Eine neue Kopie genau zwischen Prüfung und Schreiben kann
+weiterhin überschrieben werden. Dieser verbleibende Wettlauf gehört zum
+Produktvertrag; identische Bytes allein sind niemals ein Gültigkeitsnachweis.
+
+## Prüfungen
+
+Die Helfer werden mit unabhängigen nativen Lesern geprüft: vollständiger
+Formatvergleich, binäre und leere Daten, einmalige Wiederherstellung, neuer
+Eigentümer mit identischen Bytes, nicht lesbare und verzögerte Angebote,
+Größen-/Zeitgrenzen, parallele Vorbereitung und private Socket-Ablage.
+CLI-Vertragstests prüfen außerdem Abbruch vor dem Schreiben und die
+Unverträglichkeit von `--undo` mit Konvertierungsoptionen. Die gemeinsame
+Pipeline bleibt unverändert die Quelle der Fixture-Tests. Eine synthetische
+Gegenprobe ersetzt keine echte Browser-Klickabnahme auf dem Desktop.

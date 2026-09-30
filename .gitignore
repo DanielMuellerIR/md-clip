@@ -1,6 +1,7 @@
 # Kompilierte Swift-Helper-Binaries — werden via install.sh erzeugt.
 helpers/clipboard-html
 helpers/clipboard-rtf
+helpers/clipboard-undo
 
 # Manuell gesammelte Clipboard-Aufnahmen — Test-Daten, keine Source.
 tests/captures/

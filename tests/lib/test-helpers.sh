@@ -50,6 +50,15 @@ copy_install_test_project() {
   cp "$PROJECT_ROOT/lib/tables.lua" "$destination/lib/tables.lua"
   cp "$PROJECT_ROOT/helpers/clipboard-html.swift" "$destination/helpers/clipboard-html.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-rtf.swift" "$destination/helpers/clipboard-rtf.swift"
+  cp "$PROJECT_ROOT/helpers/clipboard-undo.swift" "$destination/helpers/clipboard-undo.swift"
+  cp "$PROJECT_ROOT/helpers/clipboard-undo-linux.py" "$destination/helpers/clipboard-undo-linux.py"
+  # Die Installer-Prüfung soll weder ein Display öffnen noch einen Dienst starten.
+  cat > "$destination/helpers/clipboard-undo-linux.py" <<'SH'
+#!/bin/sh
+[ "$1" = dependencies ] || exit 2
+exit 0
+SH
+  chmod +x "$destination/helpers/clipboard-undo-linux.py"
 }
 
 # Schreibt die pandoc-Attrappe. Sie liegt an ZWEI Orten: im fake-bin und im
@@ -113,7 +122,7 @@ done
 printf '#!/bin/sh\nexit 0\n' > "$output"
 chmod +x "$output"
 SH
-  for tool in xclip wl-paste wl-copy; do
+  for tool in xclip wl-paste wl-copy python3; do
     cat > "$destination/$tool" <<'SH'
 #!/bin/sh
 exit 0

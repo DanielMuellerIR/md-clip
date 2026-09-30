@@ -83,7 +83,7 @@ md-clip läuft unter Linux als CLI-Werkzeug — dieselbe Konvertierungs-Pipeline
 
 ```bash
 # Debian / Ubuntu / Mint (pandoc muss den RTF-Reader enthalten)
-sudo apt install xclip wl-clipboard libnotify-bin
+sudo apt install xclip wl-clipboard libnotify-bin python3 libx11-6 libxfixes3
 # pandoc >= 2.15 aus den Distributions-Backports oder dem offiziellen Release
 
 git clone https://github.com/DanielMuellerIR/md-clip.git
@@ -91,14 +91,18 @@ cd md-clip
 ./install.sh          # legt ~/.local/bin/md-clip an, kein sudo nötig
 ```
 
-Für Fedora (`sudo dnf install pandoc xclip wl-clipboard libnotify`) und Arch (`sudo pacman -S pandoc xclip wl-clipboard libnotify`) gilt dasselbe, nur der Paketbefehl unterscheidet sich.
+Für Fedora (`sudo dnf install pandoc xclip wl-clipboard libnotify python3 libX11 libXfixes`) und Arch (`sudo pacman -S pandoc xclip wl-clipboard libnotify python libx11 libxfixes`) gilt dasselbe, nur der Paketbefehl unterscheidet sich.
 
 md-clip prüft nicht nur, ob `pandoc` vorhanden ist, sondern ob es das
 Eingabeformat `rtf` wirklich unterstützt. Die Standardversion aus Ubuntu 22.04
 ist zu alt; dort bitte ein aktuelles Paket von der
 [offiziellen pandoc-Release-Seite](https://github.com/jgm/pandoc/releases) verwenden.
 
-Es reicht das Clipboard-Werkzeug der eigenen Sitzung — `xclip` für X11, `wl-clipboard` für Wayland. Beide zu installieren schadet nicht und überlebt einen Sitzungswechsel. `libnotify-bin` braucht nur, wer `--notify` nutzt.
+Zum Lesen reicht das Clipboard-Werkzeug der eigenen Sitzung — `xclip` für X11,
+`wl-clipboard` für Wayland. Vollständiges Undo benötigt zusätzlich Python 3,
+unter X11 `libX11` und `libXfixes`. Unter Wayland muss der Compositor das
+`ext-data-control`- oder `wlr-data-control`-Protokoll anbieten; andernfalls
+bleibt `--replace` gesperrt. `libnotify-bin` braucht nur, wer `--notify` nutzt.
 
 ### Benutzung
 
@@ -107,6 +111,7 @@ Identisch zu macOS — alle Optionen aus [Benutzung](#benutzung) gelten unverän
 ```bash
 md-clip                 # Markdown nach stdout
 md-clip --replace       # Clipboard durch Markdown ersetzen
+md-clip --undo          # ursprüngliche Formate einmalig wiederherstellen
 ```
 
 ### Bekannte Grenzen unter Linux
@@ -137,7 +142,8 @@ Alle Optionen im Überblick:
 | `--input DATEI` | | Datei lesen, ohne Clipboard-Zugriff |
 | `--doctor [--json]` | | Backend, Werkzeuge, Versionen und Fähigkeiten; keine Inhalte |
 | `--preview` | | Ergebnis vor `--replace` am Terminal bestätigen |
-| `--replace` | `-r` | Ergebnis zurück ins Clipboard schreiben |
+| `--replace` | `-r` | Ergebnis schreiben und alle ursprünglichen Formate für Undo sichern |
+| `--undo` | | Letzte erfolgreiche Ersetzung einmalig zurücknehmen |
 | `--plain` | `-p` | Keine Konvertierung, nur Klartext durchreichen |
 | `--from FORMAT` | `-f` | Eingabe erzwingen: `auto`, `html`, `rtf`, `plain` |
 | `--to FORMAT` | `-t` | Markdown-Dialekt: `gfm`, `markdown`, `commonmark` |
@@ -199,7 +205,7 @@ Gittertabelle. Die bisherige RTF-Behandlung vereinfacht Layouttabellen weiterhin
 ### Ersetzen und Vorschau
 
 `--replace` schreibt auch bei Datei-/stdin-Eingaben ausdrücklich ins Clipboard;
-dann wird zusätzlich das Schreibwerkzeug der Sitzung benötigt. Ohne die Option
+dann wird zusätzlich der Undo-Helfer der Sitzung benötigt. Ohne die Option
 berühren diese Eingaben das Clipboard nicht. Leere oder abgelehnte Ergebnisse
 werden niemals geschrieben. Bei konvertiertem Markdown entfällt vor dem
 Schreiben genau pandocs letztes LF; durchgereichter Klartext bleibt bytegenau.
@@ -214,15 +220,26 @@ Ohne interaktives Terminal ist Vorschau ein Argumentfehler. Der direkte
 Standardweg bleibt ohne Rückfrage. Die Vorschau zeigt den zuvor eingelesenen
 Stand; sie sperrt das Clipboard während der Entscheidung nicht.
 
-Ein Undo ist derzeit nicht verfügbar. Die vorhandenen Schreibwerkzeuge können
-nicht sämtliche ursprünglichen Clipboard-Formate und deren Eigentümer wieder-
-herstellen. Grenzen und Implementierungsschritte stehen in
+`md-clip --undo` stellt alle gesicherten Items und Formatbytes der letzten
+erfolgreichen Ersetzung einmalig wieder her. Die Sicherung bleibt nur im RAM,
+höchstens zehn Minuten ab dem Schreiben. Jeder neue Kopiervorgang macht sie
+ungültig, auch wenn er identischen Text liefert. Konvertierung und Vorschau
+bilden zusammen eine Ersetzung; ein Clipboard-Wechsel währenddessen verhindert
+das Schreiben. Fehlt ein ursprüngliches Format oder kann es nicht vollständig
+gelesen werden, bricht `--replace` ab. Aktive Datei-Versprechen sind keine
+materialisierten Dateidaten und werden abgelehnt.
+
+Der Helfer begrenzt die Sicherung auf 64 MiB und 128 Formate. Clipboard-Prüfung
+und Schreiben sind keine atomare Operation: Eine neue Kopie genau zwischen der
+letzten Prüfung und dem Schreiben kann weiterhin überschrieben werden. Unter
+Linux muss der Helfer die angebotenen Daten bis zum nächsten Eigentümerwechsel
+weiter ausliefern; sein Beenden verliert dieses Angebot. Details stehen in
 [docs/CLIPBOARD-UNDO.md](docs/CLIPBOARD-UNDO.md).
 
 | Code | Bedeutung |
 |---|---|
 | `0` | Nutzdaten ausgegeben/geschrieben oder Diagnose erfolgreich |
-| `1` | Quelle fehlt, ist leer oder konnte nicht gelesen werden |
+| `1` | Quelle/Sicherung nicht lesbar, Clipboard geändert oder Undo nicht mehr verfügbar |
 | `2` | Ungültige Argumente/Datei oder benötigte Abhängigkeit fehlt |
 | `3` | Konvertierung nicht darstellbar, alle vorhandenen Quellen scheitern oder Schreiben fehlgeschlagen |
 | `4` | Vorschau abgebrochen |

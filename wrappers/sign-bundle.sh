@@ -9,7 +9,7 @@
 # Reihenfolge (innen nach außen — jede äußere Signatur versiegelt die
 # inneren mit):
 #   1. Binaries in Contents/Resources/bin/ (pandoc, clipboard-html,
-#      clipboard-rtf). Die Shell-Skripte daneben (md-clip, pipeline.sh)
+#      clipboard-rtf, clipboard-undo). Die Shell-Skripte daneben (md-clip, pipeline.sh)
 #      brauchen keine eigene Signatur; sie werden als Ressourcen vom
 #      Bundle-Siegel erfasst.
 #   2. Der Updater-Helfer in Contents/MacOS/. codesign signiert beim
@@ -45,6 +45,7 @@ SIGN_TARGETS=(
   "$APP/Contents/Resources/bin/pandoc"
   "$APP/Contents/Resources/bin/clipboard-html"
   "$APP/Contents/Resources/bin/clipboard-rtf"
+  "$APP/Contents/Resources/bin/clipboard-undo"
   "$APP/Contents/MacOS/md-clip-updater"
   "$APP/Contents/MacOS/md-clip-hud"
   "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"

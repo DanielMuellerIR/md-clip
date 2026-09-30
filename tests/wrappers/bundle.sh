@@ -147,6 +147,7 @@ for executable in \
   "$XPC_TEST_APP/Contents/Resources/bin/pandoc" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-html" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-rtf" \
+  "$XPC_TEST_APP/Contents/Resources/bin/clipboard-undo" \
   "$XPC_TEST_APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"; do
   : > "$executable"
   chmod +x "$executable"
@@ -177,6 +178,7 @@ grep -Fq 'Sparkles XPC-Dienste sind noch im Bundle' "$TEST_ROOT/dead-xpc.err"
 
 grep -Fq 'verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-html" "HTML-Helfer"' "$VERIFY_BUNDLE"
 grep -Fq 'verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-rtf" "RTF-Helfer"' "$VERIFY_BUNDLE"
+grep -Fq 'verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-undo" "Undo-Helfer"' "$VERIFY_BUNDLE"
 echo "✓ Bundle-Prüfer erfasst tote XPC-Symlinks und beide Clipboard-Helfer"
 
 # --- Bundle: Info.plist darf keine ältere Kompatibilität versprechen als Code. ---
@@ -222,6 +224,7 @@ printf '%s\n' \
   "$APP/Contents/MacOS/md-clip-hud" \
   "$APP/Contents/Resources/bin/clipboard-html" \
   "$APP/Contents/Resources/bin/clipboard-rtf" \
+  "$APP/Contents/Resources/bin/clipboard-undo" \
   "$APP/Contents/Resources/bin/pandoc" \
   "$SPARKLE_FRAMEWORK/Versions/B/Sparkle" \
   "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate" \

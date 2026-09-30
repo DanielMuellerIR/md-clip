@@ -4,7 +4,7 @@
 # Was passiert hier:
 #   1. Prüfen, dass die Abhängigkeiten da sind (plattformabhängig).
 #   2. Nur macOS: Swift-Helper aus helpers/clipboard-*.swift kompilieren.
-#      Auf Linux übernimmt xclip/wl-clipboard deren Job — nichts zu bauen.
+#      Linux liest mit xclip/wl-clipboard; der Python-Helfer sichert alle Formate.
 #   3. Symlink auf bin/md-clip anlegen (macOS: /usr/local/bin,
 #      Linux: ~/.local/bin — dort braucht es kein sudo).
 #
@@ -29,6 +29,7 @@ MAIN_SCRIPT="bin/md-clip"
 HELPERS=(
   "helpers/clipboard-html.swift:helpers/clipboard-html"
   "helpers/clipboard-rtf.swift:helpers/clipboard-rtf"
+  "helpers/clipboard-undo.swift:helpers/clipboard-undo"
 )
 
 # --- Plattform erkennen (spiegelt bin/md-clip) ---
@@ -112,6 +113,7 @@ command -v pandoc >/dev/null 2>&1 || missing+=("pandoc")
 command -v perl   >/dev/null 2>&1 || missing+=("perl")
 
 if [ "$PLATFORM" = "linux" ]; then
+  command -v python3 >/dev/null 2>&1 || missing+=("python3 (vollständiges Undo)")
   # Nur das Backend der laufenden Sitzung ist Pflicht. WAYLAND_DISPLAY ist
   # auch hier die Produkt-Weiche; DISPLAY wäre unter Wayland durch XWayland
   # häufig ebenfalls gesetzt und würde die falsche Abhängigkeit verlangen.
@@ -131,11 +133,11 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "       Installation: brew install pandoc"
   else
     echo "       Installation (Debian/Ubuntu/Mint):"
-    echo "         sudo apt install pandoc xclip wl-clipboard libnotify-bin"
+    echo "         sudo apt install pandoc xclip wl-clipboard libnotify-bin python3 libx11-6 libxfixes3"
     echo "       Installation (Fedora):"
-    echo "         sudo dnf install pandoc xclip wl-clipboard libnotify"
+    echo "         sudo dnf install pandoc xclip wl-clipboard libnotify python3 libX11 libXfixes"
     echo "       Installation (Arch):"
-    echo "         sudo pacman -S pandoc xclip wl-clipboard libnotify"
+    echo "         sudo pacman -S pandoc xclip wl-clipboard libnotify python libx11 libxfixes"
   fi
   exit 2
 fi
@@ -183,7 +185,8 @@ if [ "$PLATFORM" = "macos" ]; then
     fi
   done
 else
-  echo "✓ Keine Helper zu bauen (Linux nutzt xclip/wl-clipboard)"
+  "$SCRIPT_DIR/helpers/clipboard-undo-linux.py" dependencies || exit 2
+  echo "✓ Linux-Undo-Helfer und benötigte Bibliotheken verfügbar"
 fi
 
 # --- 3. Hauptskript ausführbar machen ---

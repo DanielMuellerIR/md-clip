@@ -15,6 +15,17 @@ cp "$PROJECT_ROOT/lib/pipeline.sh" "$TEST_ROOT/runtime/pipeline.sh"
 cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$TEST_ROOT/runtime/tidy-markdown.pl"
 cp "$PROJECT_ROOT/lib/tables.lua" "$TEST_ROOT/runtime/tables.lua"
 
+cat > "$TEST_ROOT/runtime/clipboard-undo" <<'SH'
+#!/bin/sh
+case "$1" in
+  available|cancel) exit 0 ;;
+  prepare) printf 'mock-token\n' ;;
+  replace) exec /bin/cat > "$MD_CLIP_TEST_OUTPUT" ;;
+  *) exit 2 ;;
+esac
+SH
+cp "$TEST_ROOT/runtime/clipboard-undo" "$TEST_ROOT/runtime/clipboard-undo-linux.py"
+
 # Dependency-Check im Bundle-Layout erfüllen. Für die Plain-Fälle melden die
 # Helper keinen Rich-Flavor; der MSO-Fall unten kann ihnen gezielt Dateien
 # geben und dadurch denselben Auto-Pfad wie das Produkt prüfen.

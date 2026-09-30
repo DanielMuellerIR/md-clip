@@ -96,6 +96,7 @@ prepare_linux_path() {
   done
   ln -s "$FAKE_BIN/uname" "$destination/uname"
   ln -s "$FAKE_BIN/pandoc" "$destination/pandoc"
+  ln -s "$FAKE_BIN/python3" "$destination/python3"
   for tool in "$@"; do
     ln -s "$FAKE_BIN/$tool" "$destination/$tool"
   done

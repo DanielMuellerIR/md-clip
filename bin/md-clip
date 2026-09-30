@@ -110,7 +110,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.3.1"
+VERSION="1.4.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -174,6 +174,9 @@ PREVIEW=0
 DOCTOR=0
 JSON=0
 REPLACE=0       # --replace: Ergebnis ins Clipboard schreiben statt stdout
+UNDO=0
+UNDO_TOKEN=""
+CONVERSION_OPTIONS=0
 PLAIN=0         # --plain: Plain-Text-Modus, kein Convert
 FROM="auto"     # --from: auto|html|rtf|plain
 TO="gfm"        # --to: pandoc-Ziel-Dialekt (gfm|markdown|commonmark)
@@ -275,7 +278,9 @@ OPTIONS
       --preview        Vor --replace Ergebnis auf stderr zeigen und am Terminal
                        bestätigen; Abbruch liefert Exit 4.
   -r, --replace        Markdown-Ergebnis zurück ins Clipboard schreiben
-                       (statt nach stdout).
+                       (statt nach stdout); alle Formate für Undo sichern.
+      --undo           Letzte erfolgreiche Ersetzung einmalig zurücknehmen.
+                       Gilt zehn Minuten und nur bis zum nächsten Kopieren.
   -p, --plain          Plain-Text-Modus: keine Konvertierung, nur Clipboard-
                        Inhalt als Plain-Text durchreichen. Mit --replace
                        ersetzt der Plain-Text das Clipboard (alle Rich-
@@ -296,7 +301,7 @@ OPTIONS
 
 EXIT-CODES
   0  Erfolg
-  1  Quelle fehlt, ist leer oder nicht lesbar
+  1  Quelle/Sicherung nicht lesbar oder Undo abgelaufen/Clipboard geändert
   2  Ungültige Argumente, Datei oder fehlende benötigte Dependency
   3  Konvertierung nicht darstellbar oder Ausgabe fehlgeschlagen
   4  Vorschau abgebrochen
@@ -430,25 +435,33 @@ clip_read_text() {
   fi
 }
 
-# clip_write_text: Plain-Text von stdin ins Clipboard schreiben.
-# Ersetzt den Inhalt komplett — alle Rich-Flavors (HTML, RTF) verschwinden.
-clip_write_text() {
-  if [ "$PLATFORM" = "macos" ]; then
-    pbcopy
-  elif [ "$CLIP_BACKEND" = "wayland" ]; then
-    wl-copy
+# Die Helfer halten die vollständige Formatsicherung nur im Arbeitsspeicher.
+# Die Ersetzung bleibt an dieselbe Clipboard-Generation wie die Sicherung gebunden.
+undo_helper_path() {
+  local name
+  if [ "$PLATFORM" = macos ]; then name=clipboard-undo; else name=clipboard-undo-linux.py; fi
+  if [ -x "$SCRIPT_DIR/$name" ]; then
+    printf '%s\n' "$SCRIPT_DIR/$name"
   else
-    # xclip forkt sich in den Hintergrund und hält die Auswahl, solange kein
-    # anderes Programm sie übernimmt — so verlangt es das X11-Clipboard-
-    # Protokoll: Es gibt keinen zentralen Speicher, der Besitzer liefert den
-    # Inhalt auf Anfrage aus. Stirbt der Prozess, ist das Clipboard leer.
-    #
-    # Ohne umgeleitete Standard-Kanäle würde dieser Hintergrund-Prozess die
-    # Pipe unserer Aufrufer offen halten: `md-clip --replace | cat` bliebe
-    # dann hängen, bis xclip irgendwann endet. Darum stdout/stderr nach
-    # /dev/null — md-clip kehrt sofort zurück, xclip lebt weiter.
-    xclip -selection clipboard -in >/dev/null 2>&1
+    printf '%s\n' "$PROJECT_ROOT/helpers/$name"
   fi
+}
+
+clip_undo_command() {
+  local helper
+  helper=$(undo_helper_path)
+  [ -x "$helper" ] || { err "Undo-Helfer fehlt (install.sh ausführen)."; return 2; }
+  "$helper" "$@"
+}
+
+clip_prepare_replace() { clip_undo_command prepare; }
+clip_cancel_replace() { clip_undo_command cancel "$1"; }
+clip_restore() { clip_undo_command undo; }
+
+# clip_write_text ersetzt alle Rich-Flavors durch Text. Der Helfer prüft direkt
+# davor den ursprünglichen Eigentümer und bindet Undo an seinen Schreibvorgang.
+clip_write_text() {
+  clip_undo_command replace "$UNDO_TOKEN"
 }
 
 # rtf_fix_escaped_newlines liegt in lib/pipeline.sh und wird dort von
@@ -478,10 +491,13 @@ rtf_to_html() {
 # `getopts` (Bash-Builtin) kann nur kurze Optionen — daher manuell.
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --undo) UNDO=1 ;;
     --stdin)
+      CONVERSION_OPTIONS=1
       [ "$INPUT_MODE" = clipboard ] || die 2 "Nur eine Eingabequelle erlaubt."
       INPUT_MODE=stdin ;;
     --input)
+      CONVERSION_OPTIONS=1
       [ "$INPUT_MODE" = clipboard ] || die 2 "Nur eine Eingabequelle erlaubt."
       shift
       [ -n "${1:-}" ] || die 2 "--input benötigt einen Dateipfad."
@@ -490,8 +506,9 @@ while [ "$#" -gt 0 ]; do
     --json) JSON=1 ;;
     --preview) PREVIEW=1 ;;
     -r|--replace)   REPLACE=1 ;;
-    -p|--plain)     PLAIN=1 ;;
+    -p|--plain)     PLAIN=1; CONVERSION_OPTIONS=1 ;;
     -f|--from)
+      CONVERSION_OPTIONS=1
       # Wert prüfen: muss eines der erlaubten Formate sein.
       shift
       case "${1:-}" in
@@ -500,6 +517,7 @@ while [ "$#" -gt 0 ]; do
       esac
       ;;
     -t|--to)
+      CONVERSION_OPTIONS=1
       shift
       case "${1:-}" in
         gfm|markdown|commonmark) TO="$1" ;;
@@ -571,11 +589,15 @@ done
 check_dependencies() {
   local kind="$1" tool
   local required=()
+  if [ "$kind" = write ]; then
+    clip_undo_command available || return 2
+    return 0
+  fi
   case "$kind" in
     html|rtf) required=(pandoc perl) ;;
   esac
   if [ "$kind" = rtf ] && [ "$PLATFORM" = macos ]; then required+=(textutil); fi
-  if [ "$kind" = read ] || [ "$kind" = write ]; then
+  if [ "$kind" = read ]; then
     case "$PLATFORM:$CLIP_BACKEND:$kind" in
       macos:*:read)
         case "$FROM" in
@@ -584,10 +606,8 @@ check_dependencies() {
           plain) required=(pbpaste) ;;
           auto) ;; # Fehlende einzelne Flavor-Werkzeuge überspringen.
         esac ;;
-      macos:*:write) required=(pbcopy) ;;
       linux:wayland:read) required=(wl-paste) ;;
-      linux:wayland:write) required=(wl-copy) ;;
-      linux:x11:*) required=(xclip) ;;
+      linux:x11:read) required=(xclip) ;;
     esac
   fi
   for tool in ${required[@]+"${required[@]}"}; do
@@ -610,15 +630,16 @@ check_dependencies() {
 
 # Doctor liefert ausschließlich Werkzeugdaten, niemals Zwischenablage-Inhalte.
 doctor() {
-  local tool available version path sep="" sandbox=false rtf=false lua=false
+  local tool available version path sep="" sandbox=false rtf=false lua=false undo=false
+  clip_undo_command available >/dev/null 2>&1 && undo=true
   pandoc_supports_sandbox && sandbox=true
   pandoc_supports_rtf && rtf=true
   pandoc_supports_table_filter && lua=true
   if [ "$JSON" -eq 1 ]; then
-    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"undo":false,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua"
+    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
   else
     printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
-    printf 'stdin/Datei: ja; Vorschau: Terminal; Undo: nein\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$sandbox" "$rtf" "$lua"
+    printf 'stdin/Datei: ja; Vorschau: Terminal; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$undo" "$sandbox" "$rtf" "$lua"
   fi
   for tool in pandoc perl textutil pbpaste pbcopy xclip wl-paste wl-copy iconv clipboard-html clipboard-rtf; do
     available=false; version=""
@@ -705,6 +726,14 @@ is_mso_html() {
 # ---------- Quellenwahl und Eingabevertrag ----------
 
 [ "$JSON" -eq 0 ] || [ "$DOCTOR" -eq 1 ] || die 2 "--json benötigt --doctor."
+if [ "$UNDO" -eq 1 ]; then
+  [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$DOCTOR" -eq 0 ] || die 2 "--undo ist nicht mit Konvertierung, Vorschau oder --doctor kombinierbar."
+  check_dependencies write || exit 2
+  clip_restore || exit $?
+  log "md-clip: Ursprüngliche Clipboard-Formate wiederhergestellt."
+  notify "Ursprüngliche Clipboard-Formate wiederhergestellt."
+  exit 0
+fi
 if [ "$DOCTOR" -eq 1 ]; then
   [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] || die 2 "--doctor ist nicht mit Eingabe oder Ersetzen kombinierbar."
   doctor
@@ -731,10 +760,20 @@ if [ "$REPLACE" -eq 1 ]; then check_dependencies write || exit 2; fi
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/md-clip.XXXXXX")
 OUTPUT_FILE="$WORK_DIR/output"
 export MD_CLIP_RESULT_FILE="$WORK_DIR/result"
-cleanup_output() { rm -rf "$WORK_DIR"; }
+cleanup_output() {
+  if [ -n "$UNDO_TOKEN" ]; then clip_cancel_replace "$UNDO_TOKEN" >/dev/null 2>&1 || true; fi
+  rm -rf "$WORK_DIR"
+}
 trap cleanup_output EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+if [ "$REPLACE" -eq 1 ]; then
+  UNDO_TOKEN=$(clip_prepare_replace) || exit $?
+  case "$UNDO_TOKEN" in
+    ""|*[!A-Za-z0-9-]*) die 3 "Undo-Helfer lieferte keine gültige Sicherung." ;;
+  esac
+fi
 
 # Dateien erhalten auch NUL-Bytes und abschließende Newlines. Kein Nutzdaten-
 # Transport über Shell-Variablen; nur die Word-Heuristik liest einen HTML-String.
@@ -837,12 +876,8 @@ if [ "$REPLACE" -eq 1 ]; then
     die 1 "Ergebnis ist leer; Clipboard bleibt unverändert."
   fi
 
-  # clip_write_text liest von stdin und ersetzt den Clipboard-Inhalt
-  # komplett — alle Rich-Flavors (HTML, RTF) verschwinden, nur Plain bleibt.
-  # Der globale Export LC_ALL weiter oben ist hier wichtig: pbcopy (macOS)
-  # interpretiert Input-Bytes als MacRoman, wenn LC_ALL leer oder C ist,
-  # und legt dann FALSCHE Zeichen aufs Clipboard, was beim Einfügen in
-  # andere Apps Mojibake produziert.
+  # Vorschau und Konvertierung ändern die gesicherte Clipboard-Generation nicht.
+  # Ein neuer Kopiervorgang währenddessen verhindert später das Ersetzen.
   if [ "$PREVIEW" -eq 1 ]; then
     # Eingabe bleibt auf stdin nutzbar; die Entscheidung kommt separat vom TTY.
     [ -t 2 ] && ( : < /dev/tty ) 2>/dev/null || die 2 "Vorschau benötigt ein interaktives Terminal."
@@ -853,9 +888,10 @@ if [ "$REPLACE" -eq 1 ]; then
     IFS= read -r answer < /dev/tty || exit 4
     [ "$answer" = ja ] || exit 4
   fi
-  clip_write_text < "$OUTPUT_FILE" || die 3 "Clipboard konnte nicht geschrieben werden."
+  clip_write_text < "$OUTPUT_FILE" || exit $?
+  UNDO_TOKEN=""
   OUTPUT_CHARS=$(wc -m < "$OUTPUT_FILE" | tr -d '[:space:]')
-  log "md-clip: $RESULT; Clipboard ersetzt (${OUTPUT_CHARS} Zeichen)."
+  log "md-clip: $RESULT; Clipboard ersetzt (${OUTPUT_CHARS} Zeichen). Undo: md-clip --undo (zehn Minuten)."
   notify "$RESULT; im Clipboard."
 else
   cat "$OUTPUT_FILE" || die 3 "stdout konnte nicht geschrieben werden."

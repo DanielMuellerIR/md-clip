@@ -39,12 +39,26 @@ cp "$PROJECT_ROOT/bin/md-clip" "$TEST_RUNTIME/bin/md-clip"
 cp "$PROJECT_ROOT/lib/pipeline.sh" "$TEST_RUNTIME/bin/pipeline.sh"
 cp "$PROJECT_ROOT/lib/tables.lua" "$TEST_RUNTIME/bin/tables.lua"
 cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$TEST_RUNTIME/bin/tidy-markdown.pl"
+if [ "$(uname -s)" = Linux ]; then
+  cp "$PROJECT_ROOT/helpers/clipboard-undo-linux.py" "$TEST_RUNTIME/bin/clipboard-undo-linux.py"
+  # Die Testkopie darf weder eine echte Undo-Sicherung benutzen noch deren Dienst stoppen.
+  if [ -n "${WAYLAND_DISPLAY:-}" ] && [ "${WAYLAND_DISPLAY#/}" = "$WAYLAND_DISPLAY" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    export WAYLAND_DISPLAY="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+  fi
+  mkdir -m 700 "$TEST_RUNTIME/undo-runtime"
+  export XDG_RUNTIME_DIR="$TEST_RUNTIME/undo-runtime"
+fi
 PRODUCT_CLI="$TEST_RUNTIME/bin/md-clip"
 CLIPBOARD_BACKUP=""
 ENCODING_HTML=""
 UTF16_HTML=""
 
 cleanup_tests() {
+  if [ -x "$TEST_RUNTIME/bin/clipboard-undo-linux.py" ]; then
+    "$TEST_RUNTIME/bin/clipboard-undo-linux.py" stop >/dev/null 2>&1 || true
+  elif [ -x "$TEST_RUNTIME/bin/clipboard-undo" ]; then
+    "$TEST_RUNTIME/bin/clipboard-undo" stop >/dev/null 2>&1 || true
+  fi
   if [ -n "$CLIPBOARD_BACKUP" ] && [ -f "$CLIPBOARD_BACKUP" ] && declare -F clip_put_text_file >/dev/null 2>&1; then
     clip_put_text_file "$CLIPBOARD_BACKUP" 2>/dev/null || true
   fi
@@ -911,6 +925,7 @@ else
     swiftc "$CLIPBOARD_STRING_SRC" -o "$CLIPBOARD_STRING_BIN"
     swiftc "$PROJECT_ROOT/helpers/clipboard-html.swift" -o "$TEST_RUNTIME/bin/clipboard-html"
     swiftc "$PROJECT_ROOT/helpers/clipboard-rtf.swift" -o "$TEST_RUNTIME/bin/clipboard-rtf"
+    swiftc "$PROJECT_ROOT/helpers/clipboard-undo.swift" -o "$TEST_RUNTIME/bin/clipboard-undo"
 
     clip_put_html() { "$LOAD_CLIPBOARD_BIN" public.html "$1" >/dev/null; }
     clip_get_text() { "$CLIPBOARD_STRING_BIN"; }

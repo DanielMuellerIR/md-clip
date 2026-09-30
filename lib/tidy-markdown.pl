@@ -193,12 +193,23 @@ my $detect_structure = sub {
 my $fence_char;                 # undef = kein offener Zaun
 my $fence_len    = 0;
 my $fence_indent = 0;
-my @item_indents = ();          # Inhalts-Einrückung offener Listenpunkte
-my @item_markers = ();          # Marker-Einrückung derselben Punkte
+# Listen innerhalb eines Zitats dürfen die Einrückung außerhalb nicht ändern.
+# Beim Rückweg bleibt die äußere Liste erhalten; verlassene Zitate verlieren
+# ihren Zustand, damit ein späteres neues Zitat keine alte Liste übernimmt.
+my %lists_by_depth;
+my $previous_depth = 0;
 
 for my $i (0 .. $#lines) {
     my $prefix = quote_prefix($lines[$i]);
     my $body   = substr($lines[$i], length($prefix));
+    my $depth = quote_depth($prefix);
+    if ($depth < $previous_depth) {
+        delete $lists_by_depth{$_} for grep { $_ > $depth } keys %lists_by_depth;
+    }
+    $previous_depth = $depth;
+    my $list = ($lists_by_depth{$depth} ||= { indents => [], markers => [] });
+    my $item_indents = $list->{indents};
+    my $item_markers = $list->{markers};
 
     if (defined $fence_char) {
         $is_code[$i] = 1;
@@ -217,17 +228,17 @@ for my $i (0 .. $#lines) {
     # ist sie dessen Geschwister — also selbst ein Listenpunkt, auch wenn
     # die Vorzeile mit einem Hard-Break endet. Vor dem Schließen unten
     # ermitteln, denn genau dieser Punkt wird dabei zugeklappt.
-    my $sibling_of_open_item = grep { $_ == $indent } @item_markers;
+    my $sibling_of_open_item = grep { $_ == $indent } @{$item_markers};
     # Die Zeile verlässt jeden Listenpunkt, dessen Inhalt weiter rechts
     # beginnt — dessen Einrückung zählt danach nicht mehr als Container.
-    while (@item_indents && $indent < $item_indents[-1]) {
-        pop @item_indents;
-        pop @item_markers;
+    while (@{$item_indents} && $indent < $item_indents->[-1]) {
+        pop @{$item_indents};
+        pop @{$item_markers};
     }
-    my $container = @item_indents ? $item_indents[-1] : 0;
+    my $container = @{$item_indents} ? $item_indents->[-1] : 0;
     # Nach dem Zuklappen offener Punkte gilt: Bleibt ein Punkt offen,
     # gehört diese Zeile zu seinem Inhalt.
-    $in_list_container[$i] = 1 if @item_indents;
+    $in_list_container[$i] = 1 if @{$item_indents};
 
     # Vier Spalten jenseits des Containers: eingerückter Code-Block.
     if ($indent >= $container + 4) {
@@ -250,7 +261,6 @@ for my $i (0 .. $#lines) {
     if ($body =~ /^[ \t]*($list_marker)([ \t]+)/) {
         my ($marker, $gap) = ($1, $2);
         my $proven_list_item = 1;
-        my $depth = quote_depth($prefix);
 
         # Dokumentanfang oder Leerzeile derselben Zitattiefe beginnen
         # einen neuen Block. Dezimalmarker >1 dürfen dort eine Liste
@@ -297,9 +307,9 @@ for my $i (0 .. $#lines) {
         if ($proven_list_item) {
             $is_list_item[$i] = 1;
             $in_list_container[$i] = 1;
-            push @item_indents,
+            push @{$item_indents},
                 $indent + length($marker) + indent_width($gap);
-            push @item_markers, $indent;
+            push @{$item_markers}, $indent;
         }
     }
 }
