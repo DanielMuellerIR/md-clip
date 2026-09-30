@@ -14,8 +14,8 @@ permissions:
 
 jobs:
   linux:
-    name: Linux (Ubuntu)
-    runs-on: ubuntu-latest
+    name: Linux (Ubuntu 24.04, pandoc 3.1.3)
+    runs-on: ubuntu-24.04
     # Der Lauf dauert normal wenige Minuten. Die Grenze ist gegen Haenger
     # gerichtet, nicht gegen Langsamkeit: `xvfb-run` haengt als letzter Befehl
     # einer Shell VOR dem ersten Test, weil es dann PID 1 wird und Xvfbs
@@ -40,7 +40,16 @@ jobs:
 
       - name: Versionen protokollieren
         run: |
-          pandoc --version | head -1
+          # Die gemeinsame Fixture-Erwartung ist gegen diese pandoc-Version
+          # geprüft. Distributionskorrekturen sind erlaubt; ein Wechsel der
+          # pandoc-Version muss bewusst geprüft werden.
+          pandoc_version="$(pandoc --version)"
+          pandoc_version="${pandoc_version%%$'\n'*}"
+          printf '%s\n' "$pandoc_version"
+          if [ "$pandoc_version" != 'pandoc 3.1.3' ]; then
+            echo "Erwartet pandoc 3.1.3, bekam $pandoc_version" >&2
+            exit 1
+          fi
           perl -e 'print "perl $]\n"'
           ./bin/md-clip --version
 

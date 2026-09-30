@@ -6,14 +6,18 @@
   15 Funde im ersten und sechs im zweiten Review. Zitatlisten, HTML-Attributfolge
   und direkte Signaturprüfung der Clipboard-Helfer sind in 1.4.0 korrigiert.
   Frühere Fixes wurden nicht erneut umgesetzt. Noch offen sind:
-  - Der CLI-Start ergänzt auch unter Linux den Homebrew-Pfad.
-  - Die Linux-CI verwendet ein bewegliches Ubuntu-Image und pandoc aus dessen
-    Paketquelle.
   - Der Icon-Build räumt bei gewöhnlichem Fehler nicht auf. Ein fehlendes Icon
     bleibt beim App-Build bewusst optional; eine Änderung braucht eine
     Produktentscheidung.
   Zwei nur paraphrasiert erhaltene Installationsfunde lassen sich ohne
   ursprüngliche Reproduktion nicht als aktuelle Fehler bestätigen.
+
+Die beiden Linux-Funde sind in 1.4.1 korrigiert: Homebrew-Pfade ergänzt die CLI
+nur auf macOS; Linux behält den vom Aufrufer gewählten Suchpfad. Die Linux-CI
+verwendet Ubuntu 24.04 und prüft vor den Tests pandoc 3.1.3. Paketkorrekturen
+der Distribution bleiben möglich; eine andere pandoc-Version bricht den Lauf
+mit einer klaren Diagnose ab. Die gezielten PATH-Verträge stehen in
+`tests/test-dependencies.sh`.
 
 Die Compare-/Testskript-Funde sind korrigiert: `compare-file.sh` baut Loader und
 beide Lesehelfer in einem privaten Laufzeitverzeichnis. `compare.sh` bricht bei

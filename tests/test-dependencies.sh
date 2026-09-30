@@ -74,3 +74,50 @@ if INSTALL_PREFIX="$TEST_ROOT/prefix2" "$PROJECT_COPY2/install.sh" > "$TEST_ROOT
 fi
 grep -Fq 'kennt die Option --sandbox nicht' "$TEST_ROOT/install2.out"
 echo "✓ Installer lehnt pandoc ohne --sandbox ab"
+
+# Der vom Aufrufer gewählte Linux-PATH muss auch beim Konverter ankommen.
+# Mit einem Bundle-Konverter bleibt die Prüfung auf macOS unabhängig von
+# tatsächlich installierten Homebrew-Binaries.
+PATH_RUNTIME="$TEST_ROOT/path-runtime"
+mkdir -p "$PATH_RUNTIME"
+PATH_RUNTIME="$(cd "$PATH_RUNTIME" && pwd -P)"
+cp "$RUNTIME/md-clip" "$RUNTIME/pipeline.sh" "$RUNTIME/tidy-markdown.pl" "$RUNTIME/tables.lua" "$PATH_RUNTIME/"
+cat > "$PATH_RUNTIME/pandoc" <<'MOCK'
+#!/bin/sh
+printf '%s\n' "$PATH" > "$MD_CLIP_PATH_CAPTURE"
+printf 'pandoc 99.1\n'
+MOCK
+chmod +x "$PATH_RUNTIME/pandoc"
+export MD_CLIP_PATH_CAPTURE="$TEST_ROOT/converter-path"
+CALLER_PATH="$FAKE_BIN:/usr/bin:/bin"
+for backend in macos x11 wayland; do
+  case "$backend" in
+    macos)
+      export MD_CLIP_TEST_UNAME=Darwin
+      export WAYLAND_DISPLAY=""
+      expected_path="$PATH_RUNTIME:/opt/homebrew/bin:/usr/local/bin:$CALLER_PATH" ;;
+    x11)
+      export MD_CLIP_TEST_UNAME=Linux
+      export WAYLAND_DISPLAY=""
+      expected_path="$PATH_RUNTIME:$CALLER_PATH" ;;
+    wayland)
+      export MD_CLIP_TEST_UNAME=Linux
+      export WAYLAND_DISPLAY=isolated-wayland
+      expected_path="$PATH_RUNTIME:$CALLER_PATH" ;;
+  esac
+  PATH="$CALLER_PATH" "$PATH_RUNTIME/md-clip" --version > "$TEST_ROOT/path-version"
+  [ "$(cat "$MD_CLIP_PATH_CAPTURE")" = "$expected_path" ]
+  grep -Fq 'pandoc  99.1 (gebundelt)' "$TEST_ROOT/path-version"
+  echo "✓ Konverter-PATH und Bundle-Vorrang: $backend"
+done
+
+mv "$PATH_RUNTIME/pandoc" "$FAKE_BIN/pandoc"
+for backend in x11 wayland; do
+  export MD_CLIP_TEST_UNAME=Linux
+  if [ "$backend" = wayland ]; then export WAYLAND_DISPLAY=isolated-wayland
+  else export WAYLAND_DISPLAY=""; fi
+  PATH="$CALLER_PATH" "$PATH_RUNTIME/md-clip" --version > "$TEST_ROOT/path-version"
+  [ "$(cat "$MD_CLIP_PATH_CAPTURE")" = "$CALLER_PATH" ]
+  grep -Fq 'pandoc  99.1 (System)' "$TEST_ROOT/path-version"
+  echo "✓ Linux verwendet pandoc aus dem Aufrufer-PATH: $backend"
+done
