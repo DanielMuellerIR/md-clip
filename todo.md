@@ -1,12 +1,5 @@
 # md_clip — Todos
 
-## Von Hand zu prüfen
-
-- **macOS-App-Abnahme für 1.4.0.** Das aktuelle notarisiert installierte Bundle
-  hat Replace und einmaliges Undo mit vollständigem Vergleich aller Items und
-  Formatbytes bestanden. Der App-Start und die sichtbare HUD-Meldung sind nach
-  einem Timeout der GUI-Steuerung noch offen.
-
 ## Aus der Handoff-Frontier übernommen (2026-08-29)
 
 - Die beiden Reviews vom 2026-08-19 sind mit dem aktuellen Code abgeglichen:
@@ -61,4 +54,9 @@
   headless bestanden; die gemeinsame Pipeline bestand je 43/43 Prüfungen.
   Unabhängige xclip- und wl-clipboard-Roundtrips stellten auch große HTML- und
   Binärformate bytegenau wieder her. Die macOS-Kernprüfungen und die CLI des
-  notarisierten Bundles bestanden; die oben genannte GUI-Abnahme bleibt offen.
+  notarisierten Bundles bestanden.
+- **macOS-App-Abnahme.** Das aktuelle Developer-ID-signierte, notarisierte
+  und gestapelte Bundle wurde mit Gatekeeper-Akzeptanz regulär gestartet.
+  Replace, die sichtbare HUD-Meldung und einmaliges Undo aller ursprünglichen
+  Items und Formatbytes sind geprüft. Das vorherige Clipboard wurde aus einer
+  RAM-Sicherung wiederhergestellt.
