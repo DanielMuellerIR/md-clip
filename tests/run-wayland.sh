@@ -31,3 +31,4 @@ for ((i=0; i<100; i++)); do
 done
 [ "$ready" -eq 1 ] || { cat "$RUNTIME/sway.log" >&2; exit 1; }
 MD_CLIP_SKIP_CLIPBOARD=0 bash "$ROOT/tests/run-tests.sh"
+MD_CLIP_UNDO_TEST_ISOLATED=1 python3 "$ROOT/tests/test-undo-linux.py" --integration

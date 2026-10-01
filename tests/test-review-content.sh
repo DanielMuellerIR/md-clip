@@ -36,4 +36,12 @@ check classroom_following_attribute "$(classroom '<div class="mvRF3b" dir="auto"
 check classroom_existing_title "$(classroom '<div class="mvRF3b">Title</div>')" "$expected"
 check classroom_class_token "$(classroom '<div dir="auto" class=" other mvRF3b more ">Title</div>')" "$expected"
 check classroom_wrong_class "$(classroom '<div class="xmvRF3b">Title</div>')" '<a href="https://example.test/doc"></a>'
+# Der vollständige Code-Inhalt muss nach HTML-Konvertierung und erneutem
+# Parsen erhalten bleiben, auch wenn eine Liste vor einem eigenen Zitat steht.
+html=$'<ul><li>item</li></ul><blockquote><p>quote</p></blockquote><pre><code>&#92;- keep\nx&#92;\nnext\n</code></pre>'
+for format in gfm markdown commonmark; do
+  actual=$(printf '%s' "$html" | "$ROOT/bin/md-clip" --stdin --from html --to "$format" --quiet | pandoc -f "$format" -t native)
+  expected=$(printf '%s' "$html" | pandoc -f html -t native)
+  check "outer_list_standalone_quote_code_$format" "$actual" "$expected"
+done
 [ "$failed" -eq 0 ]

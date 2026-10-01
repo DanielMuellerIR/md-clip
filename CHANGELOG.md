@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.3 — 2026-10-01
+
+- Codeblöcke nach einer Liste und einem eigenständigen Zitat behalten ihren
+  vollständigen Inhalt, einschließlich Backslashes und Zeilenfortsetzungen.
+- Die CI prüft Undo auf privatem macOS-Pasteboard sowie isoliert unter X11
+  und Wayland; Inhaltsregressionen laufen auf beiden Plattformen.
+
 ## 1.4.2 — 2026-10-01
 
 - Das macOS-App-Icon ist verpflichtend. Fehlende, leere oder unlesbare

@@ -58,6 +58,14 @@ jobs:
       - name: Tests ohne Display (Fixtures)
         run: ./tests/run-tests.sh
 
+      - name: Inhaltsregressionen und Undo ohne Display
+        run: |
+          bash tests/test-review-content.sh
+          python3 tests/test-undo-linux.py
+
+      - name: Undo mit isoliertem X11-Clipboard
+        run: xvfb-run -a env MD_CLIP_UNDO_TEST_ISOLATED=1 python3 tests/test-undo-linux.py --integration
+
       # Dann mit virtuellem X-Server: beweist den echten Clipboard-Weg.
       - name: Tests mit X11-Clipboard (Xvfb)
         run: xvfb-run -a ./tests/run-tests.sh
@@ -122,3 +130,5 @@ jobs:
           bash tests/test-wrapper-safety.sh
           python3 tests/test-cli-inputs.py
           python3 tests/test-compare.py
+          bash tests/test-review-content.sh
+          python3 tests/test-undo-macos.py

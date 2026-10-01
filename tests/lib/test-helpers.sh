@@ -51,7 +51,6 @@ copy_install_test_project() {
   cp "$PROJECT_ROOT/helpers/clipboard-html.swift" "$destination/helpers/clipboard-html.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-rtf.swift" "$destination/helpers/clipboard-rtf.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-undo.swift" "$destination/helpers/clipboard-undo.swift"
-  cp "$PROJECT_ROOT/helpers/clipboard-undo-linux.py" "$destination/helpers/clipboard-undo-linux.py"
   # Die Installer-Prüfung soll weder ein Display öffnen noch einen Dienst starten.
   cat > "$destination/helpers/clipboard-undo-linux.py" <<'SH'
 #!/bin/sh

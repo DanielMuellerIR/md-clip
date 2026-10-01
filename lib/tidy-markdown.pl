@@ -203,6 +203,21 @@ for my $i (0 .. $#lines) {
     my $prefix = quote_prefix($lines[$i]);
     my $body   = substr($lines[$i], length($prefix));
     my $depth = quote_depth($prefix);
+    if (!defined($fence_char) && $depth > $previous_depth) {
+        # Ein Zitat erhält die äußere Liste nur, wenn sein Marker tatsächlich
+        # im Listeninhalt eingerückt ist. Ein eigenständiges Zitat beendet sie.
+        my $outer_body = $lines[$i];
+        $outer_body =~ s/^(?: {0,3}>[ ]?){$previous_depth}//;
+        my $quote_indent = indent_width($outer_body);
+        my $outer_list = $lists_by_depth{$previous_depth};
+        if ($outer_list) {
+            while (@{$outer_list->{indents}} &&
+                   $quote_indent < $outer_list->{indents}->[-1]) {
+                pop @{$outer_list->{indents}};
+                pop @{$outer_list->{markers}};
+            }
+        }
+    }
     if ($depth < $previous_depth) {
         delete $lists_by_depth{$_} for grep { $_ > $depth } keys %lists_by_depth;
     }
