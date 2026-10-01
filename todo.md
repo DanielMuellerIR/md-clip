@@ -43,13 +43,12 @@ ohne stdout-Ausgabe oder Clipboard-Ersetzung. Die macOS-Matrix läuft auf macOS.
   im Arbeitsbaum und wird von `.gitignore` als „früherer Ausgabeort" geführt.
   Der heutige Build schreibt nach `build/md-clip.app`. Ebenfalls nicht gelöscht.
 
-## Release-Lücke nach 1.2.9
+## Release-Lücke nach 1.2.9 — abgeschlossen am 2026-10-01
 
-- Entscheiden, welche Version nach dem bestehenden Tag `v1.3.0` veröffentlicht
-  werden soll; der aktuelle Implementierungsstand ist 1.4.0. Für die gewählte Version
-  ein notarisiertes DMG mit festgelegtem Finder-Layout (oder ausdrücklich
-  `--no-finder-layout`) erzeugen und anschließend GitHub-Release sowie
-  signierten Appcast prüfen.
+- Version 1.4.3 ist als [GitHub-Release](https://github.com/DanielMuellerIR/md-clip/releases/tag/v1.4.3)
+  mit signiertem, notarisiertem DMG veröffentlicht. Der Build verwendet bewusst
+  `--no-finder-layout`. Die ausführbaren Prüfungen bestehen auf macOS und im
+  isolierten Ubuntu-24.04-Container unter X11 und Wayland.
 
 ## Abgenommen am 2026-09-30
 
