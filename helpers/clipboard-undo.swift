@@ -180,8 +180,6 @@ private func capture() throws -> Snapshot {
     guard board.changeCount == count else { throw fail(1, "Das Clipboard wurde während der Sicherung geändert.") }
     return Snapshot(count: count, items: contents)
 }
-// NSPasteboardWriting verspricht standardmäßig alle Formate nach dem ersten.
-// Der Schreib-Worker endet sofort; deshalb muss jedes Format sofort übertragen werden.
 private func materializedItem(_ formats: [Format]) throws -> NSPasteboardItem {
     // Native Items tragen alle Formatbytes schon vor dem Schreiben. Der
     // kurzlebige Worker darf keine Datenlieferung nach seinem Ende benötigen.
@@ -196,21 +194,29 @@ private func materializedItem(_ formats: [Format]) throws -> NSPasteboardItem {
 private func writeClipboard(_ request: Request) throws -> Int {
     let board = pasteboard
     guard let expected = request.count else { throw fail(1, "Der Clipboard-Zustand fehlt.") }
-    let objects: [NSPasteboardWriting]
+    let contents: [[Format]]
     if request.command == "replace" {
         guard let bytes = request.bytes, bytes.count <= maximumBytes,
               String(data: bytes, encoding: .utf8) != nil else { throw fail(1, "Der Ersatztext ist kein gültiger UTF-8-Text oder zu groß.") }
-        objects = [try materializedItem([Format(type: NSPasteboard.PasteboardType.string.rawValue, bytes: bytes)])]
+        contents = [[Format(type: NSPasteboard.PasteboardType.string.rawValue, bytes: bytes)]]
     } else {
         guard let snapshot = request.snapshot else { throw fail(1, "Die Clipboard-Sicherung fehlt.") }
-        objects = try snapshot.items.map { try materializedItem($0) }
+        contents = snapshot.items
     }
+    let objects = try contents.map { try materializedItem($0) }
     // NSPasteboard bietet keine atomare compare-and-swap-Operation. Der letzte
     // Zählervergleich liegt unmittelbar vor clearContents; diese kleine Lücke bleibt.
     guard board.changeCount == expected else { throw fail(1, "Das Clipboard wurde inzwischen geändert; Undo ist nicht mehr verfügbar.") }
     let writtenCount = board.clearContents()
     if !objects.isEmpty && !board.writeObjects(objects) { throw fail(3, "Das Clipboard konnte nicht vollständig geschrieben werden.") }
     guard board.changeCount == writtenCount else { throw fail(1, "Das Clipboard wurde während des Schreibens geändert; Undo ist nicht mehr verfügbar.") }
+    // AppKit kann die Veröffentlichung nach writeObjects noch vervollständigen.
+    // Vor dem Worker-Ende alle Bytes zurücklesen: Sonst verschwinden auf macOS 14
+    // gelegentlich Formate, obwohl writeObjects bereits Erfolg gemeldet hat.
+    let published = try capture()
+    let expectedFormats = contents.map { Dictionary(uniqueKeysWithValues: $0.map { ($0.type, $0.bytes) }) }
+    let actual = published.items.map { Dictionary(uniqueKeysWithValues: $0.map { ($0.type, $0.bytes) }) }
+    guard actual == expectedFormats else { throw fail(3, "Das Clipboard wurde nicht vollständig veröffentlicht.") }
     return writtenCount
 }
 private func worker() {

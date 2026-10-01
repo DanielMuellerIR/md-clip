@@ -2,8 +2,9 @@
 
 ## 1.4.4 — 2026-10-01
 
-- Undo schreibt vorab vollständig materialisierte native Pasteboard-Items,
-  damit auch auf macOS 14 alle ursprünglichen Formatbytes erhalten bleiben.
+- Undo liest alle geschriebenen Formatbytes vor dem Ende des Schreibprozesses
+  vollständig zurück. Das verhindert den gelegentlichen Verlust von Formaten
+  nach einem auf macOS 14 bereits als erfolgreich gemeldeten Schreiben.
 - Native Clipboard-Tests warten auf die tatsächlich begonnene Materialisierung
   vor einem simulierten Eigentümerwechsel.
 

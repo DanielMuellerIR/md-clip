@@ -226,9 +226,30 @@ for _ in 0..<10 {
     let peerReply = try! JSONSerialization.jsonObject(with: Data(peerCapture.output.utf8)) as! [String: Any]
     let peerItems = (peerReply["snapshot"] as! [String: Any])["items"] as! [[Any]]
     let peerCount = peerItems.reduce(0) { $0 + $1.count }
+    // Derselbe Snapshot direkt zurückgeschrieben trennt AppKit vom Undo-Dienst.
+    let peerSnapshot = peerReply["snapshot"] as! [String: Any]
+    let directRequest: [String: Any] = ["command": "restore", "snapshot": peerSnapshot, "count": board.changeCount]
+    let directResult = call(["--worker"], try! JSONSerialization.data(withJSONObject: directRequest))
+    expect(directResult, 0, "direct 128 format writer")
+    let directTypes = readRaw()
+    print("128 direct writer: source", peerCount, "restored", directTypes.first?.count ?? 0)
+    precondition(directTypes == maximumTypes, "Direct writer lost formats")
+    let directPeer = call(["--worker"], Data("{\"command\":\"capture\"}".utf8))
+    expect(directPeer, 0, "independent direct-write reader")
+    let directPeerReply = try! JSONSerialization.jsonObject(with: Data(directPeer.output.utf8)) as! [String: Any]
+    let directPeerItems = (directPeerReply["snapshot"] as! [String: Any])["items"] as! [[Any]]
+    let expectedPeerBytes = try! JSONSerialization.data(withJSONObject: peerItems, options: [.sortedKeys])
+    precondition(try! JSONSerialization.data(withJSONObject: directPeerItems, options: [.sortedKeys]) == expectedPeerBytes, "Direct writer changed independent format bytes")
     replace(prepare())
     expect(call(["undo"]), 0, "128 formats exact limit")
     let restoredTypes = readRaw()
+    let restoredPeer = call(["--worker"], Data("{\"command\":\"capture\"}".utf8))
+    expect(restoredPeer, 0, "independent Undo reader")
+    let restoredReply = try! JSONSerialization.jsonObject(with: Data(restoredPeer.output.utf8)) as! [String: Any]
+    let restoredSnapshot = restoredReply["snapshot"] as! [String: Any]
+    let restoredPeerItems = restoredSnapshot["items"] as! [[Any]]
+    let restoredPeerBytes = try! JSONSerialization.data(withJSONObject: restoredPeerItems, options: [.sortedKeys])
+    precondition(restoredPeerBytes == expectedPeerBytes, "Undo changed independent format bytes")
     if restoredTypes != maximumTypes {
         print("128 format mismatch: local source", maximumTypes.first?.count ?? 0,
               "peer capture", peerCount, "restored", restoredTypes.first?.count ?? 0)
