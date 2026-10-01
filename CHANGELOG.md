@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.4 — 2026-10-01
+
+- Undo schreibt vorab vollständig materialisierte native Pasteboard-Items,
+  damit auch auf macOS 14 alle ursprünglichen Formatbytes erhalten bleiben.
+- Native Clipboard-Tests warten auf die tatsächlich begonnene Materialisierung
+  vor einem simulierten Eigentümerwechsel.
+
 ## 1.4.3 — 2026-10-01
 
 - Codeblöcke nach einer Liste und einem eigenständigen Zitat behalten ihren

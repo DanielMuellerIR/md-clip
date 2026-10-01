@@ -182,16 +182,16 @@ private func capture() throws -> Snapshot {
 }
 // NSPasteboardWriting verspricht standardmäßig alle Formate nach dem ersten.
 // Der Schreib-Worker endet sofort; deshalb muss jedes Format sofort übertragen werden.
-private final class ImmediateItem: NSObject, NSPasteboardWriting {
-    let formats: [Format]
-    init(_ formats: [Format]) { self.formats = formats }
-    func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] {
-        formats.map { NSPasteboard.PasteboardType($0.type) }
+private func materializedItem(_ formats: [Format]) throws -> NSPasteboardItem {
+    // Native Items tragen alle Formatbytes schon vor dem Schreiben. Der
+    // kurzlebige Worker darf keine Datenlieferung nach seinem Ende benötigen.
+    let item = NSPasteboardItem()
+    for format in formats {
+        guard item.setData(format.bytes, forType: NSPasteboard.PasteboardType(format.type)) else {
+            throw fail(3, "Ein Clipboard-Format konnte nicht vollständig vorbereitet werden.")
+        }
     }
-    func writingOptions(forType type: NSPasteboard.PasteboardType, pasteboard: NSPasteboard) -> NSPasteboard.WritingOptions { [] }
-    func pasteboardPropertyList(forType type: NSPasteboard.PasteboardType) -> Any? {
-        formats.first(where: { $0.type == type.rawValue })?.bytes
-    }
+    return item
 }
 private func writeClipboard(_ request: Request) throws -> Int {
     let board = pasteboard
@@ -200,10 +200,10 @@ private func writeClipboard(_ request: Request) throws -> Int {
     if request.command == "replace" {
         guard let bytes = request.bytes, bytes.count <= maximumBytes,
               String(data: bytes, encoding: .utf8) != nil else { throw fail(1, "Der Ersatztext ist kein gültiger UTF-8-Text oder zu groß.") }
-        objects = [ImmediateItem([Format(type: NSPasteboard.PasteboardType.string.rawValue, bytes: bytes)])]
+        objects = [try materializedItem([Format(type: NSPasteboard.PasteboardType.string.rawValue, bytes: bytes)])]
     } else {
         guard let snapshot = request.snapshot else { throw fail(1, "Die Clipboard-Sicherung fehlt.") }
-        objects = snapshot.items.map { ImmediateItem($0) }
+        objects = try snapshot.items.map { try materializedItem($0) }
     }
     // NSPasteboard bietet keine atomare compare-and-swap-Operation. Der letzte
     // Zählervergleich liegt unmittelbar vor clearContents; diese kleine Lücke bleibt.
