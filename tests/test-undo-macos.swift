@@ -220,11 +220,18 @@ types.removeValue(forKey: "org.example.md-clip.type128")
 for _ in 0..<10 {
     write([types])
     let maximumTypes = readRaw()
+    // Im Grenzfall getrennt erfassen, was ein zweiter Prozess tatsächlich sieht.
+    let peerCapture = call(["--worker"], Data("{\"command\":\"capture\"}".utf8))
+    expect(peerCapture, 0, "independent capture process")
+    let peerReply = try! JSONSerialization.jsonObject(with: Data(peerCapture.output.utf8)) as! [String: Any]
+    let peerItems = (peerReply["snapshot"] as! [String: Any])["items"] as! [[Any]]
+    let peerCount = peerItems.reduce(0) { $0 + $1.count }
     replace(prepare())
     expect(call(["undo"]), 0, "128 formats exact limit")
     let restoredTypes = readRaw()
     if restoredTypes != maximumTypes {
-        print("128 format mismatch", maximumTypes.count, restoredTypes.count)
+        print("128 format mismatch: local source", maximumTypes.first?.count ?? 0,
+              "peer capture", peerCount, "restored", restoredTypes.first?.count ?? 0)
         for key in Set(maximumTypes.first?.keys.map { $0 } ?? []).union(restoredTypes.first?.keys.map { $0 } ?? []) {
             let before = maximumTypes.first?[key], after = restoredTypes.first?[key]
             if before != after { print("Mismatch", key, before?.count ?? -1, after?.count ?? -1) }
