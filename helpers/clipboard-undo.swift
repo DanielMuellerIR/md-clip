@@ -211,12 +211,17 @@ private func writeClipboard(_ request: Request) throws -> Int {
     if !objects.isEmpty && !board.writeObjects(objects) { throw fail(3, "Das Clipboard konnte nicht vollständig geschrieben werden.") }
     guard board.changeCount == writtenCount else { throw fail(1, "Das Clipboard wurde während des Schreibens geändert; Undo ist nicht mehr verfügbar.") }
     // AppKit kann die Veröffentlichung nach writeObjects noch vervollständigen.
-    // Vor dem Worker-Ende alle Bytes zurücklesen: Sonst verschwinden auf macOS 14
-    // gelegentlich Formate, obwohl writeObjects bereits Erfolg gemeldet hat.
-    let published = try capture()
+    // Ein eigener Leser sieht dabei bereits lokale Puffer. Ein zweiter Prozess
+    // muss deshalb alle Bytes bestätigen, während der Writer seine RunLoop bedient.
+    let confirmation = try withExtendedLifetime(objects) {
+        try runWorker(Request(command: "capture"), pumpRunLoop: true)
+    }
+    guard confirmation.status == 0, let published = confirmation.snapshot else {
+        throw fail(3, confirmation.message ?? "Die Clipboard-Veröffentlichung konnte nicht bestätigt werden.")
+    }
     let expectedFormats = contents.map { Dictionary(uniqueKeysWithValues: $0.map { ($0.type, $0.bytes) }) }
     let actual = published.items.map { Dictionary(uniqueKeysWithValues: $0.map { ($0.type, $0.bytes) }) }
-    guard actual == expectedFormats else { throw fail(3, "Das Clipboard wurde nicht vollständig veröffentlicht.") }
+    guard published.count == writtenCount, actual == expectedFormats else { throw fail(3, "Das Clipboard wurde nicht vollständig veröffentlicht.") }
     return writtenCount
 }
 private func worker() {
@@ -242,7 +247,7 @@ private final class WorkerOutput: @unchecked Sendable {
         else if !tooLarge { data.append(bytes) }
     }
 }
-private func runWorker(_ request: Request) throws -> Reply {
+private func runWorker(_ request: Request, pumpRunLoop: Bool = false) throws -> Reply {
     let process = Process()
     process.executableURL = executableURL
     process.arguments = ["--worker"]
@@ -271,7 +276,11 @@ private func runWorker(_ request: Request) throws -> Reply {
         group.leave()
     }
     let deadline = now() + workerSeconds
-    while process.isRunning && now() < deadline && requestedStop == 0 { usleep(10_000) }
+    while process.isRunning && now() < deadline && requestedStop == 0 {
+        // Nur der Writer muss AppKit-Datenanfragen des Bestätigungslesers bedienen.
+        if pumpRunLoop { _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
+        else { usleep(10_000) }
+    }
     if process.isRunning {
         kill(process.processIdentifier, SIGKILL)
         process.waitUntilExit()
