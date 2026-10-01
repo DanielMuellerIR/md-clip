@@ -66,6 +66,9 @@ func write(_ contents: [[String: Data]]) {
 }
 // Dieser Leser teilt keinen Capture-Code mit dem Produkt.
 func readRaw() -> [[String: Data]] {
+    // Auch ältere AppKit-Versionen sollen vor dem unabhängigen Lesen den
+    // Eigentümerwechsel sehen, statt den lokal zwischengespeicherten Stand.
+    _ = board.changeCount
     return (board.pasteboardItems ?? []).map { item in
         var result: [String: Data] = [:]
         for type in item.types {

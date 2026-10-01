@@ -318,12 +318,14 @@ def source():
     clip = undo.backend()
     held = []
     delayed = False
+    capture_marker = Path(os.environ["MD_CLIP_TEST_CAPTURE_MARKER"])
     if isinstance(clip, undo.Wayland):
         original = clip._event
         def event(obj, opcode, data, fds):
             if delayed and clip.objects.get(obj) == "source" and opcode == 0:
                 if fds:
                     held.append(fds.pop(0))
+                    capture_marker.touch()
             else:
                 original(obj, opcode, data, fds)
         clip._event = event
@@ -349,6 +351,8 @@ def source():
         def request(req):
             if not delayed:
                 original(req)
+            else:
+                capture_marker.touch()
         clip._request = request
     clip.publish(fixture(clip))
     print("ready", flush=True)
@@ -407,9 +411,12 @@ class NativeTests(unittest.TestCase):
 
     def setUp(self):
         self.run_helper("stop", expected=0)
+        self.capture_directory = tempfile.TemporaryDirectory(prefix="md-clip-capture-test-")
+        self.capture_marker = Path(self.capture_directory.name) / "started"
         self.publisher = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--source"],
                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                          text=True, bufsize=1)
+                                          text=True, bufsize=1,
+                                          env=dict(os.environ, MD_CLIP_TEST_CAPTURE_MARKER=str(self.capture_marker)))
         self.wait_ready()
 
     def tearDown(self):
@@ -427,6 +434,7 @@ class NativeTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 self.publisher.kill()
                 self.publisher.communicate()
+            self.capture_directory.cleanup()
 
     def wait_ready(self):
         if not select.select([self.publisher.stdout], [], [], 10)[0]:
@@ -545,7 +553,12 @@ class NativeTests(unittest.TestCase):
     def test_owner_change_during_capture_aborts(self):
         self.source_command("delay")
         prepare = subprocess.Popen([sys.executable, str(HELPER), "prepare"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        time.sleep(.2)
+        # Der Eigentümerwechsel muss während einer wirklich begonnenen
+        # Materialisierung erfolgen, nicht während des Python-Prozessstarts.
+        deadline = time.monotonic() + 5
+        while not self.capture_marker.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertTrue(self.capture_marker.exists(), "Capture hat nicht begonnen")
         self.source_command("republish")
         stdout, stderr = prepare.communicate(timeout=10)
         self.assertEqual(1, prepare.returncode, stderr.decode())
