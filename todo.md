@@ -1,5 +1,12 @@
 # md_clip — Todos
 
+## Materialabhängige Restprüfung (Stand 2026-10-05)
+
+- [ ] Für R2-01 und R2-02 das ursprüngliche Prüfmaterial erhalten oder den
+  konkreten Folgeauftrag festlegen. Ohne diese Grundlage bleibt eine erneute
+  Implementierung oder Abnahme unbelegt. Der technisch abgeschlossene Stand
+  von Paket 02 wird dadurch nicht wieder geöffnet.
+
 ## Aus der Handoff-Frontier übernommen (2026-08-29)
 
 - Die beiden Reviews vom 2026-08-19 sind mit dem aktuellen Code abgeglichen:
