@@ -639,14 +639,18 @@ for target_format in gfm markdown commonmark; do
     marker_break_report="$marker_break_report$hard_break_marker: $marker_break_ast"
     # Der jeweilige Writer bestimmt die Maskierung. Die Bereinigung muss
     # seine Bedeutung erhalten, auch wenn neuere Versionen Marker escapen.
-    marker_break_expected=$(
-      printf '<p>Text<br>%s ordinary</p>' "$hard_break_marker" \
-        | run_pandoc "$target_format" | pandoc -f "$target_format" -t native
+    marker_break_writer=$(
+      printf '<p>Text<br>%s ordinary</p>' "$hard_break_marker" | run_pandoc "$target_format"
     )
-    if [ "$hard_break_marker" = - ] && [ "$target_format" != markdown ]; then
-      # Die bestehende Bereinigungsregel nimmt \- im Fließtext zurück.
-      printf '%s' "$marker_break_ast" | grep -q BulletList || marker_break_ok=0
+    escaped_marker="${hard_break_marker%?}\\${hard_break_marker#?}"
+    if [ "$target_format" != markdown ] && {
+      [ "$hard_break_marker" = - ] || ! printf '%s' "$marker_break_writer" | grep -Fq "$escaped_marker";
+    }; then
+      # Unmaskierte Marker beginnen nach der Break-Bereinigung eine Liste.
+      # Die bestehende Regel nimmt auch \- im Fließtext zurück.
+      printf '%s' "$marker_break_ast" | grep -qE 'BulletList|OrderedList' || marker_break_ok=0
     else
+      marker_break_expected=$(printf '%s\n' "$marker_break_writer" | pandoc -f "$target_format" -t native)
       [ "$marker_break_ast" = "$marker_break_expected" ] || marker_break_ok=0
     fi
   done

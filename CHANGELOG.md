@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.6 — 2026-10-13
+
+- Die Listenmarker-Prüfung berücksichtigt auch die ältere, unmaskierte
+  Ausgabe des gebündelten pandoc. Die Konvertierung bleibt unverändert.
+- 1.4.5 wurde nur als Quellstand getaggt; das geprüfte DMG erscheint als 1.4.6.
+
 ## 1.4.5 — 2026-10-13
 
 - Code in Zitaten innerhalb nummerierter Listen behält Backslashes und
