@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.5 — 2026-10-13
+
+- Code in Zitaten innerhalb nummerierter Listen behält Backslashes und
+  Zeilenfortsetzungen auch bei mehrstelligen Listenmarkern.
+- Tabellen- und Listenmarkertests prüfen die Struktur unabhängig von optionalen
+  Absatzwrappern und der Maskierung verschiedener pandoc-Versionen.
+- Ein wirkungsloser X11-Ereignispuffer entfällt; die Property-Abfrage bleibt
+  für den INCR-Empfang maßgeblich.
+
 ## 1.4.4 — 2026-10-01
 
 - Undo lässt alle geschriebenen Formatbytes vor dem Ende des Schreibprozesses

@@ -34,10 +34,12 @@ my $list_marker = $target_format eq q{markdown}
     ? qr/(?:$base_list_marker|$markdown_special_marker)/
     : $base_list_marker;
 
-# Blockquote-Marker abschneiden. Innerhalb eines Zitats gelten dieselben
-# Regeln, nur eben hinter dem "> ".
+# Die Präfixe werden mit dem offenen Listenkontext erkannt und danach in
+# allen Bereinigungsdurchläufen wiederverwendet.
+my @quote_prefixes;
 sub quote_prefix {
-    my ($line) = @_;
+    my ($line, $index) = @_;
+    return $quote_prefixes[$index] if defined($index) && defined($quote_prefixes[$index]);
     return ($line =~ /^((?: {0,3}>[ ]?)+)/) ? $1 : q{};
 }
 
@@ -56,7 +58,7 @@ sub term_above {
     my ($i, $depth, $lines_ref) = @_;
     my $index = $i - 1;
     while ($index >= 0) {
-        my $prefix = quote_prefix($lines_ref->[$index]);
+        my $prefix = quote_prefix($lines_ref->[$index], $index);
         last if quote_depth($prefix) != $depth;
         my $candidate = substr($lines_ref->[$index], length($prefix));
         return $candidate if $candidate !~ /^[ \t]*$/;
@@ -200,14 +202,24 @@ my %lists_by_depth;
 my $previous_depth = 0;
 
 for my $i (0 .. $#lines) {
-    my $prefix = quote_prefix($lines[$i]);
+    my $prefix = q{};
+    my $quote_level = 0;
+    while (substr($lines[$i], length($prefix)) =~ /^([ ]*)>[ ]?/) {
+        my ($part, $space) = ($&, $1);
+        my $outer = $lists_by_depth{$quote_level};
+        my $container = $outer && @{$outer->{indents}} ? $outer->{indents}->[-1] : 0;
+        last if length($space) > $container + 3;
+        $prefix .= $part;
+        $quote_level++;
+    }
+    $quote_prefixes[$i] = $prefix;
     my $body   = substr($lines[$i], length($prefix));
     my $depth = quote_depth($prefix);
     if (!defined($fence_char) && $depth > $previous_depth) {
         # Ein Zitat erhält die äußere Liste nur, wenn sein Marker tatsächlich
         # im Listeninhalt eingerückt ist. Ein eigenständiges Zitat beendet sie.
         my $outer_body = $lines[$i];
-        $outer_body =~ s/^(?: {0,3}>[ ]?){$previous_depth}//;
+        $outer_body =~ s/^(?:[ ]*>[ ]?){$previous_depth}//;
         my $quote_indent = indent_width($outer_body);
         my $outer_list = $lists_by_depth{$previous_depth};
         if ($outer_list) {
@@ -282,7 +294,7 @@ for my $i (0 .. $#lines) {
         # starten, aber keinen laufenden Absatz unterbrechen.
         my $block_start = ($i == 0);
         if (!$block_start) {
-            my $previous_prefix = quote_prefix($lines[$i - 1]);
+            my $previous_prefix = quote_prefix($lines[$i - 1], $i - 1);
             my $previous_body = substr(
                 $lines[$i - 1], length($previous_prefix)
             );
@@ -360,7 +372,7 @@ my $clean_empty_paragraphs = sub {
 # leerer Auszeichnung davor (`****\`).
 for my $i (0 .. $#lines) {
     next if $is_code[$i];
-    my $prefix = quote_prefix($lines[$i]);
+    my $prefix = quote_prefix($lines[$i], $i);
     my $body   = substr($lines[$i], length($prefix));
     next unless has_break($body);
     my $content = strip_break($body);
@@ -377,7 +389,7 @@ my $clean_hard_breaks = sub {
 # ---- Durchlauf 2b: Hard-Breaks entscheiden ----
 for my $i (0 .. $#lines) {
     next if $is_code[$i];
-    my $prefix = quote_prefix($lines[$i]);
+    my $prefix = quote_prefix($lines[$i], $i);
     my $body   = substr($lines[$i], length($prefix));
     next unless has_break($body);
     my $content = strip_break($body);
@@ -386,7 +398,7 @@ for my $i (0 .. $#lines) {
     if ($i == $#lines) {
         $drop = 1;                            # Umbruch am Dokumentende
     } elsif (!$is_code[$i + 1]) {
-        my $next_prefix = quote_prefix($lines[$i + 1]);
+        my $next_prefix = quote_prefix($lines[$i + 1], $i + 1);
         my $next_body   = substr($lines[$i + 1], length($next_prefix));
         if ($next_body =~ /^[ \t]*$/) {
             $drop = 1;                        # Umbruch vor einer Leerzeile
@@ -429,7 +441,7 @@ my $clean_escapes = sub {
 # ---- Durchlauf 2c: unnötige Escapes zurücknehmen ----
 for my $i (0 .. $#lines) {
     next if $is_code[$i];
-    my $prefix = quote_prefix($lines[$i]);
+    my $prefix = quote_prefix($lines[$i], $i);
     my $body   = substr($lines[$i], length($prefix));
     my ($space) = $body =~ /^([ \t]*)/;
     my $rest = substr($body, length($space));

@@ -44,4 +44,21 @@ for format in gfm markdown commonmark; do
   expected=$(printf '%s' "$html" | pandoc -f html -t native)
   check "outer_list_standalone_quote_code_$format" "$actual" "$expected"
 done
+code_blocks() {
+  python3 -c 'import json,sys
+result=[]
+def visit(value):
+    if isinstance(value, dict):
+        if value.get("t") == "CodeBlock": result.append(value["c"][1])
+        for child in value.values(): visit(child)
+    elif isinstance(value, list):
+        for child in value: visit(child)
+visit(json.load(sys.stdin)); print(json.dumps(result))'
+}
+html=$'<ol start="10"><li><p>outer</p><blockquote><pre><code>x&#92;\nnext\n&#92;# keep\n</code></pre></blockquote></li></ol>'
+for format in gfm markdown commonmark; do
+  actual=$(printf '%s' "$html" | "$ROOT/bin/md-clip" --stdin --from html --to "$format" --quiet | pandoc -f "$format" -t json | code_blocks)
+  expected=$(printf '%s' "$html" | pandoc -f html -t json | code_blocks)
+  check "two_digit_list_quote_code_$format" "$actual" "$expected"
+done
 [ "$failed" -eq 0 ]

@@ -443,7 +443,6 @@ class X11:
         self.data = {}
         self.outgoing = {}
         self.selection_events = []
-        self.property_events = []
         if probe:
             return
         self.clipboard = self.atom("CLIPBOARD")
@@ -532,8 +531,6 @@ class X11:
                         self.outgoing[key] = typ, fmt, data, pos + len(chunk), expires
                     else:
                         del self.outgoing[key]
-                elif prop.window == self.read_window and prop.atom == self.property_atom and prop.state == 0:
-                    self.property_events.append(True)
         now = time.monotonic()
         for key, transfer in list(self.outgoing.items()):
             if transfer[4] <= now:
@@ -591,14 +588,12 @@ class X11:
             self.x.XDestroyWindow(self.display, self.read_window)
             self.read_window = 0
             self.selection_events.clear()
-            self.property_events.clear()
             self.x.XFlush(self.display)
 
     def _convert_property(self, target, deadline, limit):
         if time.monotonic() >= deadline:
             raise UndoError("Zeitlimit beim Lesen des Clipboards erreicht.")
         self.selection_events.clear()
-        self.property_events.clear()
         self.x.XDeleteProperty(self.display, self.read_window, self.property_atom)
         self.x.XConvertSelection(self.display, self.clipboard, target, self.property_atom, self.read_window, 0)
         self.x.XFlush(self.display)
@@ -621,7 +616,6 @@ class X11:
         if data and struct.unpack("=I", data)[0] > limit:
             raise UndoError("X11-INCR überschreitet die Sicherungsgrenze ({} > {} Bytes).".format(
                 struct.unpack("=I", data)[0], limit))
-        self.property_events.clear()
         self.x.XDeleteProperty(self.display, self.read_window, self.property_atom)
         self.x.XFlush(self.display)
         parts, total, result_type, result_fmt = [], 0, None, None
@@ -629,7 +623,6 @@ class X11:
         while True:
             while True:
                 self.pump()
-                self.property_events.clear()
                 # INCR-Daten sind die Property; Hinweise können mit synchronen Antworten einlaufen.
                 if self.property_ready(self.read_window, self.property_atom):
                     break

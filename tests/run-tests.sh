@@ -619,9 +619,8 @@ for target_format in gfm markdown commonmark; do
 done
 
 # --- Test 10e: `1.`, `1)` und `-` direkt hinter einem Hard-Break ---
-# Diese drei Marker unterbrechen in GFM und CommonMark einen laufenden Absatz,
-# in pandoc-Markdown aber nicht. Das Zielformat entscheidet deshalb, was
-# richtig ist: dort Absatz plus Liste, hier EIN Absatz mit echtem LineBreak.
+# Der Writer kann diese Marker maskieren, um den Absatz zu erhalten. Seine
+# tatsächliche Blockstruktur ist die Referenz, unabhängig von der Version.
 # Der Fund vom 2026-08-21: Der Umbruch fiel in ALLEN Zielen weg und degradierte
 # in pandoc-Markdown zum SoftBreak. Test 10d erreicht den Fall nicht, weil er
 # nur `2024.` und `3)` verwendet — Marker, die keinen Absatz unterbrechen.
@@ -638,14 +637,17 @@ for target_format in gfm markdown commonmark; do
       printf '%s\n' "$marker_break_actual" | pandoc -f "$target_format" -t native
     )
     marker_break_report="$marker_break_report$hard_break_marker: $marker_break_ast"
-    if [ "$target_format" = markdown ]; then
-      printf '%s' "$marker_break_ast" | grep -q 'LineBreak' || marker_break_ok=0
-      if printf '%s' "$marker_break_ast" | grep -q 'SoftBreak'; then
-        marker_break_ok=0
-      fi
+    # Der jeweilige Writer bestimmt die Maskierung. Die Bereinigung muss
+    # seine Bedeutung erhalten, auch wenn neuere Versionen Marker escapen.
+    marker_break_expected=$(
+      printf '<p>Text<br>%s ordinary</p>' "$hard_break_marker" \
+        | run_pandoc "$target_format" | pandoc -f "$target_format" -t native
+    )
+    if [ "$hard_break_marker" = - ] && [ "$target_format" != markdown ]; then
+      # Die bestehende Bereinigungsregel nimmt \- im Fließtext zurück.
+      printf '%s' "$marker_break_ast" | grep -q BulletList || marker_break_ok=0
     else
-      printf '%s' "$marker_break_ast" \
-        | grep -qE 'BulletList|OrderedList' || marker_break_ok=0
+      [ "$marker_break_ast" = "$marker_break_expected" ] || marker_break_ok=0
     fi
   done
   if [ "$marker_break_ok" -eq 1 ]; then
@@ -704,9 +706,8 @@ done
 #      Zeichenposition definiert sind, rutschte der Text der Folgespalte um ein
 #      Zeichen nach links.
 #
-# Geprüft wird über den Rückweg nach HTML: Er zeigt Zellgrenzen und Zellinhalt
-# zugleich und hängt nicht an der Spaltenbreite, die je nach pandoc-Version
-# anders ausfallen kann.
+# Geprüft werden Zellgrenzen, Texte und Absätze über den JSON-AST. Optionale
+# HTML-Absatzwrapper und versionsabhängige Spaltenbreiten spielen keine Rolle.
 table_source_html='<table><tr><th>Spalte</th><th>Wert</th></tr><tr><td>Pipe | und Raute #</td><td>ok</td></tr><tr><td>Erste Zeile<br>Zweite Zeile</td><td>zwei</td></tr><tr><td><p>Absatz eins</p><p>Absatz zwei</p></td><td>drei</td></tr></table>'
 for target_format in gfm markdown commonmark; do
   TOTAL=$((TOTAL + 1))
@@ -719,28 +720,10 @@ for target_format in gfm markdown commonmark; do
   fi
 
   table_actual=$(printf '%s' "$table_source_html" | convert_html "$target_format")
-  table_roundtrip=$(
-    printf '%s\n' "$table_actual" | pandoc -f "$table_reader" -t html | tr -d '\n'
-  )
-
+  table_roundtrip=$(printf '%s\n' "$table_actual" | pandoc -f "$table_reader" -t json)
   table_ok=1
-  # Keine Zeile darf pandocs Platzhalter für „nicht darstellbar" sein.
-  printf '%s\n' "$table_actual" | grep -Fq '[TABLE]' && table_ok=0
-  # Die Escapes der Tabellenzeile bleiben stehen, Pipe und Raute kommen
-  # ungekürzt in DERSELBEN Zelle wieder an.
-  printf '%s' "$table_roundtrip" | grep -Fq '<td>Pipe | und Raute #</td>' || table_ok=0
-  printf '%s' "$table_roundtrip" | grep -Fq '<td>ok</td>' || table_ok=0
-
-  if [ "$target_format" = markdown ]; then
-    # Gittertabellen können Absätze und Umbrüche in einer Zelle abbilden —
-    # dort bleibt der Zellinhalt vollständig erhalten.
-    printf '%s' "$table_roundtrip" | grep -Fq '<td>Erste Zeile<br />Zweite Zeile</td>' || table_ok=0
-    printf '%s' "$table_roundtrip" | grep -Fq '<td><p>Absatz eins</p><p>Absatz zwei</p></td>' || table_ok=0
-  else
-    # Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Der Lua-Filter
-    # macht aus jeder Blockgrenze ein Leerzeichen — der Text bleibt vollständig.
-    printf '%s' "$table_roundtrip" | grep -Fq '<td>Erste Zeile Zweite Zeile</td>' || table_ok=0
-    printf '%s' "$table_roundtrip" | grep -Fq '<td>Absatz eins Absatz zwei</td>' || table_ok=0
+  if ! printf '%s' "$table_roundtrip" | python3 "$TESTS_DIR/assert-table-ast.py" "$target_format"; then
+    table_ok=0
   fi
 
   # Zweiter Fall, eigens für Befund 3: eine Tabelle aus kurzen, einzeiligen
@@ -751,10 +734,10 @@ for target_format in gfm markdown commonmark; do
     printf '%s' '<table><tr><th>A</th><th>B</th></tr><tr><td>x|y</td><td>ok</td></tr></table>' \
       | convert_html "$target_format"
   )
-  simple_table_roundtrip=$(
-    printf '%s\n' "$simple_table_actual" | pandoc -f "$table_reader" -t html | tr -d '\n'
-  )
-  printf '%s' "$simple_table_roundtrip" | grep -Fq '<td>x|y</td><td>ok</td>' || table_ok=0
+  simple_table_roundtrip=$(printf '%s\n' "$simple_table_actual" | pandoc -f "$table_reader" -t json)
+  if ! printf '%s' "$simple_table_roundtrip" | python3 "$TESTS_DIR/assert-table-ast.py" simple; then
+    table_ok=0
+  fi
 
   if [ "$table_ok" -eq 1 ]; then
     echo "✓ $target_format-tabellenzellen (Zellgrenzen und Zellinhalt bleiben)"
