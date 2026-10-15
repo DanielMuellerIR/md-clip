@@ -48,6 +48,7 @@ copy_install_test_project() {
   cp "$PROJECT_ROOT/lib/pipeline.sh" "$destination/lib/pipeline.sh"
   cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$destination/lib/tidy-markdown.pl"
   cp "$PROJECT_ROOT/lib/tables.lua" "$destination/lib/tables.lua"
+  cp "$PROJECT_ROOT/lib/preprocess-html.pl" "$destination/lib/preprocess-html.pl"
   cp "$PROJECT_ROOT/helpers/clipboard-html.swift" "$destination/helpers/clipboard-html.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-rtf.swift" "$destination/helpers/clipboard-rtf.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-undo.swift" "$destination/helpers/clipboard-undo.swift"

@@ -61,7 +61,8 @@
   `markdown` behält Zellblöcke als Gittertabelle. Neue Fälle müssen im Roundtrip
   dieselbe Anzahl Zellen/Zeilen und den vollständigen Zelltext nachweisen.
 - **Runtime-Ressourcen reisen gemeinsam.** `lib/pipeline.sh` bleibt Einstieg;
-  `lib/tidy-markdown.pl` und `lib/tables.lua` liegen im Bundle daneben. Build,
+  `lib/preprocess-html.pl`, `lib/tidy-markdown.pl` und `lib/tables.lua` liegen im
+  Bundle daneben. Build,
   Bundle-Prüfer und isolierte Testkopien müssen neue Ressourcen mitführen.
 - **Quelle, Konvertierung, Bewertung und Ausgabe bleiben getrennt.** Clipboard-
   Auto versucht HTML/RTF/Plain, bei Word RTF/HTML/Plain; explizites `--from` ist

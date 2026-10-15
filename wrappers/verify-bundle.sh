@@ -72,7 +72,7 @@ for tool in md-clip pipeline.sh pandoc clipboard-html clipboard-rtf clipboard-un
     exit 66
   }
 done
-for resource in tidy-markdown.pl tables.lua; do
+for resource in tidy-markdown.pl tables.lua preprocess-html.pl; do
   [ -s "$APP/Contents/Resources/bin/$resource" ] && [ -r "$APP/Contents/Resources/bin/$resource" ] || {
     echo "Pipeline-Ressource fehlt oder ist leer: $resource" >&2
     exit 66

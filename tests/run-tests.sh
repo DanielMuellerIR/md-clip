@@ -38,6 +38,7 @@ mkdir -p "$TEST_RUNTIME/bin"
 cp "$PROJECT_ROOT/bin/md-clip" "$TEST_RUNTIME/bin/md-clip"
 cp "$PROJECT_ROOT/lib/pipeline.sh" "$TEST_RUNTIME/bin/pipeline.sh"
 cp "$PROJECT_ROOT/lib/tables.lua" "$TEST_RUNTIME/bin/tables.lua"
+cp "$PROJECT_ROOT/lib/preprocess-html.pl" "$TEST_RUNTIME/bin/preprocess-html.pl"
 cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$TEST_RUNTIME/bin/tidy-markdown.pl"
 if [ "$(uname -s)" = Linux ]; then
   cp "$PROJECT_ROOT/helpers/clipboard-undo-linux.py" "$TEST_RUNTIME/bin/clipboard-undo-linux.py"
@@ -214,7 +215,7 @@ else
 fi
 
 # --- Test 4: Links mit leerem Anker-Text ---
-# Leere HTML-Anker werden vor pandoc gefüllt. So bleiben auch URLs mit
+# Leere Links werden auf geparsten Knoten gefüllt. So bleiben auch URLs mit
 # Klammern, Titel-Attributen und Escapes vollständig erhalten.
 actual_file="$TEST_RUNTIME/empty-link.actual"
 convert_html "$TO" < "$FIXTURES/empty-link.html" > "$actual_file"
@@ -789,7 +790,7 @@ fi
 perl_module_uses=$(
   grep -nE "^[[:space:]]*(use|require)[[:space:]]+[A-Z]" \
     "$PROJECT_ROOT/lib/pipeline.sh" "$PROJECT_ROOT/lib/tidy-markdown.pl" "$PROJECT_ROOT/bin/md-clip" \
-    "$PROJECT_ROOT/lib/tables.lua" \
+    "$PROJECT_ROOT/lib/tables.lua" "$PROJECT_ROOT/lib/preprocess-html.pl" \
     | grep -vE "(use|require)[[:space:]]+(strict|warnings)\b" || true
 )
 if [ -n "$perl_module_uses" ]; then

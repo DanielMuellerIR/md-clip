@@ -144,6 +144,7 @@ for executable in \
   "$XPC_TEST_APP/Contents/Resources/bin/pipeline.sh" \
   "$XPC_TEST_APP/Contents/Resources/bin/tidy-markdown.pl" \
   "$XPC_TEST_APP/Contents/Resources/bin/tables.lua" \
+  "$XPC_TEST_APP/Contents/Resources/bin/preprocess-html.pl" \
   "$XPC_TEST_APP/Contents/Resources/bin/pandoc" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-html" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-rtf" \
@@ -153,13 +154,13 @@ for executable in \
   chmod +x "$executable"
 done
 printf 'icon\n' > "$XPC_TEST_APP/Contents/Resources/md-clip.icns"
-for resource in tidy-markdown.pl tables.lua; do
+for resource in tidy-markdown.pl tables.lua preprocess-html.pl; do
   printf 'resource\n' > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
 done
 for license in pandoc-COPYRIGHT.txt Sparkle-LICENSE.txt README.txt; do
   printf 'Lizenz\n' > "$XPC_TEST_APP/Contents/Resources/Licenses/$license"
 done
-for resource in tidy-markdown.pl tables.lua; do
+for resource in tidy-markdown.pl tables.lua preprocess-html.pl; do
   : > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
   if bash "$VERIFY_BUNDLE" "$XPC_TEST_APP" > "$TEST_ROOT/resource.out" 2> "$TEST_ROOT/resource.err"; then
     echo "Leere Pipeline-Ressource akzeptiert: $resource" >&2; exit 1

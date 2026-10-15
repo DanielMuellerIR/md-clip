@@ -61,6 +61,7 @@ jobs:
       - name: Inhaltsregressionen und Undo ohne Display
         run: |
           bash tests/test-review-content.sh
+          python3 tests/test-html-normalization.py
           python3 tests/test-undo-linux.py
 
       - name: Undo mit isoliertem X11-Clipboard
@@ -131,4 +132,5 @@ jobs:
           python3 tests/test-cli-inputs.py
           python3 tests/test-compare.py
           bash tests/test-review-content.sh
+          python3 tests/test-html-normalization.py
           python3 tests/test-undo-macos.py

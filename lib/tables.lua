@@ -2,6 +2,35 @@
 -- verschachtelte Zellen noch Kommentare/Attribute zuverlässig unterscheiden.
 local simplified = false
 
+function Span(span)
+  local has_break = false
+  span:walk { LineBreak = function() has_break = true end }
+  if has_break then
+    -- Ein anonymer Span erhält pandocs bisherige Maskierung getippter Listen
+    -- hinter <br>. Aufgelöst würde der Writer zusätzliche Escapes erzeugen,
+    -- die tidy_markdown als echten Absatzumbruch behandeln müsste.
+    span.attr = pandoc.Attr()
+    return span
+  end
+  return span.content
+end
+
+function Div(div)
+  return div.content
+end
+
+function Link(link)
+  local has_image = false
+  pandoc.Span(link.content):walk { Image = function() has_image = true end }
+  local text = pandoc.utils.stringify(link.content):gsub('%s', ''):gsub('\194\160', '')
+  if text == '' and not has_image then
+    -- Der Span verhindert, dass der Writer einen Autolink daraus macht und
+    -- dabei dessen Titel verwirft. URL und Titel kommen bereits dekodiert an.
+    link.content = { pandoc.Span { pandoc.Str(link.target) } }
+  end
+  return link
+end
+
 function Table(tbl)
   local nested = false
   tbl:walk { Table = function() nested = true end }

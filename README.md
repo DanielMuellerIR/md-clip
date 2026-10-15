@@ -187,6 +187,12 @@ benötigten Weg.
 
 ### Reihenfolge und Inhaltsgrenzen
 
+HTML-Layoutcontainer und leere Links werden nach dem HTML-Parsing normalisiert.
+Anführungszeichen, `>` und Zeilenumbrüche in Attributen sind dabei kein Text;
+Linkziele und Linktitel bleiben erhalten. Quellenreparaturen für Claude-Codezeilen
+und Classroom-Anhänge berücksichtigen auch einfache Anführungszeichen und
+großgeschriebene Attributnamen. Maskiertes HTML in Code bleibt unverändert.
+
 Bei Clipboard-`auto` liest md-clip die vorhandenen HTML-, RTF- und Klartext-
 Quellen einmal ein. Es versucht HTML → RTF → Klartext. Erkennt es Microsoft-
 Word-HTML, gilt RTF → HTML → Klartext. Eine leere, unsichtbare, nicht verfügbare
@@ -336,6 +342,7 @@ bash tests/test-plain-newlines.sh
 bash tests/test-install-safety.sh
 bash tests/test-dependencies.sh
 bash tests/test-wrapper-safety.sh
+python3 tests/test-html-normalization.py
 ```
 
 Voraussetzungen sind pandoc, perl und ein Clipboard-Werkzeug (macOS: `pbpaste`;

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.7 — 2026-10-16
+
+- HTML-Attribute mit Anführungszeichen, Zeilenumbrüchen oder `>` verändern den
+  Text nicht mehr. Claude-Codezeilen und Classroom-Anhänge werden auch bei
+  einfachen Anführungszeichen und großgeschriebenen Attributnamen erkannt.
+- Span-/Div-Container und leere Links werden auf geparsten pandoc-Knoten
+  normalisiert. Linkziele, Titel, signifikante Leerzeichen und Code bleiben
+  erhalten; Kommentare und JavaScript-/CSS-Rohtext bleiben unangetastet.
+- HTML-Varianten werden nach dem Markdown-Roundtrip auf Text, Code, Linkziele,
+  Linktitel und Listenstruktur geprüft. Der neue Quellenhelfer gehört zu allen
+  Bundle- und isolierten Testlayouts.
+
 ## 1.4.6 — 2026-10-13
 
 - Die Listenmarker-Prüfung berücksichtigt auch die ältere, unmaskierte

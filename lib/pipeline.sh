@@ -20,106 +20,14 @@ case "$_MD_CLIP_LIB_DIR" in
   *) _MD_CLIP_LIB_DIR="$PWD/$_MD_CLIP_LIB_DIR" ;;
 esac
 
+# Quellenreparaturen vor pandoc; die allgemeine Span-/Link-Normalisierung
+# läuft danach auf geparsten Knoten in tables.lua.
 preprocess_claude_desktop() {
-  # HTML-Attribute haben keine feste Reihenfolge. Der Zeilenmarker darf
-  # deshalb auch hinter style/class stehen; data-lineage ist kein Marker.
-  perl -0pe 's{<div\b(?=[^>]*\sdata-line="[^"]*")[^>]*>(.*?)</div>}{$1\n}gs;
-
-        s{(<pre[^>]*>.*?</pre>)}{
-          my $block = $1;
-          $block =~ s{</?div[^>]*>}{}g;
-          $block;
-        }gse;
-        # Claude-Desktop-Attribute nur aus echten HTML-Tags entfernen. Eine
-        # globale Ersetzung traf bisher auch Fließtext und maskiertes HTML in
-        # Code-Beispielen. pre-/code-INHALTE bleiben deshalb roh; deren
-        # öffnende Tags werden weiter bereinigt, weil etwa ein style-Attribut
-        # am <pre> pandocs Sprachklasse am <code> verdeckt.
-        s{(<[^>]+>)}{
-          my $tag = $1;
-          $tag =~ s/\s+(?:style|data-[a-z-]+)="[^"]*"//gi;
-          $tag;
-        }gise
-      '
+  perl "$_MD_CLIP_LIB_DIR/preprocess-html.pl" claude
 }
 
 preprocess_google_classroom() {
-  perl -0777 -pe '
-    s{<a\b([^>]*)\bhref="([^"]*)"([^>]*)>(.*?)</a>}{
-      my ($pre, $href, $post, $inner) = ($1, $2, $3, $4);
-      if ($inner =~ m{classroom\.google\.com/webthumbnail}) {
-        # Die Klasse ist ein eigenes Token, kein Teil einer anderen Klasse;
-        # weitere Attribute vor oder hinter class ändern den Titel nicht.
-        my $title = ($inner =~ m{<div\b(?=[^>]*\sclass="(?:[^"]*\s)?mvRF3b(?:\s[^"]*)?")[^>]*>(.*?)</div>}s) ? $1 : "";
-        $title =~ s/<[^>]+>//g;
-        $title =~ s/^\s+|\s+$//g;
-        # Den Google-Kontowähler entfernen, ohne Fragment oder folgende
-        # Query-Parameter zu verlieren. Bei `?authuser=0&x=1` muss das `?`
-        # für den verbleibenden Parameter stehen bleiben.
-        $href =~ s{&amp;}{&}gi;
-        $href =~ s{([?&])authuser=[^&#]*&}{$1}g;
-        $href =~ s{[?&]authuser=[^&#]*}{}g;
-        $href =~ s{\?&}{?}g;
-        $href =~ s{[?&](?=#|$)}{}g;
-        $title ne ""
-          ? "<li data-md-clip-classroom=\"1\"><a href=\"$href\">$title</a></li>"
-          : "<a href=\"$href\"></a>";
-      } else {
-        $&;
-      }
-    }gse;
-    s{<img[^>]*classroom\.google\.com/webthumbnail[^>]*>}{}gs;
-    1 while s{<div\b[^>]*>\s*</div>}{}gs;
-
-    # Nur von uns erzeugte Classroom-Punkte zusammenziehen. Normale <li>
-    # in vorhandenen <ol>/<ul> bleiben samt Listentyp und Struktur erhalten.
-    1 while s{(<li\b[^>]*data-md-clip-classroom="1"[^>]*>.*?</li>)(?:\s*</?div[^>]*>\s*)+(?=<li\b[^>]*data-md-clip-classroom="1")}{${1}}gs;
-    s{(?:<li\b[^>]*data-md-clip-classroom="1"[^>]*>.*?</li>\s*)+}{
-      my $items = $&;
-      $items =~ s/\s+data-md-clip-classroom="1"//g;
-      $items =~ s/>\s+</></g;
-      "<ul>$items</ul>";
-    }gse;
-  '
-}
-
-# Füllt leere HTML-Anker VOR pandoc. Dadurch müssen wir keine Markdown-URLs
-# mit verschachtelten Klammern, Titeln oder Escapes selbst parsen.
-#
-# „Leer" heißt: der Anker hat keinen sichtbaren Text. Das gilt auch für den
-# üblichen Icon-Link `<a href="…"><i class="icon"></i></a>` — die Auszeichnung
-# darin bringt in Markdown nichts mit, pandoc schriebe daraus ein unsichtbares
-# `[](…)`. Ein Anker um ein Bild bleibt dagegen unangetastet: das Bild IST der
-# sichtbare Inhalt und wird zu `[![alt](bild)](ziel)`.
-#
-# Dasselbe gilt für ein eingebettetes `<svg>`: pandoc macht daraus ein Bild mit
-# `data:`-URL, auch außerhalb eines Ankers. Ohne die Ausnahme ersetzte diese
-# Funktion die komplette Grafik durch den nackten URL-Text — der Icon-Link mit
-# Inline-SVG ist im Web der Normalfall, nicht der Sonderfall (Review-Fund
-# 2026-08-05, am Verhalten von pandoc 3.9 belegt). `<video>`, `<audio>` und
-# `<object>` bleiben bewusst draußen: aus ihnen macht pandoc gar nichts
-# Sichtbares, dort ist der URL-Text die bessere Ausgabe.
-fill_empty_html_links() {
-  perl -0pe '
-    s{<a\b([^>]*\bhref\s*=\s*(?:"([^"]*)"|\x27([^\x27]*)\x27)[^>]*)>(.*?)</a>}{
-      my $whole = $&;
-      my ($attributes, $inner) = ($1, $4);
-      my $href = defined($2) ? $2 : $3;
-      my $visible = $inner;
-      $visible =~ s/<[^>]*>//g;        # Tags tragen selbst keinen Text bei
-      $visible =~ s/&nbsp;/ /gi;
-      $visible =~ s/\s+//g;
-      # Span verhindert pandocs Autolink-Kürzung, die Link-Titel verwirft.
-      ($visible eq q{} && $inner !~ /<(?:img|svg)\b/i)
-        ? "<a$attributes><span>$href</span></a>"
-        : $whole
-    }gise
-  '
-}
-
-clean_html() {
-  sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g' \
-    | sed -E 's/<span[^>]*>([^<]*)<\/span>/\1/g'
+  perl "$_MD_CLIP_LIB_DIR/preprocess-html.pl" classroom
 }
 
 rtf_fix_escaped_newlines() {
@@ -347,16 +255,11 @@ require_nonempty_markdown() {
 # Markdown auf stdout. Davor steht der Teil, der sich unterscheidet — die
 # Herkunftsbereinigung beim HTML, die Tabellen- und Listenkorrektur beim RTF.
 #
-# Eine Funktion und nicht zweimal dieselbe Kette: Drei dieser Stufen bekommen
-# das Zielformat, und alle sechs müssen in beiden Wegen in derselben Reihenfolge
-# stehen. Zweimal hingeschrieben blieb beim Ergänzen einer Stufe leicht eine
-# Kette zurück — dann käme Clipboard-HTML anders heraus als dasselbe HTML aus
-# einem RTF.
+# Beide Eingabewege verwenden denselben Writer und dieselbe Nachbearbeitung.
+# Die Quellenreparaturen davor bleiben bewusst verschieden.
 html_to_markdown() {
   local target_format="${1:-gfm}"
-  clean_html \
-    | fill_empty_html_links \
-    | run_pandoc "$target_format" \
+  run_pandoc "$target_format" \
     | tidy_markdown "$target_format" \
     | require_nonempty_markdown
 }

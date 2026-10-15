@@ -32,7 +32,7 @@ class CompareTests(unittest.TestCase):
             shutil.copy2(PROJECT / "tests" / name, self.repo / "tests" / name)
         for name in ("clipboard-html.swift", "clipboard-rtf.swift"):
             shutil.copy2(PROJECT / "helpers" / name, self.repo / "helpers" / name)
-        for name in ("pipeline.sh", "tidy-markdown.pl", "tables.lua"):
+        for name in ("pipeline.sh", "tidy-markdown.pl", "tables.lua", "preprocess-html.pl"):
             shutil.copy2(PROJECT / "lib" / name, self.repo / "lib" / name)
         self.fake = self.root / "tools"
         self.fake.mkdir()
@@ -74,7 +74,7 @@ if [ "${TEST_REQUIRE_READERS:-0}" = 1 ]; then
     [ -x "$runtime/$reader" ] || exit 2
     "$runtime/$reader" >/dev/null || exit 2
   done
-  for resource in pipeline.sh tidy-markdown.pl tables.lua; do
+  for resource in pipeline.sh tidy-markdown.pl tables.lua preprocess-html.pl; do
     [ -f "$runtime/$resource" ] || exit 2
   done
 fi

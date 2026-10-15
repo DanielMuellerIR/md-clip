@@ -18,7 +18,6 @@ for name,data in cases.items():
     result={'bytes':len(data)}
     result['pipeline'],_=measure(['bash','-c',setup+('convert_rtf' if name=='word' else 'convert_html')],data)
     stages=['rtf_to_html','flatten_layout_tables','unwrap_list_paragraphs'] if name=='word' else ['preprocess_claude_desktop','preprocess_google_classroom']
-    stages+=['clean_html','fill_empty_html_links']
     if 'inline_table_cells()' in (root/'lib/pipeline.sh').read_text(): stages+=['inline_table_cells']
     stages+=['run_pandoc','tidy_markdown','require_nonempty_markdown']
     result['stages']={}
