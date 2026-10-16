@@ -164,11 +164,12 @@ echo "✓ pandoc bereit ($(du -h "$BUILD_DIR/pandoc" | cut -f1))"
 # ---------- 2. Swift-Helper kompilieren ----------
 
 for helper in clipboard-html clipboard-rtf clipboard-undo md-clip-hud md-clip-preview; do
-  src="$PROJECT_ROOT/helpers/${helper}.swift"
+  src="helpers/${helper}.swift"
   out="$BUILD_DIR/${helper}"
   echo "==> Kompiliere ${helper}"
   # -target setzt sowohl Architektur als auch Mindest-OS-Version in einem.
-  swiftc -target "arm64-apple-macos${MIN_MACOS}" "$src" -o "$out"
+  # Relative Quellen verhindern private Pfade in impliziten Swift-Diagnosen.
+  (cd "$PROJECT_ROOT" && swiftc -target "arm64-apple-macos${MIN_MACOS}" "$src" -o "$out")
 done
 
 # ---------- 3. Sparkle laden und Updater-Helfer kompilieren ----------
@@ -196,11 +197,11 @@ echo "==> Kompiliere md-clip-updater"
 # Kompatibilitätsprüfungen. Gelinkt wird gegen das frisch entpackte Framework;
 # zur Laufzeit findet der Updater es über den rpath im Bundle unter
 # Contents/Frameworks.
-swiftc -target "arm64-apple-macos${MIN_MACOS}" \
+(cd "$PROJECT_ROOT" && swiftc -target "arm64-apple-macos${MIN_MACOS}" \
   -F "$SPARKLE_STAGE" \
-  "$PROJECT_ROOT/helpers/md-clip-updater.swift" \
+  helpers/md-clip-updater.swift \
   -o "$BUILD_DIR/md-clip-updater" \
-  -Xlinker -rpath -Xlinker "@loader_path/../Frameworks"
+  -Xlinker -rpath -Xlinker "@loader_path/../Frameworks")
 
 # ---------- 4. .app-Bundle-Struktur ----------
 
