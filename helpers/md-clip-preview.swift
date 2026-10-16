@@ -230,6 +230,13 @@ private final class PreviewController: NSObject, NSWindowDelegate, NSMenuItemVal
         acceptButton.isEnabled = false
         undoButton.isEnabled = false
         window.defaultButtonCell = acceptButton.cell as? NSButtonCell
+        // Die feste Schleife bleibt unabhängig vom noch nicht berechneten Auto-Layout.
+        window.autorecalculatesKeyViewLoop = false
+        notesView.nextKeyView = textView
+        textView.nextKeyView = undoButton
+        undoButton.nextKeyView = cancelButton
+        cancelButton.nextKeyView = acceptButton
+        acceptButton.nextKeyView = notesView
         window.initialFirstResponder = acceptButton
         installMenu()
         window.center()

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.11 — 2026-10-16
+
+- Tab und Shift-Tab erreichen Hinweise, Markdown und alle verfügbaren
+  Vorschauaktionen in einer festen Reihenfolge. Deaktivierte Aktionen werden
+  übersprungen, statt den Fokus auf dem Standardbutton festzuhalten.
+
 ## 1.10.10 — 2026-10-16
 
 - Return übernimmt die native Vorschau auch bei Fokus im Markdown oder in den

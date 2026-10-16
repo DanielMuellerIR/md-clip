@@ -240,7 +240,9 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
             if initial['keyboard_access']:
                 forward = tab_sequence(process, pid)
                 backward = tab_sequence(process, pid, reverse=True)
-                record('tab-skips-unavailable-actions', not {'accept', 'undo'}.intersection(forward+backward),
+                record('tab-skips-unavailable-actions', {'content', 'notes', 'cancel'}.issubset(forward)
+                       and {'content', 'notes', 'cancel'}.issubset(backward)
+                       and not {'accept', 'undo'}.intersection(forward+backward),
                        status=invalid['status'], forward=forward, backward=backward)
             else:
                 record('tab-unavailable-actions-disabled-by-system', True, skipped=True, keyboard_access=False)
