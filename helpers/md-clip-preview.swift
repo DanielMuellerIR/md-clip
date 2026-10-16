@@ -99,9 +99,25 @@ private let backgroundPreview: Bool = {
 #endif
 }()
 
+#if TEST
+private final class PreviewTextView: NSTextView {
+    override func copy(_ sender: Any?) {
+        // Echte Copy-Tasten dürfen im Test nur das private Pasteboard ändern.
+        guard let name = ProcessInfo.processInfo.environment["MD_CLIP_TEST_PASTEBOARD"],
+              name != NSPasteboard.Name.general.rawValue else { return }
+        let board = NSPasteboard(name: NSPasteboard.Name(name))
+        board.clearContents()
+        _ = writeSelection(to: board, type: .string)
+    }
+}
+#else
+private typealias PreviewTextView = NSTextView
+#endif
+
 private final class PreviewController: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let window: NSWindow
-    let textView = NSTextView()
+    let textView = PreviewTextView()
+    let notesView = PreviewTextView()
     let scrollView = NSScrollView()
     let statusLabel = NSTextField(wrappingLabelWithString: "Verfügbarkeit wird geprüft …")
     let acceptButton = NSButton(title: "Übernehmen", target: nil, action: nil)
@@ -150,7 +166,6 @@ private final class PreviewController: NSObject, NSWindowDelegate, NSMenuItemVal
         counts.textColor = .secondaryLabelColor
         for label in [title, explanation, counts] { stack.addArrangedSubview(label) }
         explanation.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        let notesView = NSTextView()
         configureTextView(notesView, text: notes.trimmingCharacters(in: .newlines), font: .systemFont(ofSize: 12))
         notesView.setAccessibilityLabel("Quelle und Konvertierungshinweise")
         let notesScroll = NSScrollView()
@@ -279,8 +294,20 @@ private final class PreviewController: NSObject, NSWindowDelegate, NSMenuItemVal
         }
 #if TEST
         if let path = ProcessInfo.processInfo.environment["MD_CLIP_TEST_PREVIEW_EVIDENCE"] {
+            let responder = window.firstResponder
+            let focus = responder === textView ? "content" : responder === notesView ? "notes" :
+                responder === acceptButton ? "accept" : responder === cancelButton ? "cancel" :
+                responder === undoButton ? "undo" : String(describing: type(of: responder))
+            let selected = textView.selectedRange(), selectedNotes = notesView.selectedRange()
             let observed: [String: Any] = ["accept": acceptButton.isEnabled, "undo": undoButton.isEnabled,
                 "visible": window.isVisible, "status": statusLabel.stringValue,
+                "focus": focus, "key_window": window.isKeyWindow,
+                "keyboard_access": NSApp.isFullKeyboardAccessEnabled,
+                "observed_at": ProcessInfo.processInfo.systemUptime,
+                "content": String(textView.string.prefix(4096)), "content_length": (textView.string as NSString).length,
+                "selection": [selected.location, selected.length],
+                "notes_selection": [selectedNotes.location, selectedNotes.length],
+                "scroll_y": scrollView.documentVisibleRect.minY,
                 "focus_preserved": NSWorkspace.shared.frontmostApplication?.processIdentifier == initialFrontForTest,
                 "initial_front_pid": initialFrontForTest.map { Int($0) } ?? -1,
                 "front_pid": NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) } ?? -1,
@@ -342,6 +369,14 @@ private final class PreviewDelegate: NSObject, NSApplicationDelegate {
         let view = PreviewController(text: text, notes: notes, background: backgroundPreview) { [self] action in
             timer?.invalidate(); client.cancel(); exit(action.rawValue)
         }
+#if TEST
+        if let name = ProcessInfo.processInfo.environment["MD_CLIP_TEST_PREVIEW_APPEARANCE"] {
+            view.window.appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
+        }
+        if ProcessInfo.processInfo.environment["MD_CLIP_TEST_PREVIEW_SMALL"] == "1" {
+            view.window.setContentSize(NSSize(width: 640, height: 520))
+        }
+#endif
         controller = view
         if !backgroundPreview {
             view.window.makeKeyAndOrderFront(nil)

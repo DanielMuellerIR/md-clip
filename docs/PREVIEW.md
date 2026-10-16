@@ -85,3 +85,19 @@ Diese Hintergrundprüfungen ersetzen
 keine Abnahme der vollständigen notarisiert installierten App einschließlich
 Vordergrund-Fokus, Return/Escape und Systemdialogen. Diese Abnahme gehört zum
 Installations-/Release-Meilenstein.
+
+Die separate Tastaturprüfung übernimmt den Fensterfokus und benötigt eine
+entsperrte macOS-Konsolensitzung sowie eine ausdrückliche Freigabe:
+
+```bash
+python3 tests/test-preview-foreground.py --allow-focus --output /tmp/md-clip-keyboard-results
+```
+
+Der Ergebnisordner muss neu sein. Die Prüfung baut eine isolierte Test-App und
+steuert echte Tasten für Übernehmen, Abbrechen, Undo, Auswahl und Kopieren.
+CLI, Vorschau und Undo verwenden ausschließlich ein privates Pasteboard.
+Auch Kopieren wird nur im TEST-Build auf dieses Board umgeleitet. Die
+Tab-Reihenfolge wird anhand der tatsächlichen macOS-Tastaturnavigation bewertet;
+deaktivierte Aktionen dürfen dabei nicht erreichbar sein. Das JSON-Protokoll
+enthält synthetische Testdaten. VoiceOver-Ausgabe und die notarisiert installierte
+App sind gesondert abzunehmen; der Tastaturtest bestätigt sie nicht.

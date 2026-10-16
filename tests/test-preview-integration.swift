@@ -210,5 +210,52 @@ func run() throws {
     try cliUndo(signalOriginal)
     print("OK: echte CLI-Signalbehandlung beendet native Vorschau, storniert Token und erhält voriges Undo")
 }
-do { try run() }
+func servePrivateBoard() throws {
+    try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+    defer {
+        for child in children where child.isRunning { stop(child) }
+        _ = try? call(["stop"])
+        board.releaseGlobally()
+    }
+    func emit(_ value: [String: Any]) throws {
+        let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+        print(String(decoding: data, as: UTF8.self))
+    }
+    func snapshot() -> [String: Any] {
+        let items = raw().map { item in item.mapValues { $0.base64EncodedString() } }
+        return ["items": items, "change_count": board.changeCount,
+                "host_change_count": NSPasteboard.general.changeCount]
+    }
+    try emit(["board": board.name.rawValue, "directory": environment["MD_CLIP_TEST_DIRECTORY"]!])
+    while let line = readLine() {
+        guard let data = line.data(using: .utf8),
+              let command = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let operation = command["operation"] as? String else { throw Check.failed("Ungültiger Prüfauftrag") }
+        switch operation {
+        case "seed":
+            environment["MD_CLIP_TEST_PENDING_TTL"] = String(command["pending_seconds"] as? Int ?? 600)
+            environment["MD_CLIP_TEST_TTL"] = String(command["undo_seconds"] as? Int ?? 600)
+            let original = try seed(command["previous"] as? Bool ?? false)
+            var result = snapshot()
+            result["original"] = original.map { $0.mapValues { $0.base64EncodedString() } }
+            try emit(result)
+        case "write":
+            try write(command["text"] as? String ?? "Neue private Kopie")
+            try emit(snapshot())
+        case "snapshot": try emit(snapshot())
+        case "undo":
+            let result = try finish(launch(cli, ["--undo", "--quiet"]))
+            var value = snapshot(); value["exit"] = Int(result.status); value["error"] = result.error
+            try emit(value)
+        case "stop": try emit(snapshot()); return
+        default: throw Check.failed("Unbekannter Prüfauftrag")
+        }
+    }
+}
+
+do {
+    if CommandLine.arguments.dropFirst(4).contains("--serve-private-board") {
+        try servePrivateBoard()
+    } else { try run() }
+}
 catch { fputs("Native Vorschauintegration fehlgeschlagen: \(error)\n", stderr); exit(1) }
