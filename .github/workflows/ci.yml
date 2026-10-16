@@ -172,3 +172,12 @@ jobs:
           "$TEST_PYTHON" tests/test-app-actions.py
           "$TEST_PYTHON" tests/test-undo-macos.py
           "$TEST_PYTHON" tests/test-preview-macos.py
+      - name: Unsigniertes Bundle bauen und Konvertierung ausführen
+        if: matrix.converter == 'bundled'
+        run: |
+          source wrappers/pandoc-pin.sh
+          mkdir -p build/cache
+          cp "$RUNNER_TEMP/md-clip-pandoc/pandoc-${PANDOC_VERSION}-arm64-macOS.zip" \
+            "build/cache/pandoc-${PANDOC_VERSION}-arm64.zip"
+          bash build.sh
+          "$TEST_PYTHON" tests/test-bundle-conversion.py build/md-clip.app

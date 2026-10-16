@@ -551,6 +551,20 @@ bash tests/prepare-bundled-pandoc.sh /tmp/md-clip-pandoc
 PATH="/tmp/md-clip-pandoc:$PATH" MD_CLIP_SKIP_CLIPBOARD=1 bash tests/run-tests.sh
 ```
 
+Der macOS-Zweig mit Bundle-pandoc baut zusätzlich ein unsigniertes App-Bundle
+und führt Konvertierungen mit dessen eingebetteter CLI aus. Lokal:
+
+```bash
+bash build.sh
+python3 tests/test-bundle-conversion.py build/md-clip.app
+```
+
+Dieser Test bindet CLI/Ressourcen an die eigene Build-Quelle und pandoc an das
+geprüfte Archiv. Er prüft Datei/stdin aus einem fremden Arbeitsverzeichnis,
+Leerzeichenpfade, Rohbytes und die Inhaltsoptionen. Er startet weder App noch
+GUI und verändert das Clipboard nicht. Signatur-, Installations- und native
+Vordergrundabnahme bleiben davon getrennte Prüfungen.
+
 `tests/test-compare.py` nutzt Clipboard-Attrappen. Die tatsächlichen manuellen
 Vergleichsskripte benötigen dagegen macOS und verändern das Clipboard;
 identische gespeicherte AppleMD-Ausgabe belegt allein keine Kurzbefehl-Ausführung.

@@ -2,6 +2,10 @@
 
 ## 1.10.7 — 2026-10-16
 
+- Die macOS-CI baut zusätzlich ein unsigniertes Bundle und prüft Konvertierungen
+  aus dessen eingebetteter CLI. Quellen-/Archivbindung, fremdes Arbeitsverzeichnis,
+  Leerzeichenpfade und Rohbytes ergänzen die bisherigen Quellprüfungen.
+
 - Scheitert die Übertragung einer erfolgreichen Undo-Vorbereitung an den Client,
   gibt der Dienst deren Token wieder frei. Eine neue Konvertierung kann sofort
   beginnen; die vorherige Undo-Sicherung bleibt erhalten.
