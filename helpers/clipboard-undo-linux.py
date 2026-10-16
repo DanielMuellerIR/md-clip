@@ -25,9 +25,10 @@ TOTAL_TIMEOUT = 30
 
 
 class UndoError(Exception):
-    def __init__(self, message, code=1):
+    def __init__(self, message, code=1, reason="undo-helper-failed"):
         super().__init__(message)
         self.code = code
+        self.reason = reason
 
 
 def deadline_wait(fd, deadline):
@@ -62,14 +63,14 @@ class Wayland:
         display = os.environ.get("WAYLAND_DISPLAY", "")
         runtime = os.environ.get("XDG_RUNTIME_DIR", "")
         if not display or not runtime:
-            raise UndoError("Wayland-Sitzung oder XDG_RUNTIME_DIR fehlt.", 2)
+            raise UndoError("Wayland-Sitzung oder XDG_RUNTIME_DIR fehlt.", 2, "wayland-runtime-missing")
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(READ_TIMEOUT)
         try:
             self.sock.connect(display if os.path.isabs(display) else os.path.join(runtime, display))
         except OSError:
             self.sock.close()
-            raise UndoError("Wayland-Verbindung nicht verfügbar.", 2)
+            raise UndoError("Wayland-Verbindung nicht verfügbar.", 2, "wayland-connect-failed")
         self.objects = {1: "display", 2: "registry"}
         self.next_id = 3
         self.globals = {}
@@ -89,9 +90,12 @@ class Wayland:
         managers = [(name, iface, version) for name, (iface, version) in self.globals.items()
                     if iface in ("ext_data_control_manager_v1", "zwlr_data_control_manager_v1")]
         seats = [name for name, (iface, _) in self.globals.items() if iface == "wl_seat"]
-        if not managers or len(seats) != 1:
+        if not managers:
             self.close()
-            raise UndoError("Wayland-Undo benötigt Data-Control und genau einen Seat.", 2)
+            raise UndoError("Wayland-Undo benötigt Data-Control.", 2, "wayland-data-control-missing")
+        if len(seats) != 1:
+            self.close()
+            raise UndoError("Wayland-Undo benötigt genau einen Seat.", 2, "wayland-seat-unsupported")
         managers.sort(key=lambda entry: entry[1] != "ext_data_control_manager_v1")
         if probe:
             return
@@ -398,7 +402,7 @@ class X11:
     def __init__(self, probe=False):
         xname, fname = C.util.find_library("X11"), C.util.find_library("Xfixes")
         if not xname or not fname:
-            raise UndoError("X11-Undo benötigt libX11 und libXfixes.", 2)
+            raise UndoError("X11-Undo benötigt libX11 und libXfixes.", 2, "x11-libraries-missing")
         self.x, self.f = C.CDLL(xname), C.CDLL(fname)
         signatures = {
             "XOpenDisplay": (P, [C.c_char_p]), "XCloseDisplay": (C.c_int, [P]),
@@ -429,11 +433,11 @@ class X11:
         self.display = self.x.XOpenDisplay(None)
         if not self.display:
             self.x.XSetErrorHandler(self.previous_handler)
-            raise UndoError("X11-Verbindung nicht verfügbar.", 2)
+            raise UndoError("X11-Verbindung nicht verfügbar.", 2, "x11-connect-failed")
         event, error = C.c_int(), C.c_int()
         if not self.f.XFixesQueryExtension(self.display, C.byref(event), C.byref(error)):
             self.close()
-            raise UndoError("X11-Server unterstützt XFixes nicht.", 2)
+            raise UndoError("X11-Server unterstützt XFixes nicht.", 2, "x11-xfixes-missing")
         self.fix_event = event.value
         self.window = 0
         self.read_window = 0
@@ -744,9 +748,9 @@ class X11:
 
 def dependencies():
     if sys.platform != "linux" or sys.version_info < (3, 8):
-        raise UndoError("Clipboard-Undo benötigt Linux und Python 3.8 oder neuer.", 2)
+        raise UndoError("Clipboard-Undo benötigt Linux und Python 3.8 oder neuer.", 2, "python-unsupported")
     if not hasattr(socket, "SO_PEERCRED") or not hasattr(os, "O_NOFOLLOW"):
-        raise UndoError("Sichere lokale Clipboard-Undo-Verbindungen werden nicht unterstützt.", 2)
+        raise UndoError("Sichere lokale Clipboard-Undo-Verbindungen werden nicht unterstützt.", 2, "local-security-unsupported")
     if not os.environ.get("WAYLAND_DISPLAY"):
         try:
             for name in ("X11", "Xfixes"):
@@ -755,13 +759,38 @@ def dependencies():
                     raise OSError()
                 C.CDLL(library)
         except OSError:
-            raise UndoError("X11-Undo benötigt libX11 und libXfixes.", 2)
+            raise UndoError("X11-Undo benötigt libX11 und libXfixes.", 2, "x11-libraries-missing")
 
 
 def backend(probe=False):
     if sys.platform != "linux":
         raise UndoError("Dieser Clipboard-Helfer benötigt Linux.", 2)
     return Wayland(probe) if os.environ.get("WAYLAND_DISPLAY") else X11(probe)
+
+
+def diagnose():
+    """Nur Bibliotheken, Sitzung und Protokoll prüfen; keine Selection binden."""
+    try:
+        dependencies()
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+        if os.environ.get("WAYLAND_DISPLAY") and not runtime:
+            return "wayland-runtime-missing"
+        if runtime:
+            try:
+                info = os.lstat(runtime)
+            except OSError:
+                return "runtime-unsafe"
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                return "runtime-unsafe"
+        if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+            return "x11-session-missing"
+        clipboard = backend(probe=True)
+        clipboard.close()
+        return "ok"
+    except UndoError as error:
+        return error.reason
+    except (OSError, ValueError, KeyError, AttributeError, struct.error):
+        return "undo-helper-failed"
 
 
 class State:
@@ -964,6 +993,8 @@ def connect(socket_path):
 
 
 def client(command, token=""):
+    if command == "diagnose":
+        return diagnose()
     if command == "dependencies":
         dependencies()
         return ""
@@ -1019,8 +1050,8 @@ def client(command, token=""):
 
 def main():
     try:
-        if len(sys.argv) < 2 or sys.argv[1] not in ("dependencies", "available", "prepare", "replace", "cancel", "undo", "stop", "__daemon"):
-            raise UndoError("Aufruf: clipboard-undo-linux.py dependencies|available|prepare|replace TOKEN|cancel TOKEN|undo", 2)
+        if len(sys.argv) < 2 or sys.argv[1] not in ("dependencies", "available", "diagnose", "prepare", "replace", "cancel", "undo", "stop", "__daemon"):
+            raise UndoError("Aufruf: clipboard-undo-linux.py dependencies|available|diagnose|prepare|replace TOKEN|cancel TOKEN|undo", 2)
         command = sys.argv[1]
         if len(sys.argv) != (3 if command in ("replace", "cancel") else 2):
             raise UndoError("Ungültiger Clipboard-Undo-Aufruf.", 2)

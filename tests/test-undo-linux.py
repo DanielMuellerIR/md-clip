@@ -11,12 +11,69 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "helpers" / "clipboard-undo-linux.py"
 spec = importlib.util.spec_from_file_location("clipboard_undo_linux", HELPER)
 undo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(undo)
+
+
+class DiagnoseTests(unittest.TestCase):
+    def test_no_session_needs_no_clipboard(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(undo, 'dependencies'), \
+             patch.object(undo, 'backend') as backend, patch.object(undo, 'private_directory') as directory:
+            self.assertEqual('x11-session-missing', undo.diagnose())
+            backend.assert_not_called()
+            directory.assert_not_called()
+
+    def test_probe_closes_without_creating_daemon_state(self):
+        with patch.dict(os.environ, {'DISPLAY': ':test'}, clear=True), patch.object(undo, 'dependencies'), \
+             patch.object(undo, 'backend') as backend, patch.object(undo, 'private_directory') as directory:
+            self.assertEqual('ok', undo.diagnose())
+            backend.assert_called_once_with(probe=True)
+            backend.return_value.close.assert_called_once_with()
+            directory.assert_not_called()
+
+    def test_library_and_protocol_causes(self):
+        for reason in ('x11-libraries-missing', 'wayland-data-control-missing', 'wayland-seat-unsupported'):
+            with patch.dict(os.environ, {'DISPLAY': ':test'}, clear=True), patch.object(undo, 'dependencies'), \
+                 patch.object(undo, 'backend', side_effect=undo.UndoError('private error', 2, reason)):
+                self.assertEqual(reason, undo.diagnose())
+
+    def test_wayland_registry_capabilities_without_selection_binding(self):
+        for interfaces, reason in ((['wl_seat'], 'wayland-data-control-missing'),
+                                   (['zwlr_data_control_manager_v1'], 'wayland-seat-unsupported'),
+                                   (['zwlr_data_control_manager_v1', 'wl_seat', 'wl_seat'], 'wayland-seat-unsupported'),
+                                   (['ext_data_control_manager_v1', 'wl_seat'], None)):
+            def registry(clipboard):
+                clipboard.globals = {i + 1: (name, 1) for i, name in enumerate(interfaces)}
+            with patch.dict(os.environ, {'WAYLAND_DISPLAY': 'test', 'XDG_RUNTIME_DIR': '/tmp'}, clear=True), \
+                 patch.object(undo.socket, 'socket'), patch.object(undo.Wayland, 'sync', registry), \
+                 patch.object(undo.Wayland, 'send') as send, patch.object(undo.Wayland, 'bind') as bind:
+                if reason:
+                    with self.assertRaises(undo.UndoError) as error:
+                        undo.Wayland(probe=True)
+                    self.assertEqual(reason, error.exception.reason)
+                else:
+                    clipboard = undo.Wayland(probe=True)
+                    clipboard.close()
+                send.assert_called_once()
+                self.assertEqual((1, 1), send.call_args[0][:2])  # Nur get_registry.
+                bind.assert_not_called()
+
+    def test_runtime_is_checked_without_creating_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {'WAYLAND_DISPLAY': 'test', 'XDG_RUNTIME_DIR': directory}
+            os.chmod(directory, 0o755)
+            with patch.dict(os.environ, environment, clear=True), patch.object(undo, 'dependencies'), \
+                 patch.object(undo, 'backend') as backend:
+                self.assertEqual('runtime-unsafe', undo.diagnose())
+                backend.assert_not_called()
+                self.assertEqual([], os.listdir(directory))
+        with patch.dict(os.environ, {'WAYLAND_DISPLAY': 'test'}, clear=True), patch.object(undo, 'dependencies'):
+            self.assertEqual('wayland-runtime-missing', undo.diagnose())
 
 
 class FakeClipboard:
@@ -578,6 +635,25 @@ class NativeTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(HELPER), "dependencies"],
                                 env=environment, capture_output=True, timeout=10)
         self.assertEqual(0, result.returncode, result.stderr.decode())
+
+    def test_doctor_reads_no_formats(self):
+        self.source_command("delay")
+        start = time.monotonic()
+        result = subprocess.run([str(ROOT / "bin/md-clip"), "--doctor", "--json"],
+                                capture_output=True, timeout=10)
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+        doc = json.loads(result.stdout)
+        self.assertEqual({'status': 'ready', 'code': 'ok'}, doc['session'])
+        self.assertTrue(doc['capabilities']['clipboard_replace'])
+        self.assertLess(time.monotonic() - start, 3)
+        self.source_command("republish")
+
+    def test_diagnose_reads_no_formats(self):
+        self.source_command("delay")
+        start = time.monotonic()
+        self.assertEqual("ok", self.run_helper("diagnose"))
+        self.assertLess(time.monotonic() - start, 2)
+        self.source_command("republish")
 
     def test_available_reads_no_formats(self):
         self.source_command("delay")

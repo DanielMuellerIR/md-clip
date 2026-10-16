@@ -21,6 +21,13 @@ with tempfile.TemporaryDirectory(prefix="md-clip-undo-tests-", dir="/private/tmp
     ]:
         subprocess.run(["swiftc", "-O" if binary == helper else "-Onone", "-module-cache-path", str(cache), *flags,
                         str(source), "-o", str(binary)], check=True)
+    diagnosis_directory = work / "diagnosis-only"
+    diagnosis = subprocess.run([str(helper), "diagnose"], capture_output=True, timeout=10,
+                               env=dict(os.environ, MD_CLIP_TEST_DIRECTORY=str(diagnosis_directory),
+                                        MD_CLIP_TEST_PASTEBOARD="md-clip-doctor-private-test"))
+    assert diagnosis.returncode == 0 and diagnosis.stdout.strip() in (b"ok", b"macos-session-missing"), diagnosis.stderr
+    assert not diagnosis_directory.exists(), "Diagnose erzeugt keinen Dienstordner"
+    print("OK: native macOS-Diagnose ohne Dienststart")
     try:
         subprocess.run([str(driver), str(helper), str(work)], check=True, timeout=180)
     finally:

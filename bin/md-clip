@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.7.0"
+VERSION="1.8.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -465,6 +465,53 @@ clip_undo_command() {
   "$helper" "$@"
 }
 
+rtf_tools_ready() {
+  if [ "$PLATFORM" = macos ]; then command -v textutil >/dev/null 2>&1
+  else [ "$1" = true ]; fi
+}
+
+doctor_platform_issues() {
+  if [ "$PLATFORM" = macos ]; then
+    command -v textutil >/dev/null 2>&1 || doctor_issue textutil-missing warning 'textutil fehlt; der macOS-RTF-Weg ist nicht verfügbar.' 'Die macOS-Systemwerkzeuge und den PATH prüfen.'
+    [ -x "$HTML_HELPER" ] || doctor_issue html-helper-missing warning 'Der macOS-HTML-Lesehelfer fehlt.' 'install.sh ausführen oder die vollständige App verwenden.'
+    [ -x "$RTF_HELPER" ] || doctor_issue rtf-helper-missing warning 'Der macOS-RTF-Lesehelfer fehlt.' 'install.sh ausführen oder die vollständige App verwenden.'
+  elif [ "$2" = true ] && [ "$1" = false ]; then
+    doctor_issue pandoc-no-rtf warning 'Der RTF-Reader von pandoc fehlt.' 'pandoc mit RTF-Unterstützung installieren; HTML und Klartext separat verwenden.'
+  fi
+}
+
+clip_read_tools_ready() {
+  case "$PLATFORM:$CLIP_BACKEND" in
+    macos:*) command -v pbpaste ;;
+    linux:x11) command -v xclip ;;
+    linux:wayland) command -v wl-paste ;;
+  esac >/dev/null 2>&1
+}
+
+clip_write_tools_ready() {
+  case "$PLATFORM:$CLIP_BACKEND" in
+    macos:*) command -v pbcopy ;;
+    linux:x11) command -v xclip ;;
+    linux:wayland) command -v wl-copy ;;
+  esac >/dev/null 2>&1
+}
+
+# Feste Kennung statt ungefilterter Helferfehler; Diagnose liest keine Nutzdaten.
+clip_diagnose() {
+  local helper diagnosis
+  helper=$(undo_helper_path)
+  [ -x "$helper" ] || { printf 'undo-helper-missing'; return; }
+  if [ "$PLATFORM" = linux ] && ! command -v python3 >/dev/null 2>&1; then
+    printf 'python-missing'; return
+  fi
+  diagnosis=$("$helper" diagnose 2>/dev/null) || { printf 'undo-helper-failed'; return; }
+  case "$diagnosis" in
+    ok|macos-session-missing|python-unsupported|local-security-unsupported|runtime-unsafe|x11-session-missing|x11-connect-failed|x11-libraries-missing|x11-xfixes-missing|wayland-runtime-missing|wayland-connect-failed|wayland-data-control-missing|wayland-seat-unsupported)
+      printf '%s' "$diagnosis" ;;
+    *) printf 'undo-helper-failed' ;;
+  esac
+}
+
 clip_prepare_replace() { clip_undo_command prepare; }
 clip_cancel_replace() { clip_undo_command cancel "$1"; }
 clip_restore() { clip_undo_command undo; }
@@ -654,20 +701,64 @@ check_dependencies() {
   fi
 }
 
-# Doctor liefert ausschließlich Werkzeugdaten, niemals Zwischenablage-Inhalte.
+doctor_json_string() {
+  local value="$1"
+  value=${value//\\/\\\\}; value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}; value=${value//$'\r'/\\r}; value=${value//$'\t'/\\t}
+  printf '"%s"' "$value"
+}
+
+doctor_state_label() {
+  case "$1" in
+    true) printf 'ja' ;;
+    false) printf 'nein' ;;
+    ready) printf 'bereit' ;;
+    unavailable) printf 'nicht erreichbar' ;;
+    unsupported) printf 'nicht unterstützt' ;;
+    *) printf 'nicht geprüft' ;;
+  esac
+}
+
+doctor_issue() {
+  local code="$1" severity="$2" message="$3" next="$4"
+  issues+="$issue_sep{\"code\":\"$code\",\"severity\":\"$severity\",\"message\":$(doctor_json_string "$message"),\"next_step\":$(doctor_json_string "$next")}"
+  issue_sep=,
+  if [ "$JSON" -eq 0 ]; then
+    printf '[%s] %s\n  Nächster Schritt: %s\n' "$code" "$message" "$next"
+  fi
+}
+
+# Doctor prüft ausschließlich Werkzeuge und Sitzungsmetadaten. Es liest keine
+# Formate, erzeugt keinen Undo-Daemon und sagt nichts über eine gültige Sicherung.
 doctor() {
   local tool available version path sep="" sandbox=false rtf=false lua=false undo=false
-  clip_undo_command available >/dev/null 2>&1 && undo=true
+  local diagnosis session read_tools=false write_tools=false read_ready=null replace_ready=false
+  local html=false rtf_conversion=false pandoc_runs=false issues="" issue_sep=""
+  diagnosis=$(clip_diagnose)
+  case "$diagnosis" in
+    ok) session=ready; undo=true ;;
+    x11-xfixes-missing|wayland-data-control-missing|wayland-seat-unsupported) session=unsupported ;;
+    *session-missing|*connect-failed|wayland-runtime-missing|runtime-unsafe) session=unavailable ;;
+    *) session=unverified ;;
+  esac
+  clip_read_tools_ready && read_tools=true
+  clip_write_tools_ready && write_tools=true
   pandoc_supports_sandbox && sandbox=true
   pandoc_supports_rtf && rtf=true
   pandoc_supports_table_filter && lua=true
+  if command -v perl >/dev/null 2>&1 && [ "$sandbox" = true ] && [ "$lua" = true ]; then html=true; fi
+  if [ "$html" = true ] && rtf_tools_ready "$rtf"; then rtf_conversion=true; fi
+  if [ "$read_tools" = false ]; then read_ready=false
+  elif [ "$session" = ready ]; then read_ready=true
+  elif [ "$session" = unavailable ]; then read_ready=false; fi
+  if [ "$undo" = true ] && [ "$write_tools" = true ]; then replace_ready=true; fi
   if [ "$JSON" -eq 1 ]; then
     printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"strict":true,"image_modes":["keep","alt","omit"],"table_modes":["reject","text"],"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
   else
     printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
     printf 'stdin/Datei: ja; Vorschau: Terminal; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$undo" "$sandbox" "$rtf" "$lua"
   fi
-  for tool in pandoc perl textutil pbpaste pbcopy xclip wl-paste wl-copy iconv clipboard-html clipboard-rtf; do
+  for tool in pandoc perl textutil pbpaste pbcopy xclip wl-paste wl-copy iconv clipboard-html clipboard-rtf python3; do
     available=false; version=""
     case "$tool" in
       clipboard-html) path="$HTML_HELPER" ;;
@@ -677,25 +768,60 @@ doctor() {
     if [ -n "$path" ] && [ -x "$path" ]; then
       available=true
       case "$tool" in
-        pandoc) version=$(pandoc --version 2>/dev/null | head -1 || true) ;;
+        pandoc) if version=$(pandoc --version 2>/dev/null | head -1); then pandoc_runs=true; fi ;;
         perl) version=$(perl -e 'printf "%vd", $^V' 2>/dev/null || true) ;;
+        python3) version=$(python3 --version 2>/dev/null | head -1 || true) ;;
         wl-copy|wl-paste) version=$("$tool" --version 2>/dev/null | head -1 || true) ;;
         xclip) version=$(xclip -version 2>&1 | head -1 || true) ;;
         *) version="Systemwerkzeug (Version separat nicht verfuegbar)" ;;
       esac
     fi
     version=$(printf '%s' "$version" | LC_ALL=C tr -cd '[:print:]')
-    # Shell-Escaping für die einzigen dynamischen JSON-Strings.
-    version=${version//\\/\\\\}; version=${version//\"/\\\"}
-    version=${version//$'\n'/ }; version=${version//$'\r'/ }; version=${version//$'\t'/ }
+    version=${version:0:200}
     if [ "$JSON" -eq 1 ]; then
-      printf '%s"%s":{"available":%s,"version":"%s"}' "$sep" "$tool" "$available" "$version"
+      printf '%s"%s":{"available":%s,"version":%s}' "$sep" "$tool" "$available" "$(doctor_json_string "$version")"
       sep=,
     else
       printf '%s: %s %s\n' "$tool" "$available" "$version"
     fi
   done
-  [ "$JSON" -eq 0 ] || printf '}}\n'
+  if [ "$JSON" -eq 0 ]; then
+    printf 'Fähigkeiten: Plain-Datei/stdin: ja; HTML: %s; RTF: %s\n' "$(doctor_state_label "$html")" "$(doctor_state_label "$rtf_conversion")"
+    printf 'Clipboard-Lesewerkzeuge: %s; Schreibwerkzeuge: %s; Sitzung: %s\n' "$(doctor_state_label "$read_tools")" "$(doctor_state_label "$write_tools")" "$(doctor_state_label "$session")"
+    printf 'Clipboard lesen: %s; Ersetzen mit Undo: %s\n' "$(doctor_state_label "$read_ready")" "$(doctor_state_label "$replace_ready")"
+  fi
+  if ! command -v pandoc >/dev/null 2>&1; then
+    doctor_issue pandoc-missing error 'pandoc fehlt; Rich-Text-Konvertierung ist nicht verfügbar.' 'pandoc installieren; Klartext-Datei/stdin funktioniert bereits.'
+  elif [ "$pandoc_runs" = false ]; then
+    doctor_issue pandoc-unusable error 'pandoc lässt sich nicht ausführen.' 'pandoc-Installation und ausführbare Datei prüfen oder neu installieren.'
+  else
+    [ "$sandbox" = true ] || doctor_issue pandoc-no-sandbox error 'pandoc unterstützt die erforderliche Sandbox nicht.' 'Ein aktuelles pandoc mit --sandbox installieren.'
+    [ "$lua" = true ] || doctor_issue table-filter-unavailable error 'Der gemeinsame Tabellenfilter ist nicht ausführbar.' 'Perl und die vollständigen lib-Ressourcen prüfen; anschließend pandoc aktualisieren.'
+  fi
+  command -v perl >/dev/null 2>&1 || doctor_issue perl-missing error 'Perl fehlt; Rich-Text-Konvertierung ist nicht verfügbar.' 'Perl beziehungsweise perl-base installieren.'
+  doctor_platform_issues "$rtf" "$pandoc_runs"
+  [ "$read_tools" = true ] || doctor_issue clipboard-read-tool-missing warning 'Das Lesewerkzeug dieses Clipboard-Backends fehlt.' 'Unter X11 xclip, unter Wayland wl-clipboard installieren; unter macOS pbpaste/PATH prüfen.'
+  [ "$write_tools" = true ] || doctor_issue clipboard-write-tool-missing warning 'Das Schreibwerkzeug dieses Clipboard-Backends fehlt.' 'Unter X11 xclip, unter Wayland wl-clipboard installieren; unter macOS pbcopy/PATH prüfen.'
+  case "$diagnosis" in
+    ok) ;;
+    undo-helper-missing) doctor_issue "$diagnosis" error 'Der Undo-Helfer fehlt oder ist nicht ausführbar.' 'install.sh ausführen oder die vollständige App verwenden.' ;;
+    python-missing|python-unsupported) doctor_issue "$diagnosis" error 'Linux-Undo benötigt Python 3.8 oder neuer.' 'Einen unterstützten Python-3-Interpreter im PATH bereitstellen.' ;;
+    x11-libraries-missing) doctor_issue "$diagnosis" error 'libX11 oder libXfixes fehlt oder lässt sich nicht laden.' 'Die Laufzeitbibliotheken libX11 und libXfixes der Distribution installieren.' ;;
+    x11-session-missing) doctor_issue "$diagnosis" warning 'Es ist keine X11-Sitzung angegeben.' 'In der grafischen Sitzung starten; für Datei/stdin ist keine Sitzung nötig.' ;;
+    x11-connect-failed) doctor_issue "$diagnosis" warning 'Die angegebene X11-Sitzung ist nicht erreichbar.' 'DISPLAY und die Sitzungsberechtigung im Terminal der grafischen Sitzung prüfen.' ;;
+    x11-xfixes-missing) doctor_issue "$diagnosis" warning 'Der X11-Server bietet das für Undo nötige XFixes nicht an.' 'Einen X11-Server mit XFixes verwenden; Datei/stdin bleibt verfügbar.' ;;
+    wayland-runtime-missing) doctor_issue "$diagnosis" warning 'Das Wayland-Sitzungsverzeichnis fehlt.' 'Im Terminal der Wayland-Sitzung starten; WAYLAND_DISPLAY und XDG_RUNTIME_DIR prüfen.' ;;
+    wayland-connect-failed) doctor_issue "$diagnosis" warning 'Die Wayland-Sitzung ist nicht erreichbar.' 'WAYLAND_DISPLAY und XDG_RUNTIME_DIR in der grafischen Sitzung prüfen.' ;;
+    wayland-data-control-missing) doctor_issue "$diagnosis" warning 'Der Compositor bietet kein unterstütztes Data-Control-Protokoll.' 'Einen Compositor mit ext_data_control_manager_v1 oder zwlr_data_control_manager_v1 verwenden; Datei/stdin funktioniert unabhängig davon.' ;;
+    wayland-seat-unsupported) doctor_issue "$diagnosis" warning 'Wayland-Undo benötigt genau einen Seat.' 'Eine Sitzung mit genau einem Seat verwenden; Datei/stdin bleibt verfügbar.' ;;
+    runtime-unsafe) doctor_issue "$diagnosis" error 'Das Sitzungsverzeichnis ist nicht privat oder nicht zugänglich.' 'XDG_RUNTIME_DIR der eigenen grafischen Sitzung verwenden; Eigentümer und Modus 0700 prüfen.' ;;
+    macos-session-missing) doctor_issue "$diagnosis" warning 'Für diesen Benutzer ist keine aktive macOS-Konsolensitzung erkennbar.' 'In der angemeldeten grafischen Sitzung starten; Datei/stdin funktioniert unabhängig davon.' ;;
+    local-security-unsupported) doctor_issue "$diagnosis" error 'Sichere lokale Undo-Verbindungen werden nicht unterstützt.' 'Eine unterstützte Linux-/Python-Laufzeit mit SO_PEERCRED und O_NOFOLLOW verwenden.' ;;
+    *) doctor_issue undo-helper-failed error 'Der Undo-Helfer liefert keine gültige Diagnose.' 'Helfer und Laufzeit prüfen oder install.sh erneut ausführen.' ;;
+  esac
+  if [ "$JSON" -eq 1 ]; then
+    printf '},"diagnostics_version":1,"session":{"status":"%s","code":"%s"},"clipboard_tools":{"read":%s,"write":%s},"capabilities":{"plain_input":true,"html_conversion":%s,"rtf_conversion":%s,"clipboard_read":%s,"clipboard_replace":%s},"diagnostics":[%s]}\n' "$session" "$diagnosis" "$read_tools" "$write_tools" "$html" "$rtf_conversion" "$read_ready" "$replace_ready" "$issues"
+  fi
 }
 
 # ---------- Gemeinsame Konvertierungs-Pipeline ----------

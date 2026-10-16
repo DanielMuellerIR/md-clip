@@ -425,8 +425,19 @@ private func stdinBytes(deadline: Double) throws -> Data {
 }
 private func client() throws -> Reply {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    guard let command = arguments.first, ["prepare", "replace", "cancel", "undo", "available", "stop"].contains(command),
-          arguments.count == ((command == "replace" || command == "cancel") ? 2 : 1) else { throw fail(2, "Aufruf: clipboard-undo prepare | replace TOKEN | cancel TOKEN | undo | available | stop") }
+    guard let command = arguments.first, ["prepare", "replace", "cancel", "undo", "available", "diagnose", "stop"].contains(command),
+          arguments.count == ((command == "replace" || command == "cancel") ? 2 : 1) else { throw fail(2, "Aufruf: clipboard-undo prepare | replace TOKEN | cancel TOKEN | undo | available | diagnose | stop") }
+    if command == "diagnose" {
+        if serviceExists() { try checkDirectory(create: false) }
+        _ = try socketAddress()
+        // Sitzungsmetadaten benötigen weder Pasteboard-Zugriff noch GUI-Start.
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        let ready = session?[kCGSessionUserIDKey as String] as? Int == Int(getuid())
+            && session?[kCGSessionOnConsoleKey as String] as? Bool == true
+            && session?[kCGSessionLoginDoneKey as String] as? Bool == true
+        print(ready ? "ok" : "macos-session-missing")
+        return Reply(status: 0)
+    }
     if command == "available" {
         if serviceExists() { try checkDirectory(create: false) }
         _ = try socketAddress()

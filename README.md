@@ -223,6 +223,20 @@ oder ausdrücklich gewählter Klartext bleibt bytegenau verwendbar. Strict prüf
 die bekannten Fälle und ist keine allgemeine Verlustfreiheitsgarantie.
 Der genaue Vertrag steht in [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md).
 
+### Diagnose ohne Clipboard-Inhalte
+
+`md-clip --doctor` zeigt Werkzeuge, Konvertierungsfähigkeiten und konkrete
+nächste Schritte. `--doctor --json` ergänzt die bisherigen Felder um feste
+Diagnosekennungen und einen getrennten Sitzungsstatus. So lassen sich fehlende
+X11-Bibliotheken, eine nicht erreichbare Sitzung und fehlendes Wayland-Data-Control
+unterscheiden. Datei/stdin mit Klartext funktioniert auch ohne grafische Sitzung.
+
+Doctor liest und schreibt keine Clipboard-Inhalte, startet keinen Undo-Dienst
+und keine GUI. „Undo verfügbar“ bezeichnet die Fähigkeit des Helfers, keine
+vorhandene Rücknahmesicherung. `null` bei einer Lesefähigkeit bedeutet, dass sie
+nicht geprüft werden konnte. Vertrag und Kennungen stehen in
+[docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md).
+
 ### Komplexe Tabellen als Text
 
 `--tables text` stellt Tabellen mit verbundenen Zellen oder verschachtelten
@@ -398,6 +412,7 @@ python3 tests/test-html-normalization.py
 python3 tests/test-conversion-report.py
 python3 tests/test-images.py
 python3 tests/test-tables-text.py
+python3 tests/test-doctor.py
 ```
 
 Voraussetzungen sind pandoc, perl und ein Clipboard-Werkzeug (macOS: `pbpaste`;

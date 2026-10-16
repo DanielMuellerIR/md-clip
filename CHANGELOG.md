@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.0 — 2026-10-16
+
+- Doctor ergänzt feste Diagnosekennungen, Ursachen und nächste Schritte für
+  fehlende Werkzeuge/Bibliotheken, nicht erreichbare Sitzungen, fehlendes
+  Wayland-Data-Control und defekte Helfer.
+- JSON nennt Konvertierungsfähigkeiten, Clipboard-Werkzeuge und den getrennten
+  Sitzungsstatus. Nicht geprüfte Lesefähigkeiten erscheinen als null.
+  Sitzungsprüfungen lesen keine Clipboard-Inhalte und starten keinen Undo-Dienst.
+
 ## 1.7.0 — 2026-10-16
 
 - `--tables text` stellt komplexe Tabellen als beschrifteten Text dar: geparste
