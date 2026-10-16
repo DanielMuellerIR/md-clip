@@ -344,6 +344,7 @@ private func serve() throws {
         let deadline = now() + requestSeconds
         var reply: Reply
         var isStatus = false
+        var preparedToken: String?
         do {
             var peerUID: uid_t = 0
             var peerGID: gid_t = 0
@@ -364,6 +365,7 @@ private func serve() throws {
                 guard pasteboard.changeCount == snapshot.count else { throw fail(1, "Das Clipboard wurde während der Sicherung geändert.") }
                 let token = UUID().uuidString
                 pending = (token, snapshot, now() + pendingSeconds)
+                preparedToken = token
                 hadSnapshot = true
                 reply = Reply(status: 0, token: token)
             case "cancel":
@@ -391,7 +393,11 @@ private func serve() throws {
             }
         } catch let error as Failure { reply = Reply(status: error.status, message: error.message) }
         catch { reply = Reply(status: 2, message: "Der Undo-Dienst konnte die Anfrage nicht verarbeiten.") }
-        try? transmit(fd, reply, deadline: deadline)
+        do { try transmit(fd, reply, deadline: deadline) }
+        catch {
+            // Ohne übertragene Token-Antwort kann dieser Client nicht stornieren.
+            if let token = preparedToken, pending?.token == token { pending = nil }
+        }
         close(fd)
         if !isStatus { idleSince = now() }
     }

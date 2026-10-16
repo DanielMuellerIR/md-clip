@@ -29,6 +29,13 @@ abgelehnte Vorschauen schreiben nicht; ihre vorbereitete Sicherung wird
 verworfen. Parallel vorbereitete Ersetzungen werden abgelehnt. Auch eine
 Vorbereitung verfällt nach zehn Minuten, falls ihr Aufrufer verschwindet.
 
+Kann der Dienst die Antwort einer erfolgreichen Vorbereitung nicht übertragen,
+gibt er deren Token sofort frei. Vorheriges Undo bleibt erhalten. Scheitert nur
+die Antwort nach einer bereits geschriebenen Ersetzung, bleiben Ergebnis und
+Undo gültig. Eine erfolgreiche Socket-Übertragung beweist allerdings nicht, dass
+der Client die Antwort danach vollständig verarbeitet hat; dieser Fall bleibt
+an die bestehende Ablaufzeit gebunden.
+
 Beim Undo werden alle gesicherten Daten wieder angeboten und die Undo-Operation
 verbraucht. Eine zweite Ausführung scheitert. Leere Ausgangs-Clipboards können
 bei Datei-/stdin-Eingaben wieder leer hergestellt werden. Nach dem Verlust oder

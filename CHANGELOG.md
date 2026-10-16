@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.7 — 2026-10-16
+
+- Scheitert die Übertragung einer erfolgreichen Undo-Vorbereitung an den Client,
+  gibt der Dienst deren Token wieder frei. Eine neue Konvertierung kann sofort
+  beginnen; die vorherige Undo-Sicherung bleibt erhalten.
+- Nicht empfangbare Fehler-/Status-Antworten verwerfen keine andere Vorbereitung.
+  Bereits geschriebene Ersetzungen und deren Undo bleiben auch bei fehlgeschlagener
+  Antwort erhalten. Native macOS-/X11-/Wayland-Gegenproben sichern diese Grenzen.
+
 ## 1.10.6 — 2026-10-16
 
 - Scheinbare Tags in `textarea` und `title` lösen keine Tabellenfehler aus.

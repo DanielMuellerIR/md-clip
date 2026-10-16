@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import socket
 import shutil
 import subprocess
 import sys
@@ -799,6 +800,50 @@ class NativeTests(unittest.TestCase):
                 self.assertEqual(2, response["code"])
         self.run_helper("undo")
         self.assertEqual(original, self.read_clipboard())
+
+    def unread_request(self, request, data=b''):
+        path, fd = undo.private_directory(); os.close(fd)
+        connection = undo.connect(os.path.join(path,'control.sock'))
+        try:
+            connection.shutdown(socket.SHUT_RD)
+            payload=json.dumps(dict(request,size=len(data))).encode()
+            connection.sendall(len(payload).to_bytes(4,'big')+payload+data)
+            return connection
+        except BaseException:
+            connection.close();raise
+
+    def test_failed_prepare_reply_releases_only_new_pending(self):
+        original=self.read_clipboard()
+        self.run_helper('replace',self.run_helper('prepare'),b'previous')
+        before=self.read_clipboard()
+        with self.unread_request({'command':'prepare'}):
+            self.assertTrue(json.loads(self.run_helper('status'))['undo_available'])
+            next_token=self.run_helper('prepare')
+        self.assertEqual(before,self.read_clipboard())
+        self.run_helper('cancel',next_token)
+        self.run_helper('undo');self.assertEqual(original,self.read_clipboard())
+
+    def test_unread_rejections_and_status_preserve_existing_pending(self):
+        original=self.read_clipboard()
+        self.run_helper('replace',self.run_helper('prepare'),b'previous')
+        token=self.run_helper('prepare');before=self.read_clipboard()
+        for request in ({'command':'prepare'}, {'command':[]}, {'command':'status','token':token}):
+            with self.unread_request(request):
+                status=json.loads(self.run_helper('status',token))
+                self.assertTrue(status['pending_valid'] and status['undo_available'])
+            self.assertEqual(before,self.read_clipboard())
+        self.run_helper('cancel',token);self.run_helper('undo')
+        self.assertEqual(original,self.read_clipboard())
+
+    def test_unread_replace_reply_preserves_success_and_undo(self):
+        original=self.read_clipboard();token=self.run_helper('prepare')
+        with self.unread_request({'command':'replace','token':token},b'replacement'):
+            status=json.loads(self.run_helper('status',token))
+            self.assertTrue(status['undo_available'] and not status['pending_valid'])
+        clip=undo.backend()
+        try:self.assertEqual(clip.text(b'replacement'),self.read_clipboard())
+        finally:clip.close()
+        self.run_helper('undo');self.assertEqual(original,self.read_clipboard())
 
     def test_stop_preserves_external_owner(self):
         self.run_helper("prepare")

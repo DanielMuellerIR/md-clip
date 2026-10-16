@@ -95,6 +95,31 @@ func pause(_ seconds: Double) {
     while Date() < until { _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
 }
 func stop() { _ = call(["stop"]) }
+func unreadRequest(_ request: [String: Any]) {
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    precondition(fd >= 0)
+    var enabled: Int32 = 1, limit = timeval(tv_sec: 3, tv_usec: 0)
+    precondition(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size)) == 0)
+    precondition(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size)) == 0)
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX); address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+    let path = Array((service + "/service.sock").utf8) + [0]
+    precondition(path.count <= MemoryLayout.size(ofValue: address.sun_path))
+    withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
+    precondition(withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } } == 0)
+    precondition(shutdown(fd, SHUT_RD) == 0)
+    let payload = try! JSONSerialization.data(withJSONObject: request), size = UInt32(payload.count)
+    let bytes = Data([UInt8(size >> 24), UInt8((size >> 16) & 255), UInt8((size >> 8) & 255), UInt8(size & 255)]) + payload
+    var offset = 0
+    while offset < bytes.count {
+        let count = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress!.advanced(by: offset), bytes.count-offset) }
+        precondition(count > 0); offset += count
+    }
+    // Die vollständige Anfrage ist bereits gepuffert. Erst danach schließen,
+    // damit der Antwortfehler ohne Warten auf die vorhandene Frist sichtbar wird.
+    precondition(shutdown(fd, SHUT_WR) == 0)
+    close(fd)
+}
 defer { stop(); board.releaseGlobally() }
 expect(call(["available"]), 0, "available without clipboard reads")
 precondition(!FileManager.default.fileExists(atPath: service), "available created state")
@@ -127,6 +152,45 @@ let restored = board.changeCount
 expect(call(["undo"]), 1, "once-only undo")
 unchanged(restored, raw)
 print("PASS: 2 Items, HTML/RTF/Bild/custom/binär/leer bytegenau; Token und einmaliges Undo")
+
+write(original); replace(prepare())
+do {
+    let previous = readRaw(), count = board.changeCount
+    unreadRequest(["command":"prepare"])
+    precondition(status().undo_available)
+    let next = prepare()
+    unchanged(count, previous)
+    expect(call(["cancel",next]),0,"cancel after failed prepare reply")
+    expect(call(["undo"]),0,"previous undo after failed prepare reply")
+    precondition(readRaw()==raw)
+}
+print("PASS: fehlgeschlagene prepare-Antwort gibt neuen Token frei und erhält vollständiges Undo")
+
+write(original); replace(prepare())
+do {
+    let token = prepare(), previous = readRaw(), count = board.changeCount
+    for request: [String: Any] in [["command":"prepare"], ["command":[]], ["command":"status","token":token]] {
+        unreadRequest(request)
+        let state = status(token)
+        precondition(state.pending_valid && state.undo_available)
+        unchanged(count, previous)
+    }
+    expect(call(["cancel",token]),0,"existing prepare after unread rejections")
+    expect(call(["undo"]),0,"previous undo after unread rejections")
+    precondition(readRaw()==raw)
+}
+print("PASS: nicht empfangene Busy-/Fehler-/Status-Antwort verwirft keinen gültigen fremden Token")
+
+write(original)
+do {
+    let token = prepare()
+    unreadRequest(["command":"replace","token":token,"bytes":Data("replacement".utf8).base64EncodedString()])
+    let state = status(token)
+    precondition(state.undo_available && !state.pending_valid && board.string(forType:.string)=="replacement")
+    expect(call(["undo"]),0,"undo after unread successful replace")
+    precondition(readRaw()==raw)
+}
+print("PASS: erfolgreiche Ersetzung und ihr Undo bleiben bei fehlgeschlagener Antwort erhalten")
 
 write([])
 let emptyToken = prepare()

@@ -944,6 +944,7 @@ def serve(path, directory_fd):
             connection, _ = server.accept()
             with connection:
                 connection.settimeout(READ_TIMEOUT)
+                prepared_token = None
                 try:
                     check_peer(connection)
                     expires = time.monotonic() + READ_TIMEOUT
@@ -965,6 +966,8 @@ def serve(path, directory_fd):
                         running, result = False, ""
                     else:
                         result = state.command(name, token, data)
+                        if name == "prepare":
+                            prepared_token = result
                     response = {"code": 0, "result": result}
                 except UndoError as error:
                     response = {"code": error.code, "error": str(error)}
@@ -973,7 +976,9 @@ def serve(path, directory_fd):
                 try:
                     connection.sendall(json.dumps(response).encode() + b"\n")
                 except OSError:
-                    pass
+                    # Ohne übertragene Token-Antwort kann dieser Client nicht stornieren.
+                    if prepared_token is not None and state.pending and secrets.compare_digest(prepared_token, state.pending[0]):
+                        state.pending = None
     finally:
         state.pending = state.saved = None
         clipboard.close()
