@@ -16,6 +16,8 @@ jobs:
   linux:
     name: Linux (Ubuntu 24.04, pandoc 3.1.3)
     runs-on: ubuntu-24.04
+    env:
+      TEST_PYTHON: /usr/bin/python3
     # Der Lauf dauert normal wenige Minuten. Die Grenze ist gegen Haenger
     # gerichtet, nicht gegen Langsamkeit: `xvfb-run` haengt als letzter Befehl
     # einer Shell VOR dem ersten Test, weil es dann PID 1 wird und Xvfbs
@@ -36,7 +38,7 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq pandoc xclip xvfb sway wl-clipboard
+          sudo apt-get install -y -qq pandoc xclip xvfb sway wl-clipboard unzip
 
       - name: Versionen protokollieren
         run: |
@@ -51,6 +53,7 @@ jobs:
             exit 1
           fi
           perl -e 'print "perl $]\n"'
+          "$TEST_PYTHON" --version
           ./bin/md-clip --version
 
       # Erst ohne Display: beweist, dass die Fixture-Tests ohne Clipboard
@@ -61,15 +64,16 @@ jobs:
       - name: Inhaltsregressionen und Undo ohne Display
         run: |
           bash tests/test-review-content.sh
-          python3 tests/test-html-normalization.py
-          python3 tests/test-conversion-report.py
-          python3 tests/test-images.py
-          python3 tests/test-tables-text.py
-          python3 tests/test-doctor.py
-          python3 tests/test-undo-linux.py
+          "$TEST_PYTHON" tests/test-html-normalization.py
+          "$TEST_PYTHON" tests/test-conversion-report.py
+          "$TEST_PYTHON" tests/test-images.py
+          "$TEST_PYTHON" tests/test-tables-text.py
+          "$TEST_PYTHON" tests/test-doctor.py
+          "$TEST_PYTHON" tests/test-pandoc-pin.py
+          "$TEST_PYTHON" tests/test-undo-linux.py
 
       - name: Undo mit isoliertem X11-Clipboard
-        run: xvfb-run -a env MD_CLIP_UNDO_TEST_ISOLATED=1 python3 tests/test-undo-linux.py --integration
+        run: xvfb-run -a env MD_CLIP_UNDO_TEST_ISOLATED=1 "$TEST_PYTHON" tests/test-undo-linux.py --integration
 
       # Dann mit virtuellem X-Server: beweist den echten Clipboard-Weg.
       - name: Tests mit X11-Clipboard (Xvfb)
@@ -106,24 +110,46 @@ jobs:
           echo "OK: Exit 1 bei leerem Clipboard"
 
       - name: CLI-Dateien und strukturelle Tabellenregressionen
-        run: python3 tests/test-cli-inputs.py
+        run: |
+          "$TEST_PYTHON" tests/test-cli-inputs.py
 
       - name: Compare-Skripte ohne System-Clipboard
-        run: python3 tests/test-compare.py
+        run: |
+          "$TEST_PYTHON" tests/test-compare.py
 
       - name: Wayland mit isoliertem Compositor
         run: env -u WAYLAND_DISPLAY ./tests/run-wayland.sh
 
   macos:
-    name: macOS (headless)
-    runs-on: macos-14
+    name: macOS 15 arm64 (pandoc ${{ matrix.converter }})
+    # Der Bundle-Pin braucht arm64; Runnerreferenz:
+    # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        converter: [system, bundled]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: pandoc installieren
+      - name: Aktuelles System-pandoc installieren
+        if: matrix.converter == 'system'
         run: brew install pandoc
+      - name: Exaktes Bundle-pandoc bereitstellen
+        if: matrix.converter == 'bundled'
+        run: |
+          bash tests/prepare-bundled-pandoc.sh "$RUNNER_TEMP/md-clip-pandoc"
+          printf '%s\n' "$RUNNER_TEMP/md-clip-pandoc" >> "$GITHUB_PATH"
+      - name: Architektur und Testversionen protokollieren
+        run: |
+          uname -m
+          command -v pandoc
+          pandoc --version
+          test_python="$(command -v python3)"
+          printf 'TEST_PYTHON=%s\n' "$test_python" >> "$GITHUB_ENV"
+          "$test_python" --version
       - name: Fixtures, CLI und isolierte Wrapper
         env:
           MD_CLIP_SKIP_CLIPBOARD: '1'
@@ -133,12 +159,13 @@ jobs:
           bash tests/test-install-safety.sh
           bash tests/test-dependencies.sh
           bash tests/test-wrapper-safety.sh
-          python3 tests/test-cli-inputs.py
-          python3 tests/test-compare.py
+          "$TEST_PYTHON" tests/test-cli-inputs.py
+          "$TEST_PYTHON" tests/test-compare.py
           bash tests/test-review-content.sh
-          python3 tests/test-html-normalization.py
-          python3 tests/test-conversion-report.py
-          python3 tests/test-images.py
-          python3 tests/test-tables-text.py
-          python3 tests/test-doctor.py
-          python3 tests/test-undo-macos.py
+          "$TEST_PYTHON" tests/test-html-normalization.py
+          "$TEST_PYTHON" tests/test-conversion-report.py
+          "$TEST_PYTHON" tests/test-images.py
+          "$TEST_PYTHON" tests/test-tables-text.py
+          "$TEST_PYTHON" tests/test-doctor.py
+          "$TEST_PYTHON" tests/test-pandoc-pin.py
+          "$TEST_PYTHON" tests/test-undo-macos.py

@@ -35,12 +35,6 @@ APP_NAME="md-clip"
 # verify-bundle.sh prüft diese Grenze für alle ausführbaren Bundle-Bestandteile.
 MIN_MACOS="14.0"
 
-# Pandoc-Version. Pinning macht den Build reproduzierbar. Bei Updates
-# diese Zahl bumpen und neu bauen.
-PANDOC_VERSION="3.9.0.2"
-PANDOC_ZIP_SHA256="6e9eca844076bcbb599bbeebbba78a70f93b5307782b85c2c272872812c88875"
-PANDOC_COPYRIGHT_SHA256="842e33ef01625e93f85bebb8bac83aa570186b7aa77a09971257cc29f8f60740"
-
 # Sparkle-Version (Update-Framework). Exakt gepinnt, weil der Updater die
 # installierte App austauscht: Ein Versionssprung wird bewusst geprüft, nie
 # still aufgelöst — dieselbe Regel wie in poormans_text. Die Prüfsumme wurde
@@ -57,6 +51,8 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/verified-cache.sh"
 # shellcheck source=version.sh
 source "$SCRIPT_DIR/version.sh"
+# shellcheck source=pandoc-pin.sh
+source "$SCRIPT_DIR/pandoc-pin.sh"
 
 # Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth,
 # identisch zu wrappers/sign-and-release.sh. Landet unten im Info.plist als

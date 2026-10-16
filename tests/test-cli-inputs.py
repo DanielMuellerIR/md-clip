@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CLI-Verhalten mit echten Konvertern und drei vollständig isolierten Backends."""
 import json
+import sys
 import fcntl
 import pty
 import select
@@ -26,11 +27,11 @@ with tempfile.TemporaryDirectory(prefix='md-clip-contract-') as tmp:
     assert real_pandoc
     # Produkt priorisiert Bundle-pandoc; dort liegt auch der gesamte Fake-PATH.
     (runtime / 'pandoc').symlink_to(real_pandoc)
-    mock = '''#!/usr/bin/env python3
-import os,sys,pathlib
+    mock = '#!' + os.path.realpath(sys.executable) + '\n' + '''import os,sys,pathlib
 name=pathlib.Path(sys.argv[0]).name
 args=sys.argv[1:]
 b=pathlib.Path(os.environ['MOCK_ROOT'])
+with (b/'interpreters').open('a') as f:f.write(os.path.realpath(sys.executable)+'\\n')
 if name=='uname': print(os.environ['MOCK_PLATFORM']);sys.exit()
 undo=name in ('clipboard-undo','clipboard-undo-linux.py')
 if undo and args==['available']:sys.exit()
@@ -59,6 +60,10 @@ sys.stdout.buffer.write(f.read_bytes())
 '''
     for name in ('uname','pbpaste','pbcopy','wl-paste','wl-copy','xclip','clipboard-html','clipboard-rtf','clipboard-undo','clipboard-undo-linux.py'):
         f=runtime/name;f.write_text(mock);f.chmod(0o755)
+    # Ein zufälliges python3 im Produkt-PATH darf die Testattrappen nicht übernehmen.
+    decoy=runtime/'python3'
+    decoy.write_text('#!/bin/sh\n[ "$1" = --version ] && { echo "Python 3.test"; exit 0; }\necho unwanted > "$MOCK_ROOT/unwanted-interpreter"\nexit 92\n')
+    decoy.chmod(0o755)
     env=dict(os.environ, PATH=str(runtime)+':'+os.environ['PATH'], MOCK_ROOT=str(base), MOCK_PLATFORM='Linux')
     def run(args=(), data=None, rc=0):
         p=subprocess.run([str(runtime/'md-clip'),*args],input=data,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=20)
@@ -356,4 +361,8 @@ sys.stdout.buffer.write(f.read_bytes())
             if proc.poll() is None:os.killpg(proc.pid,signal.SIGKILL)
             proc.wait()
     print('OK: INT/TERM storniert vorbereitete Sicherung einmalig')
+    interpreters=set((base/'interpreters').read_text().splitlines())
+    assert interpreters=={os.path.realpath(sys.executable)}, interpreters
+    assert not (base/'unwanted-interpreter').exists()
+    print('OK: alle Python-Attrappen verwenden',os.path.realpath(sys.executable))
 print('OK: stdin/Datei/Doctor/Klartext-Abhängigkeiten')

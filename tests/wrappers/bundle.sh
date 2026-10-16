@@ -300,6 +300,7 @@ mkdir -p "$ICON_PROJECT/wrappers" "$ICON_PROJECT/bin" "$ICON_PROJECT/assets" \
   "$ICON_PROJECT/build/md-clip.app" "$ICON_PROJECT/fake-bin"
 cp "$PROJECT_ROOT/wrappers/build-app-bundled.sh" \
   "$PROJECT_ROOT/wrappers/version.sh" "$PROJECT_ROOT/wrappers/verified-cache.sh" \
+  "$PROJECT_ROOT/wrappers/pandoc-pin.sh" \
   "$ICON_PROJECT/wrappers/"
 cp "$PROJECT_ROOT/bin/md-clip" "$ICON_PROJECT/bin/"
 printf 'alter Build\n' > "$ICON_PROJECT/build/md-clip.app/keep"

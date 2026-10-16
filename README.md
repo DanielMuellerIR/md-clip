@@ -118,11 +118,11 @@ md-clip --undo          # ursprüngliche Formate einmalig wiederherstellen
 
 - **Keine Dock-App und kein System-Hotkey.** Beides sind unter Linux Sache der Desktop-Umgebung, nicht des Programms. Einen Hotkey legt man in den Tastatur-Einstellungen an (GNOME: *Einstellungen → Tastatur → Eigene Tastenkombinationen*, KDE: *Systemeinstellungen → Kurzbefehle*) und hinterlegt dort als Befehl:
   ```
-  md-clip --replace --quiet --notify
+  md-clip --replace --notify
   ```
 - **Firefox und Chromium legen HTML unterschiedlich kodiert ab** (Firefox UTF-16, Chromium UTF-8). md-clip erkennt und behandelt beides — falls doch einmal Zeichensalat auftaucht, ist das ein Bug und ein Issue wert.
 - **RTF** wird von pandoc gelesen statt von Apples `textutil`. Für dieselbe Datei kommt auf beiden Plattformen dasselbe Markdown heraus (ein Test sichert das ab), pandocs RTF-Reader ist bei exotischen Dokumenten aber weniger erprobt.
-- **Wayland ist nicht durch die CI abgedeckt** (ein Compositor im CI-Runner wäre unverhältnismäßig aufwendig) — der Pfad wird von Hand geprüft. X11 läuft in der CI unter Xvfb mit.
+- **Wayland und X11 laufen in der CI isoliert.** sway stellt eine eigene headless Wayland-Sitzung bereit; X11 läuft unter Xvfb. Der echte Desktop wird dabei nicht berührt.
 
 ## Benutzung
 
@@ -149,7 +149,7 @@ Alle Optionen im Überblick:
 | `--undo` | | Letzte erfolgreiche Ersetzung einmalig zurücknehmen |
 | `--plain` | `-p` | Keine Konvertierung, nur Klartext durchreichen |
 | `--from FORMAT` | `-f` | Eingabe erzwingen: `auto`, `html`, `rtf`, `plain` |
-| `--to FORMAT` | `-t` | Markdown-Dialekt: `gfm`, `markdown`, `commonmark` |
+| `--to FORMAT` | `-t` | Markdown-Dialekt: `gfm`, `markdown`, `commonmark` (mit Pipe-Tabellen) |
 | `--notify` | `-n` | Erfolgsmeldung anzeigen (macOS-App: kurzes Einblend-Fenster der App selbst; Quellinstallation ohne App-Bundle: Mitteilungszentrale; Linux: `notify-send`) |
 | `--quiet` | `-q` | Keine Statusmeldungen |
 | `--verbose` | `-V` | Diagnose-Ausgabe, welcher Pfad gewählt wurde |
@@ -177,7 +177,7 @@ HTML interpretiert. Verzeichnisse, fehlende oder unlesbare Dateien sind Fehler.
 
 stdout enthält ausschließlich Nutzdaten, auch ohne `--quiet`. Status und
 Diagnose stehen auf stderr. `--quiet` unterdrückt Status, Verbose und HUD;
-Fehler bleiben sichtbar. `--verbose` nennt Quellen, Konvertierungsweg und
+Fehler bleiben sichtbar. Auch `--quiet --notify` bleibt ohne Erfolgsmeldung; für HUD/Notification `--notify` ohne `--quiet` verwenden. `--verbose` nennt Quellen, Konvertierungsweg und
 übersprungene Fehler. Erfolgsmeldungen unterscheiden „Markdown erzeugt“,
 „Klartext übernommen“ und „Struktur vereinfacht“.
 
@@ -402,67 +402,73 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
 
 ## Tests
 
+Die folgenden Prüfungen berühren das Host-Clipboard nicht. Sie benötigen pandoc,
+Perl, unzip und Python 3.8 oder neuer. Die nativen macOS- und Wrapper-Prüfungen benötigen
+zusätzlich die Xcode-Kommandozeilenwerkzeuge. Linux überspringt macOS-exklusive
+Teile sichtbar.
+
 ```bash
-bash tests/run-tests.sh
+MD_CLIP_SKIP_CLIPBOARD=1 bash tests/run-tests.sh
 bash tests/test-plain-newlines.sh
 bash tests/test-install-safety.sh
 bash tests/test-dependencies.sh
 bash tests/test-wrapper-safety.sh
+bash tests/test-review-content.sh
+python3 tests/test-cli-inputs.py
+python3 tests/test-compare.py
 python3 tests/test-html-normalization.py
 python3 tests/test-conversion-report.py
 python3 tests/test-images.py
 python3 tests/test-tables-text.py
 python3 tests/test-doctor.py
+python3 tests/test-pandoc-pin.py
+python3 tests/test-undo-linux.py
+python3 tests/test-undo-macos.py
 ```
 
-Voraussetzungen sind pandoc, perl und ein Clipboard-Werkzeug (macOS: `pbpaste`;
-Linux: `xclip` oder `wl-clipboard`). `test-wrapper-safety.sh` prüft zusätzlich
-den Argumentvertrag des Updaters und braucht dafür `swiftc`. Der Updater gehört
-nur zum macOS-Bundle: dort ist der Compiler mit den Xcode-Kommandozeilenwerkzeugen
-vorhanden und der Test verbindlich, auf Linux überspringt er diesen einen Block
-mit einer sichtbaren Meldung.
+Python-Attrappen der CLI-Matrix verwenden denselben Interpreter wie ihr
+Testprozess, unabhängig vom Produkt-PATH. Die CI bindet `TEST_PYTHON` vor dem Testlauf
+ausdrücklich und protokolliert dessen Version (Linux: `/usr/bin/python3`, macOS:
+Interpreter des Runner-PATH). Lokal lässt sich der gewünschte
+Interpreter ebenfalls über seinen absoluten Pfad starten.
 
-Die Fixture-Tests brauchen nur pandoc und perl und laufen überall. Die Clipboard-Roundtrip-Tests brauchen ein echtes Clipboard und überspringen sich sichtbar, wo keines erreichbar ist (etwa in einem Container). Unter Linux holt man sie mit einem unsichtbaren X-Server dazu:
+Die Fixtures sourcen dieselbe Pipeline wie das Produkt. Beide Plattformen prüfen
+dieselben Erwartungsdateien; RTF wird unter macOS von textutil und unter Linux von
+pandoc gelesen. Der kleine [Quellenkorpus](tests/fixtures/README.md) dokumentiert
+Formatabdeckung und Herkunftsgrenzen. Variantenprüfungen vergleichen zusätzlich
+Text, Code, Links, Auszeichnung, Listen und Tabellen nach dem Markdown-Roundtrip.
+`commonmark` verwendet dafür ausdrücklich die Erweiterung `pipe_tables`.
+
+Für echte Linux-Clipboard-Prüfungen in eigenen unsichtbaren Sitzungen:
 
 ```bash
-sudo apt install xvfb
-xvfb-run ./tests/run-tests.sh
+sudo apt install xclip xvfb sway wl-clipboard
+xvfb-run -a ./tests/run-tests.sh
+xvfb-run -a env MD_CLIP_UNDO_TEST_ISOLATED=1 python3 tests/test-undo-linux.py --integration
+env -u WAYLAND_DISPLAY ./tests/run-wayland.sh
 ```
 
-Die Fixture-Tests sourcen exakt dieselbe Pipeline wie das Produkt. Auf macOS
-kompilieren sie Produkt- und Test-Helper in ein privates temporäres
-Bundle-Layout; ein sauberer Checkout braucht keine ignorierten Alt-Binaries.
-Der RTF-Test läuft auf beiden Plattformen gegen dieselbe Erwartungsdatei,
-obwohl dahinter zwei verschiedene RTF-Parser stecken (`textutil` auf macOS,
-pandoc auf Linux).
+Wayland-Prüfungen benötigen einen unprivilegierten Benutzer und lehnen eine
+bereits gesetzte WAYLAND_DISPLAY ab. Der eigene Compositor wird danach beendet.
+Native macOS-Undo-Tests verwenden ausschließlich ein privates Pasteboard.
+Ein ungeschützter Aufruf von `tests/run-tests.sh` kann dagegen das echte Clipboard
+verwenden und restauriert nur dessen Klartext. Für normale macOS-Prüfungen daher
+immer `MD_CLIP_SKIP_CLIPBOARD=1` setzen.
 
-Zusätzliche Tests ohne Host-Clipboard:
+Die CI prüft Ubuntu 24.04/pandoc 3.1.3 sowie macOS 15 arm64 mit aktuellem
+System-pandoc und dem exakt gebündelten pandoc. App-Build und CI lesen denselben
+[Pin samt SHA-256](wrappers/pandoc-pin.sh); die Testbereitstellung baut keine App
+und führt kein Signing aus. Lokal lässt sich derselbe Konverter bereitstellen:
 
 ```bash
-MD_CLIP_SKIP_CLIPBOARD=1 ./tests/run-tests.sh
-./tests/test-plain-newlines.sh
-./tests/test-install-safety.sh
-./tests/test-dependencies.sh
-./tests/test-wrapper-safety.sh
-python3 tests/test-cli-inputs.py
-python3 tests/test-compare.py
-python3 tests/benchmark.py --runs 5
+bash tests/prepare-bundled-pandoc.sh /tmp/md-clip-pandoc
+PATH="/tmp/md-clip-pandoc:$PATH" MD_CLIP_SKIP_CLIPBOARD=1 bash tests/run-tests.sh
 ```
 
-`tests/test-plain-newlines.sh` prüft die Schluss-LFs und den Leertext-Fehlercode
-über macOS-, X11- und Wayland-Attrappen; die macOS-Matrix läuft auf macOS.
-`tests/test-compare.py` prüft die Vergleichsskripte in temporären Projektkopien,
-einschließlich manuellem AppleMD-Erfassen über ein isoliertes Terminal. Alle
-Clipboard-Werkzeuge sind dabei Attrappen. `tests/compare-file.sh` baut Loader und
-Lesehelfer selbst; der tatsächliche Vergleich benötigt macOS und verändert das
-Clipboard. Identische manuelle AppleMD-Ausgabe wird bytegenau gespeichert,
-belegt für sich allein aber keine Kurzbefehl-Ausführung.
-
-`tests/run-wayland.sh` startet als unprivilegierter Linux-Benutzer einen eigenen
-headless sway-Compositor (Pakete `sway`, `wl-clipboard`, `pandoc`). Es lehnt eine
-bereits gesetzte `WAYLAND_DISPLAY` ab und beendet den eigenen Compositor nach
-dem Test. Die CI prüft Ubuntu mit X11 und Wayland sowie macOS mit Fixtures und
-isolierten Clipboard-Attrappen.
+`tests/test-compare.py` nutzt Clipboard-Attrappen. Die tatsächlichen manuellen
+Vergleichsskripte benötigen dagegen macOS und verändern das Clipboard;
+identische gespeicherte AppleMD-Ausgabe belegt allein keine Kurzbefehl-Ausführung.
+Ein optionaler Laufzeitvergleich steht in `python3 tests/benchmark.py --runs 5`.
 
 ## Mitwirken
 

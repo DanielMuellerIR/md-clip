@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.8.0"
+VERSION="1.8.1"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -300,7 +300,7 @@ OPTIONS
   -f, --from FORMAT    Eingabe-Format erzwingen: auto|html|rtf|plain
                        (default: auto).
   -t, --to FORMAT      Pandoc-Ziel-Dialekt: gfm|markdown|commonmark
-                       (default: gfm).
+                       (default: gfm; commonmark mit Pipe-Tabellen).
   -q, --quiet          Keine Status-Ausgaben auf stderr.
   -n, --notify         Desktop-Notification bei Erfolg (für Wrapper-Aufrufe).
       --check-updates  Sichtbar nach App-Updates suchen (Sparkle-Dialog).

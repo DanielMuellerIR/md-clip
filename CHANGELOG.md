@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.1 — 2026-10-16
+
+- CI prüft das exakt gebündelte pandoc zusätzlich zum aktuellen System-pandoc;
+  Build und Tests teilen Version und Archivprüfsumme. Alle Varianten-, Bild-,
+  Tabellen- und Diagnoseverträge laufen in beiden macOS-Konfigurationen.
+- CLI-Testattrappen verwenden ausdrücklich den Interpreter des Testprozesses.
+  Quellenbeispiele sind dokumentiert und Classroom-Kennungen anonymisiert.
+  README beschreibt Wayland-CI, CommonMark-Tabellen und sichere Testaufrufe korrekt.
+
 ## 1.8.0 — 2026-10-16
 
 - Doctor ergänzt feste Diagnosekennungen, Ursachen und nächste Schritte für
