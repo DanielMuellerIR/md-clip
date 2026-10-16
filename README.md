@@ -143,6 +143,7 @@ Alle Optionen im Überblick:
 | `--doctor [--json]` | | Backend, Werkzeuge, Versionen und Fähigkeiten; keine Inhalte |
 | `--preview` | | Ergebnis vor `--replace` am Terminal bestätigen |
 | `--strict` | | Erkannte Strukturvereinfachungen und Rich-Text-Rückfall auf Klartext ablehnen |
+| `--tables MODUS` | | Komplexe Tabellen: `reject` ablehnen (Standard), `text` beschriftet als Text darstellen |
 | `--images MODUS` | | Bilder: `keep` erhalten (Standard), `alt` auf Alternativtext reduzieren, `omit` entfernen |
 | `--replace` | `-r` | Ergebnis schreiben und alle ursprünglichen Formate für Undo sichern |
 | `--undo` | | Letzte erfolgreiche Ersetzung einmalig zurücknehmen |
@@ -202,7 +203,7 @@ oder fehlgeschlagene Rich-Text-Quelle führt zum nächsten Versuch. Ein explizit
 `--from` bleibt strikt und fällt auf keine andere Quelle zurück.
 
 Verschachtelte Tabellen und verbundene Zellen werden strukturell im pandoc-
-Dokument erkannt und abgelehnt. Im Auto-Modus bleibt der Rückfall verfügbar;
+Dokument erkannt und im Standardmodus abgelehnt. Im Auto-Modus bleibt der Rückfall verfügbar;
 mit expliziter Quelle bleibt das Clipboard bei Fehlern unverändert. Der
 wörtliche Text `[TABLE]` ist erlaubt und löst keine Sonderbehandlung aus.
 Für `gfm` und `commonmark` werden Absätze, Listen, Zitate und Codeblöcke innerhalb
@@ -221,6 +222,24 @@ Ein erfolgreicher Wechsel zwischen HTML und RTF bleibt zulässig. Ursprüngliche
 oder ausdrücklich gewählter Klartext bleibt bytegenau verwendbar. Strict prüft
 die bekannten Fälle und ist keine allgemeine Verlustfreiheitsgarantie.
 Der genaue Vertrag steht in [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md).
+
+### Komplexe Tabellen als Text
+
+`--tables text` stellt Tabellen mit verbundenen Zellen oder verschachtelten
+Tabellen als beschrifteten Text in Zitaten dar. Jede geparste Zeile und Spalte
+bekommt eine Zuordnung; Spannweiten und Fortsetzungen werden ausdrücklich genannt.
+Zellinhalt erscheint einmalig, einschließlich Listen, Links und Codeblöcken.
+Verschachtelte Tabellen stehen im zugehörigen Zellinhalt; leere Zellen bleiben
+sichtbar. Einfache Tabellen behalten ihre normale Darstellung.
+
+Der Standard `--tables reject` behält die bisherige Ablehnung komplexer Tabellen.
+`--strict` verweigert eine tatsächlich nötige Textdarstellung vor der Ausgabe.
+Im Textmodus wird die frühere RTF-Layouttabellenreparatur übersprungen, damit die
+Matrix erhalten bleibt. Die Koordinaten beziehen sich auf pandocs geparste
+Struktur; HTML-Reparaturen des Readers lassen sich damit nicht rückgängig machen.
+Nicht positive oder widersprüchlich angegebene Spannweiten werden abgelehnt,
+insbesondere `rowspan="0"`. Details und ein Beispiel stehen in
+[docs/TABLES.md](docs/TABLES.md).
 
 ### Bildbehandlung
 
@@ -378,6 +397,7 @@ bash tests/test-wrapper-safety.sh
 python3 tests/test-html-normalization.py
 python3 tests/test-conversion-report.py
 python3 tests/test-images.py
+python3 tests/test-tables-text.py
 ```
 
 Voraussetzungen sind pandoc, perl und ein Clipboard-Werkzeug (macOS: `pbpaste`;

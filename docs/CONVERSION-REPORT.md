@@ -21,6 +21,8 @@ verhindern die Übernahme des betreffenden Konvertierungsergebnisses.
 |---|---|
 | `table-cells-flattened` | Zellen, deren Blockstruktur oder Umbrüche zu Inline-Inhalt vereinfacht wurden |
 | `layout-tables-flattened` | Entfernte RTF-Layouttabellen, einschließlich verschachtelter Tabellen darin |
+| `tables-text` | Als beschrifteten Text dargestellte Tabellen, einschließlich darin verschachtelter Tabellen |
+| `table-ambiguous` | Ablehnung nicht eindeutig zuordenbarer Zellpositionen oder Spannweiten |
 | `table-nested` | Strukturelle Ablehnung einer verschachtelten Tabelle |
 | `table-spanned` | Strukturelle Ablehnung verbundener Tabellenzellen |
 | `empty-document` | Dokument ohne sichtbaren darstellbaren Inhalt |
@@ -55,6 +57,12 @@ bleiben bytegenau zulässig und brauchen weiterhin weder pandoc noch Perl.
 verweigert diese nur, wenn tatsächlich Bilder verändert würden; Dokumente ohne
 Bilder bleiben zulässig. `keep` erhält bestehende Bildreferenzen auch im strengen
 Modus. Leere Ergebnisse nach einer Bildvereinfachung werden ebenfalls abgelehnt.
+`--tables text` setzt intern `MD_CLIP_TABLES=text`, der Standard ist `reject`.
+Die CLI überschreibt geerbte Werte. Die Textdarstellung komplexer Tabellen wird
+als `tables-text` gemeldet; Strict verweigert sie unabhängig vom Zielformat.
+Die RTF-Layoutreparatur wird im Textmodus übersprungen. Einfache Tabellen bleiben
+zulässig, sofern keine andere bekannte Vereinfachung erforderlich ist.
+Siehe [TABLES.md](TABLES.md) für den Darstellungsvertrag.
 Strict ist keine allgemeine Garantie verlustfreier Markdown-Darstellung.
 
 Abgelehnte Konvertierungen liefern Exit 3, geben keine Nutzdaten aus und schreiben

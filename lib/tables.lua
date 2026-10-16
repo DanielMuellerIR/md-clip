@@ -6,7 +6,11 @@ local image_mode = os.getenv('MD_CLIP_IMAGES') or 'keep'
 if image_mode ~= 'keep' and image_mode ~= 'alt' and image_mode ~= 'omit' then
   error('Unbekannte Bildbehandlung: keep|alt|omit erwartet.')
 end
-local images_alt, images_omitted = 0, 0
+local table_mode = os.getenv('MD_CLIP_TABLES') or 'reject'
+if table_mode ~= 'reject' and table_mode ~= 'text' then
+  error('Unbekannte Tabellenbehandlung: reject|text erwartet.')
+end
+local images_alt, images_omitted, tables_text = 0, 0, 0
 
 local function report(code, count)
   local path = os.getenv('MD_CLIP_RESULT_FILE')
@@ -60,6 +64,124 @@ function Link(link)
     link.content = { pandoc.Span { pandoc.Str(link.target) } }
   end
   return link
+end
+
+local function row_groups(tbl)
+  local groups = { { label = 'Tabellenkopf', rows = tbl.head.rows } }
+  for i, body in ipairs(tbl.bodies) do
+    local rows = pandoc.List()
+    rows:extend(body.head)
+    rows:extend(body.body)
+    groups[#groups + 1] = { label = 'Tabellenkörper ' .. i, rows = rows,
+                           head_count = #body.head, row_head_columns = body.row_head_columns }
+  end
+  groups[#groups + 1] = { label = 'Tabellenfuß', rows = tbl.foot.rows }
+  return groups
+end
+
+local function complex_table(tbl)
+  local nested = false
+  tbl:walk { Table = function() nested = true end }
+  if nested then return true end
+  for _, group in ipairs(row_groups(tbl)) do
+    for _, row in ipairs(group.rows) do
+      for _, cell in ipairs(row.cells) do
+        if cell.row_span ~= 1 or cell.col_span ~= 1 then return true end
+      end
+    end
+  end
+  return false
+end
+
+local function label(text)
+  return pandoc.Para { pandoc.Strong { pandoc.Str(text) } }
+end
+
+local function interval(first, last)
+  return first == last and tostring(first) or (first .. '–' .. last)
+end
+
+local render_table
+local function render_nested(blocks)
+  return pandoc.Pandoc(blocks):walk {
+    traverse = 'topdown',
+    Table = function(tbl) return render_table(tbl), false end
+  }.blocks
+end
+
+render_table = function(tbl)
+  tables_text = tables_text + 1
+  local number, columns = tables_text, #tbl.colspecs
+  if columns == 0 then reject('table-ambiguous', 'Tabelle hat keine zuordenbaren Spalten.') end
+  local out = pandoc.List { label('Tabelle ' .. number .. ' — Textdarstellung (' .. columns .. (columns == 1 and ' Spalte)' or ' Spalten)')) }
+  if #tbl.caption.long > 0 then
+    out:extend(render_nested(tbl.caption.long))
+  elseif tbl.caption.short and #tbl.caption.short > 0 then
+    out:insert(pandoc.Para(tbl.caption.short))
+  end
+  local offset = 0
+  for _, group in ipairs(row_groups(tbl)) do
+    -- Pandocs normalisierte Zellen belegen das erste freie Feld ihrer Zeile.
+    -- Ein Raster verhindert, dass Rowspan-Fortsetzungen als neue Zellen gelten.
+    local grid = {}
+    for r = 1, #group.rows do grid[r] = {} end
+    for r, row in ipairs(group.rows) do
+      local column = 1
+      for _, cell in ipairs(row.cells) do
+        while column <= columns and grid[r][column] do column = column + 1 end
+        local rs, cs = cell.row_span, cell.col_span
+        if rs < 1 or cs < 1 or rs % 1 ~= 0 or cs % 1 ~= 0
+          or r + rs - 1 > #group.rows or column + cs - 1 > columns then
+          reject('table-ambiguous', 'Tabellenspannweite ist nicht eindeutig zuordenbar.')
+        end
+        local origin = { row = r, column = column, cell = cell }
+        for rr = r, r + rs - 1 do
+          for cc = column, column + cs - 1 do
+            if grid[rr][cc] then
+              reject('table-ambiguous', 'Tabellenspannweiten überlappen sich.')
+            end
+            grid[rr][cc] = origin
+          end
+        end
+        column = column + cs
+      end
+    end
+    for r, _ in ipairs(group.rows) do
+      local kind = group.label
+      if group.head_count and r <= group.head_count then kind = kind .. ', Zwischenkopf' end
+      out:insert(label('Zeile ' .. (offset + r) .. ' (' .. kind .. ')'))
+      local column = 1
+      while column <= columns do
+        local origin = grid[r][column]
+        if not origin then
+          reject('table-ambiguous', 'Tabellenraster enthält eine nicht zugeordnete Position.')
+        end
+        local cell = origin.cell
+        local last = origin.column + cell.col_span - 1
+        local heading = (column == last and 'Spalte ' or 'Spalten ') .. interval(column, last)
+        if origin.row == r then
+          if cell.row_span > 1 then
+            heading = heading .. '; Zeilen ' .. interval(offset + r, offset + r + cell.row_span - 1)
+          end
+          if group.row_head_columns and column <= group.row_head_columns then
+            heading = heading .. ' (Zeilenkopf)'
+          end
+          out:insert(label(heading))
+          if #cell.contents == 0 then
+            out:insert(pandoc.Para { pandoc.Emph { pandoc.Str('(leere Zelle)') } })
+          else
+            out:extend(render_nested(cell.contents))
+          end
+        else
+          out:insert(label(heading .. ': Fortsetzung aus Zeile ' .. (offset + origin.row)
+            .. ', Spalte ' .. origin.column))
+        end
+        column = last + 1
+      end
+    end
+    offset = offset + #group.rows
+  end
+  return pandoc.BlockQuote(out)
 end
 
 function Table(tbl)
@@ -144,7 +266,8 @@ function Table(tbl)
   return tbl
 end
 
-function Pandoc(doc)
+local function finalize_document(doc)
+  if tables_text > 0 then report('tables-text', tables_text) end
   if images_alt > 0 then report('images-alt', images_alt) end
   if images_omitted > 0 then report('images-omitted', images_omitted) end
   if strict and (images_alt > 0 or images_omitted > 0) then
@@ -178,3 +301,23 @@ function Pandoc(doc)
   end
   return doc
 end
+
+-- Komplexe Außentabellen vor dem üblichen Bottom-up-Lauf umwandeln. Sonst
+-- verschwände die verschachtelte Tabelle, bevor ihr Container sie erkennen kann.
+return { { Pandoc = function(doc)
+  if table_mode == 'text' then
+    doc = doc:walk {
+      traverse = 'topdown',
+      Table = function(tbl)
+        if not complex_table(tbl) then return nil end
+        if strict then
+          report('tables-text', 1)
+          error('Strenger Modus: Komplexe Tabelle müsste als Text vereinfacht werden.')
+        end
+        return render_table(tbl), false
+      end
+    }
+  end
+  doc = doc:walk { Span = Span, Div = Div, Image = Image, Link = Link, Table = Table }
+  return finalize_document(doc)
+end } }

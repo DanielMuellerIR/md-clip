@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0 — 2026-10-16
+
+- `--tables text` stellt komplexe Tabellen als beschrifteten Text dar: geparste
+  Zeilen/Spalten, Spannweiten, Fortsetzungen, leere Zellen und Verschachtelung
+  bleiben nachvollziehbar. Zellinhalt mit Listen, Links und Code bleibt erhalten.
+- Der Standard lehnt komplexe Tabellen weiterhin ab. Textdarstellungen werden
+  gezählt und mit `--strict` verweigert; uneindeutige Zuordnungen werden vor der
+  Ausgabe abgelehnt. RTF-Layouttabellen bleiben im Textmodus zunächst strukturiert.
+
 ## 1.6.0 — 2026-10-16
 
 - `--images keep|alt|omit` erhält Bildreferenzen, reduziert Bilder auf ihren

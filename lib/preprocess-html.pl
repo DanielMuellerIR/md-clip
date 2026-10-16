@@ -3,8 +3,8 @@ use strict;
 use warnings;
 
 my $mode = shift // '';
-die "HTML-Vorverarbeitung: claude|classroom erwartet\n"
-    unless $mode eq 'claude' || $mode eq 'classroom';
+die "HTML-Vorverarbeitung: claude|classroom|tables erwartet\n"
+    unless $mode eq 'claude' || $mode eq 'classroom' || $mode eq 'tables';
 my $html = do { local $/; <STDIN> } // '';
 my $tag_body = qr/(?:[^"'<>]|"[^"]*"|'[^']*')*/;
 my $markup = qr/<!--.*?-->|<![^>]*>|<\/?[A-Za-z][A-Za-z0-9:_-]*$tag_body>/s;
@@ -49,6 +49,29 @@ while ($html =~ /$markup/g) {
     pos($html) = $cursor;
 }
 push @tokens, { raw => substr($html, $cursor) } if $cursor < length $html;
+
+if ($mode eq 'tables') {
+    for my $token (@tokens) {
+        next unless ($token->{name} // '') =~ /^(td|th)$/ && !$token->{close};
+        for my $name ('rowspan', 'colspan') {
+            next unless exists $token->{attrs}{$name};
+            my $value = $token->{attrs}{$name};
+            $value =~ s/&#(?:x([0-9a-f]+)|(\d+));/chr(defined($1) ? hex($1) : $2)/gie;
+            $value =~ s/^\s+|\s+$//g;
+            my $duplicates = grep { $_->[2] eq $name } @{$token->{ranges}};
+            if ($value !~ /^0*[1-9][0-9]*$/ || $duplicates != 1) {
+                if (my $path = $ENV{MD_CLIP_RESULT_FILE}) {
+                    open(my $status, '>>', $path) or die "Statusdatei: $!";
+                    print {$status} "table-ambiguous\t1\n";
+                    close($status) or die "Statusdatei: $!";
+                }
+                die "Tabellenspannweite muss eine eindeutige positive Ganzzahl sein.\n";
+            }
+        }
+    }
+    print $html;
+    exit;
+}
 
 if ($mode eq 'claude') {
     my $pre_depth = 0;

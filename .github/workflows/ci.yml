@@ -64,6 +64,7 @@ jobs:
           python3 tests/test-html-normalization.py
           python3 tests/test-conversion-report.py
           python3 tests/test-images.py
+          python3 tests/test-tables-text.py
           python3 tests/test-undo-linux.py
 
       - name: Undo mit isoliertem X11-Clipboard
@@ -137,4 +138,5 @@ jobs:
           python3 tests/test-html-normalization.py
           python3 tests/test-conversion-report.py
           python3 tests/test-images.py
+          python3 tests/test-tables-text.py
           python3 tests/test-undo-macos.py

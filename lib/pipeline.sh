@@ -35,6 +35,9 @@ rtf_fix_escaped_newlines() {
 }
 
 flatten_layout_tables() {
+  # Der optionale Tabellenmodus braucht die geparste ursprüngliche Matrix.
+  # Die historische RTF-Layoutreparatur würde sie vorher in Absätze auflösen.
+  if [ "${MD_CLIP_TABLES:-reject}" = text ]; then cat; return; fi
   perl -0pe '
     my $cursor = 0;
     my $flattened = 0;
@@ -268,9 +271,16 @@ require_nonempty_markdown() {
 #
 # Beide Eingabewege verwenden denselben Writer und dieselbe Nachbearbeitung.
 # Die Quellenreparaturen davor bleiben bewusst verschieden.
+check_table_spans() {
+  if [ "${MD_CLIP_TABLES:-reject}" = text ]; then
+    perl "$_MD_CLIP_LIB_DIR/preprocess-html.pl" tables
+  else cat; fi
+}
+
 html_to_markdown() {
   local target_format="${1:-gfm}"
-  run_pandoc "$target_format" \
+  check_table_spans \
+    | run_pandoc "$target_format" \
     | tidy_markdown "$target_format" \
     | require_nonempty_markdown
 }

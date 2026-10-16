@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.6.0"
+VERSION="1.7.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -175,6 +175,7 @@ INPUT_PATH=""
 PREVIEW=0
 STRICT=0
 IMAGES=keep
+TABLES=reject
 DOCTOR=0
 JSON=0
 REPLACE=0       # --replace: Ergebnis ins Clipboard schreiben statt stdout
@@ -285,6 +286,8 @@ OPTIONS
                        Rich Text auf Klartext ablehnen (Exit 3).
       --images MODUS   Bilder erhalten, durch Alternativtext ersetzen oder
                        entfernen: keep|alt|omit (default: keep).
+      --tables MODUS   Komplexe Tabellen ablehnen oder beschriftet als Text
+                       darstellen: reject|text (default: reject).
   -r, --replace        Markdown-Ergebnis zurück ins Clipboard schreiben
                        (statt nach stdout); alle Formate für Undo sichern.
       --undo           Letzte erfolgreiche Ersetzung einmalig zurücknehmen.
@@ -521,6 +524,13 @@ while [ "$#" -gt 0 ]; do
         keep|alt|omit) IMAGES="$1" ;;
         *) die 2 "Ungültiges --images: '${1:-}' (erlaubt: keep, alt, omit)" ;;
       esac ;;
+    --tables)
+      CONVERSION_OPTIONS=1
+      shift
+      case "${1:-}" in
+        reject|text) TABLES="$1" ;;
+        *) die 2 "Ungültiges --tables: '${1:-}' (erlaubt: reject, text)" ;;
+      esac ;;
     -r|--replace)   REPLACE=1 ;;
     -p|--plain)     PLAIN=1; CONVERSION_OPTIONS=1 ;;
     -f|--from)
@@ -652,7 +662,7 @@ doctor() {
   pandoc_supports_rtf && rtf=true
   pandoc_supports_table_filter && lua=true
   if [ "$JSON" -eq 1 ]; then
-    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"strict":true,"image_modes":["keep","alt","omit"],"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
+    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"strict":true,"image_modes":["keep","alt","omit"],"table_modes":["reject","text"],"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
   else
     printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
     printf 'stdin/Datei: ja; Vorschau: Terminal; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$undo" "$sandbox" "$rtf" "$lua"
@@ -743,6 +753,7 @@ is_mso_html() {
 
 export MD_CLIP_STRICT="$STRICT"
 export MD_CLIP_IMAGES="$IMAGES"
+export MD_CLIP_TABLES="$TABLES"
 [ "$JSON" -eq 0 ] || [ "$DOCTOR" -eq 1 ] || die 2 "--json benötigt --doctor."
 if [ "$UNDO" -eq 1 ]; then
   [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$DOCTOR" -eq 0 ] || die 2 "--undo ist nicht mit Konvertierung, Vorschau oder --doctor kombinierbar."
@@ -753,7 +764,7 @@ if [ "$UNDO" -eq 1 ]; then
   exit 0
 fi
 if [ "$DOCTOR" -eq 1 ]; then
-  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] && [ "$IMAGES" = keep ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen, --strict oder Bildvereinfachung kombinierbar."
+  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] && [ "$IMAGES" = keep ] && [ "$TABLES" = reject ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen, --strict oder Inhaltsvereinfachung kombinierbar."
   doctor
   exit 0
 fi
@@ -829,6 +840,7 @@ CONVERTED=0
 RESULT=""
 TABLE_CELLS_FLATTENED=0
 LAYOUT_TABLES_FLATTENED=0
+TABLES_TEXT=0
 IMAGES_ALT=0
 IMAGES_OMITTED=0
 SOURCE_REASON=""
@@ -840,6 +852,7 @@ read_conversion_report() {
   local record="" code count count_value
   TABLE_CELLS_FLATTENED=0
   LAYOUT_TABLES_FLATTENED=0
+  TABLES_TEXT=0
   IMAGES_ALT=0
   IMAGES_OMITTED=0
   SOURCE_REASON=""
@@ -857,9 +870,10 @@ read_conversion_report() {
     case "$code" in
       table-cells-flattened) TABLE_CELLS_FLATTENED=$((TABLE_CELLS_FLATTENED + count_value)) ;;
       layout-tables-flattened) LAYOUT_TABLES_FLATTENED=$((LAYOUT_TABLES_FLATTENED + count_value)) ;;
+      tables-text) TABLES_TEXT=$((TABLES_TEXT + count_value)) ;;
       images-alt) IMAGES_ALT=$((IMAGES_ALT + count_value)) ;;
       images-omitted) IMAGES_OMITTED=$((IMAGES_OMITTED + count_value)) ;;
-      table-nested|table-spanned|empty-document)
+      table-nested|table-spanned|table-ambiguous|empty-document)
         [ -n "$SOURCE_REASON" ] || SOURCE_REASON="$code" ;;
       *) err "Unbekannter Konvertierungsbericht: $code"; return 3 ;;
     esac
@@ -876,13 +890,14 @@ source_failure_reason() {
     printf 'Strenger Modus verbietet die Bildvereinfachung'
     return
   fi
-  if [ "$STRICT" -eq 1 ] && { [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; }; then
+  if [ "$STRICT" -eq 1 ] && { [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ] || [ "$TABLES_TEXT" -gt 0 ]; }; then
     printf 'Strenger Modus verbietet die nötige Strukturvereinfachung'
     return
   fi
   case "$SOURCE_REASON" in
     table-nested) printf 'verschachtelte Tabelle nicht darstellbar' ;;
     table-spanned) printf 'verbundene Tabellenzellen nicht darstellbar' ;;
+    table-ambiguous) printf 'Tabellenzellen nicht eindeutig zuordenbar' ;;
     empty-document)
       if [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ]; then
         printf 'Bildbehandlung lässt keinen sichtbaren Inhalt'
@@ -905,6 +920,11 @@ report_simplifications() {
     if [ "$LAYOUT_TABLES_FLATTENED" -eq 1 ]; then label=RTF-Layouttabelle; fi
     log "md-clip: Vereinfachung: $LAYOUT_TABLES_FLATTENED $label in Absätze umgewandelt."
   fi
+  if [ "$TABLES_TEXT" -gt 0 ]; then
+    label=Tabellen
+    if [ "$TABLES_TEXT" -eq 1 ]; then label=Tabelle; fi
+    log "md-clip: Vereinfachung: $TABLES_TEXT $label als beschrifteten Text dargestellt."
+  fi
   if [ "$IMAGES_ALT" -gt 0 ]; then
     label=Bilder
     if [ "$IMAGES_ALT" -eq 1 ]; then label=Bild; fi
@@ -919,7 +939,7 @@ report_simplifications() {
 
 has_simplification() {
   [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ] \
-    || [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ]
+    || [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ] || [ "$TABLES_TEXT" -gt 0 ]
 }
 
 convert_source() {

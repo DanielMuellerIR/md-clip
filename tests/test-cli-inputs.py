@@ -75,7 +75,8 @@ sys.stdout.buffer.write(f.read_bytes())
     for args in (['--stdin'],['--stdin','--input','x'],['--json'],['--preview'],['--plain','--from','html'],['--input','missing.html']):
         run(args,b'x',2)
     run(['--doctor','--strict'],rc=2)
-    for args in (['--images'], ['--images','invalid'], ['--doctor','--images','alt']):
+    for args in (['--images'], ['--images','invalid'], ['--doctor','--images','alt'],
+                 ['--tables'], ['--tables','invalid'], ['--doctor','--tables','text']):
         run(args,rc=2)
     f=base/'file with space.txt';f.write_bytes(b'file\n\n')
     assert run(['--input',str(f)]).stdout==f.read_bytes()
@@ -116,15 +117,22 @@ sys.stdout.buffer.write(f.read_bytes())
         else:
             assert b'2 Tabellenzellen' in p.stderr
             assert not run(args+['--strict'],complex_cells,3).stdout
+    rtf_table=br'{\rtf1\ansi\trowd\cellx1000\cellx2000\intbl RTFLEFT\cell RTFRIGHT\cell\row}'
+    for target in ('gfm','markdown','commonmark'):
+        p=run(['--stdin','--from','rtf','--tables','text','--to',target],rtf_table)
+        parsed=json.loads(subprocess.check_output([real_pandoc,'-f',target+('+pipe_tables' if target=='commonmark' else ''),'-t','json'],input=p.stdout))
+        assert parsed['blocks'][0]['t']=='Table',p.stdout
+        assert b'RTFLEFT' in p.stdout and b'RTFRIGHT' in p.stdout
     filter_file=runtime/'tables.lua'
     saved_filter=filter_file.read_bytes()
     for record in ('table-cells-flattened\tbogus\n', 'table-cells-flattened\t0\n',
                    'table-cells-flattened\t\t1\n', 'table-cells-flattened\t1\t\n',
                    'table-cells-flattened\t1', 'unknown\t1\n'):
-        filter_file.write_bytes(saved_filter + ('\nfunction Pandoc(doc)\n'
+        filter_file.write_bytes(('function Pandoc(doc)\n'
             'local f=assert(io.open(os.getenv("MD_CLIP_RESULT_FILE"),"a"))\n'
             'f:write('+json.dumps(record)+'); f:close(); return doc\nend\n').encode())
-        assert not run(['--stdin','--from','html'],b'<p>valid</p>',3).stdout
+        invalid=run(['--stdin','--from','html'],b'<p>valid</p>',3)
+        assert not invalid.stdout and b'Konvertierungsbericht' in invalid.stderr
     filter_file.write_bytes(saved_filter)
     for inner, expected in ((b'<blockquote><p>ONE</p><p>TWO</p></blockquote>', 'ONE TWO'),
                             (b'<ul><li>ONE</li><li>TWO</li></ul>', 'ONE TWO'),
@@ -145,14 +153,18 @@ sys.stdout.buffer.write(f.read_bytes())
             text=subprocess.check_output([real_pandoc,'-f','json','-t','plain'],input=json.dumps(doc).encode()).decode().strip()
             assert text==expected,(output,text)
     env['MD_CLIP_STRICT']='1'
+    env['MD_CLIP_TABLES']='text'
     env['MD_CLIP_IMAGES']='omit'
     assert b'![' in run(['--stdin','--from','html'],b'<img src="x" alt="Y">').stdout
+    run(['--stdin','--from','html'],NESTED,3)
     doctor=json.loads(run(['--doctor','--json']).stdout)
+    assert doctor['table_modes']==['reject','text']
     assert doctor['stdin'] and doctor['sandbox'] and doctor['undo'] and doctor['strict']
     assert doctor['image_modes']==['keep','alt','omit']
     assert doctor['table_filter'], 'Interne Umgebungswerte dürfen Doctor nicht verändern'
     env.pop('MD_CLIP_STRICT')
     env.pop('MD_CLIP_IMAGES')
+    env.pop('MD_CLIP_TABLES')
     assert not (base/'calls').exists(), 'Datei/stdin/Doctor berührten Clipboard'
     # Kein pandoc-Aufruf im Plain-Weg, auch bei vorhandenem defektem Binary.
     (runtime/'pandoc').unlink()
@@ -162,6 +174,7 @@ sys.stdout.buffer.write(f.read_bytes())
     assert run(['--stdin','--plain','--strict'],b'bytes\n').stdout==b'bytes\n'
     for mode in ('keep','alt','omit'):
         assert run(['--stdin','--plain','--images',mode],b'![image](x)\x00\n').stdout==b'![image](x)\x00\n'
+    assert run(['--stdin','--plain','--tables','text'],b'|x|\x00\n').stdout==b'|x|\x00\n'
     assert not (base/'pandoc-called').exists()
     broken=json.loads(run(['--doctor','--json']).stdout)
     assert not broken['sandbox'] and not broken['table_filter']
@@ -173,7 +186,7 @@ sys.stdout.buffer.write(f.read_bytes())
         env.update(MOCK_PLATFORM=platform, WAYLAND_DISPLAY=wayland)
         for args in (['--undo','--replace'], ['--undo','--plain'],
                      ['--undo','--stdin'], ['--undo','--from','auto'],
-                     ['--undo','--doctor'], ['--undo','--preview'], ['--undo','--strict'], ['--undo','--images','keep']):
+                     ['--undo','--doctor'], ['--undo','--preview'], ['--undo','--strict'], ['--undo','--images','keep'], ['--undo','--tables','reject']):
             run(args,rc=2)
         undo_calls()
         run(['--undo'],rc=1)
@@ -263,6 +276,19 @@ sys.stdout.buffer.write(f.read_bytes())
                 assert b'Bildvereinfachung' in p.stderr and not p.stdout
                 assert (base/'written').read_bytes()==b'protected'
                 assert undo_calls()==['prepare','cancel']
+        (base/'html').write_bytes(NESTED)
+        for target in ('gfm','markdown','commonmark'):
+            undo_calls()
+            (base/'written').unlink(missing_ok=True)
+            p=run(['--from','html','--replace','--tables','text','--to',target])
+            assert b'2 Tabellen' in p.stderr
+            assert b'VALUE' in (base/'written').read_bytes()
+            assert undo_calls()==['prepare','replace']
+            (base/'written').unlink()
+            p=run(['--from','html','--replace','--tables','text','--strict','--to',target],rc=3)
+            assert not p.stdout and not (base/'written').exists()
+            assert undo_calls()==['prepare','cancel']
+            assert b'Strenger Modus' in p.stderr
         for mode in ('alt','omit'):
             (base/'html').write_bytes(b'<img src="x">')
             (base/'written').write_bytes(b'protected')
