@@ -71,8 +71,10 @@ sys.stdout.buffer.write(f.read_bytes())
     env['NO_CLIP']='1'
     for raw in (b'abc',b'abc\n\n',b'\x00\xff\r\n',b'\n\n'):
         assert run(['--stdin','--plain'],raw).stdout==raw
+        assert run(['--stdin','--plain','--strict'],raw).stdout==raw
     for args in (['--stdin'],['--stdin','--input','x'],['--json'],['--preview'],['--plain','--from','html'],['--input','missing.html']):
         run(args,b'x',2)
+    run(['--doctor','--strict'],rc=2)
     f=base/'file with space.txt';f.write_bytes(b'file\n\n')
     assert run(['--input',str(f)]).stdout==f.read_bytes()
     run(['--stdin','--plain'],b'',1)
@@ -100,6 +102,28 @@ sys.stdout.buffer.write(f.read_bytes())
         p=run(['--stdin','--from','html','--to',target],b'<p title="<table>">literal</p><!-- <table><table> -->')
         assert b'literal' in p.stdout
         run(['--stdin','--from','html','--to',target],b'<table><tr><th>A</th><th>B</th></tr><tr><td colspan="2">VALUE</td></tr></table>',3)
+    complex_cells=b'<table><tr><th>A</th><th>B</th></tr><tr><td>one<br>two</td><td><p>three</p><p>four</p></td></tr></table>'
+    simple_table=b'<table><tr><th>A</th></tr><tr><td>value</td></tr></table>'
+    for target in ('gfm','markdown','commonmark'):
+        args=['--stdin','--from','html','--to',target]
+        assert run(args+['--strict'],simple_table).stdout
+        p=run(args,complex_cells)
+        if target=='markdown':
+            assert b'Vereinfachung' not in p.stderr
+            assert run(args+['--strict'],complex_cells).stdout==p.stdout
+        else:
+            assert b'2 Tabellenzellen' in p.stderr
+            assert not run(args+['--strict'],complex_cells,3).stdout
+    filter_file=runtime/'tables.lua'
+    saved_filter=filter_file.read_bytes()
+    for record in ('table-cells-flattened\tbogus\n', 'table-cells-flattened\t0\n',
+                   'table-cells-flattened\t\t1\n', 'table-cells-flattened\t1\t\n',
+                   'table-cells-flattened\t1', 'unknown\t1\n'):
+        filter_file.write_bytes(saved_filter + ('\nfunction Pandoc(doc)\n'
+            'local f=assert(io.open(os.getenv("MD_CLIP_RESULT_FILE"),"a"))\n'
+            'f:write('+json.dumps(record)+'); f:close(); return doc\nend\n').encode())
+        assert not run(['--stdin','--from','html'],b'<p>valid</p>',3).stdout
+    filter_file.write_bytes(saved_filter)
     for inner, expected in ((b'<blockquote><p>ONE</p><p>TWO</p></blockquote>', 'ONE TWO'),
                             (b'<ul><li>ONE</li><li>TWO</li></ul>', 'ONE TWO'),
                             (b'<dl><dt>TERM</dt><dd>DEF</dd></dl>', 'TERM DEF'),
@@ -118,14 +142,18 @@ sys.stdout.buffer.write(f.read_bytes())
             doc=dict(parsed,blocks=cell)
             text=subprocess.check_output([real_pandoc,'-f','json','-t','plain'],input=json.dumps(doc).encode()).decode().strip()
             assert text==expected,(output,text)
+    env['MD_CLIP_STRICT']='1'
     doctor=json.loads(run(['--doctor','--json']).stdout)
-    assert doctor['stdin'] and doctor['sandbox'] and doctor['undo']
+    assert doctor['stdin'] and doctor['sandbox'] and doctor['undo'] and doctor['strict']
+    assert doctor['table_filter'], 'Interne Umgebungswerte dürfen Doctor nicht verändern'
+    env.pop('MD_CLIP_STRICT')
     assert not (base/'calls').exists(), 'Datei/stdin/Doctor berührten Clipboard'
     # Kein pandoc-Aufruf im Plain-Weg, auch bei vorhandenem defektem Binary.
     (runtime/'pandoc').unlink()
     (runtime/'pandoc').write_text('#!/bin/sh\necho touched > "$MOCK_ROOT/pandoc-called"\nexit 88\n')
     (runtime/'pandoc').chmod(0o755)
     assert run(['--stdin','--plain'],b'bytes\n').stdout==b'bytes\n'
+    assert run(['--stdin','--plain','--strict'],b'bytes\n').stdout==b'bytes\n'
     assert not (base/'pandoc-called').exists()
     broken=json.loads(run(['--doctor','--json']).stdout)
     assert not broken['sandbox'] and not broken['table_filter']
@@ -137,7 +165,7 @@ sys.stdout.buffer.write(f.read_bytes())
         env.update(MOCK_PLATFORM=platform, WAYLAND_DISPLAY=wayland)
         for args in (['--undo','--replace'], ['--undo','--plain'],
                      ['--undo','--stdin'], ['--undo','--from','auto'],
-                     ['--undo','--doctor'], ['--undo','--preview']):
+                     ['--undo','--doctor'], ['--undo','--preview'], ['--undo','--strict']):
             run(args,rc=2)
         undo_calls()
         run(['--undo'],rc=1)
@@ -161,11 +189,19 @@ sys.stdout.buffer.write(f.read_bytes())
             (base/'rtf').write_bytes(b'{\\rtf1\\ansi RTF rescue}')
             p=run(['--replace','--to',target]);assert (base/'written').read_bytes()==b'RTF rescue'
             assert undo_calls()==['prepare','replace']
+            assert b'verschachtelte Tabelle' in p.stderr and b'RTF verwendet' in p.stderr
+            p=run(['--replace','--strict','--to',target])
+            assert (base/'written').read_bytes()==b'RTF rescue'
+            assert undo_calls()==['prepare','replace']
             (base/'rtf').unlink()
             p=run(['--replace','--to',target]);assert (base/'written').read_bytes()==b'plain\n\n'
             assert undo_calls()==['prepare','replace']
             assert b'Klartext' in p.stderr and not p.stdout
             (base/'written').write_bytes(b'protected')
+            p=run(['--replace','--strict','--to',target],rc=3)
+            assert b'Strenger Modus' in p.stderr and not p.stdout
+            assert (base/'written').read_bytes()==b'protected'
+            assert undo_calls()==['prepare','cancel']
             run(['--replace','--from','html','--to',target],rc=3)
             assert (base/'written').read_bytes()==b'protected'
             assert undo_calls()==['prepare','cancel']
@@ -182,11 +218,31 @@ sys.stdout.buffer.write(f.read_bytes())
         assert b'HTML rescue' in run().stdout
         (base/'html').write_bytes(b'<table><tr><th>A</th></tr><tr><td>one<br>two</td></tr></table>')
         assert b'Struktur vereinfacht' in run().stderr
+        assert b'1 Tabellenzelle' in run().stderr
         assert not run(['--quiet','--verbose']).stderr
+        for flags in (['--strict'], ['--strict','--quiet'], ['--strict','--preview']):
+            (base/'written').write_bytes(b'protected')
+            undo_calls()
+            p=run(['--replace',*flags],rc=3)
+            assert b'Strenger Modus' in p.stderr and not p.stdout
+            assert (base/'written').read_bytes()==b'protected'
+            assert undo_calls()==['prepare','cancel']
+        (base/'html').unlink()
+        (base/'rtf').unlink(missing_ok=True)
+        undo_calls()
+        p=run(['--strict','--replace'])
+        assert (base/'written').read_bytes()==b'plain\n\n'
+        assert b'R\xc3\xbcckfall' not in p.stderr and b'Vereinfachung' not in p.stderr
+        assert undo_calls()==['prepare','replace']
+        (base/'html').write_bytes(NESTED)
+        undo_calls()
+        run(['--strict','--plain','--replace'])
+        assert (base/'written').read_bytes()==b'plain\n\n'
+        assert undo_calls()==['prepare','replace']
         (base/'written').write_bytes(b'protected')
         run(['--preview','--replace'],rc=2)
         assert (base/'written').read_bytes()==b'protected'
-        print('OK:',platform,wayland or 'default','Tabellen/Fallback/Schreibschutz')
+        print('OK:',platform,wayland or 'default','Tabellen/Fallback/Strict/Schreibschutz')
     # Echte Terminalabfrage, aber ausschließlich auf den Clipboard-Attrappen.
     for answer, expected_rc in ((b'nein\n',4),(b'ja\n',0),(b'\x04',4)):
         undo_calls()

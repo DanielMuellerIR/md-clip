@@ -142,6 +142,7 @@ Alle Optionen im Überblick:
 | `--input DATEI` | | Datei lesen, ohne Clipboard-Zugriff |
 | `--doctor [--json]` | | Backend, Werkzeuge, Versionen und Fähigkeiten; keine Inhalte |
 | `--preview` | | Ergebnis vor `--replace` am Terminal bestätigen |
+| `--strict` | | Erkannte Strukturvereinfachungen und Rich-Text-Rückfall auf Klartext ablehnen |
 | `--replace` | `-r` | Ergebnis schreiben und alle ursprünglichen Formate für Undo sichern |
 | `--undo` | | Letzte erfolgreiche Ersetzung einmalig zurücknehmen |
 | `--plain` | `-p` | Keine Konvertierung, nur Klartext durchreichen |
@@ -207,6 +208,18 @@ Für `gfm` und `commonmark` werden Absätze, Listen, Zitate und Codeblöcke inne
 einer Tabellenzelle durch Leerzeichen getrennt zusammengeführt. Links und
 Inline-Auszeichnung bleiben erhalten. Das Ziel `markdown` behält Zellblöcke als
 Gittertabelle. Die bisherige RTF-Behandlung vereinfacht Layouttabellen weiterhin.
+
+Bekannte Vereinfachungen werden mit Grund und Anzahl auf stderr gemeldet, etwa
+„2 Tabellenzellen; Blockgrenzen und Umbrüche zusammengeführt“. Auto nennt auch
+übersprungene Quellen und die anschließend verwendete Quelle.
+
+Mit `--strict` werden diese Tabellenvereinfachungen und ein Rückfall von einem
+gescheiterten vorhandenen Rich-Text-Angebot auf Klartext abgelehnt. Der Befehl
+liefert dann Exit 3, gibt keine Nutzdaten aus und ersetzt das Clipboard nicht.
+Ein erfolgreicher Wechsel zwischen HTML und RTF bleibt zulässig. Ursprünglicher
+oder ausdrücklich gewählter Klartext bleibt bytegenau verwendbar. Strict prüft
+die bekannten Fälle und ist keine allgemeine Verlustfreiheitsgarantie.
+Der genaue Vertrag steht in [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md).
 
 ### Ersetzen und Vorschau
 
@@ -343,6 +356,7 @@ bash tests/test-install-safety.sh
 bash tests/test-dependencies.sh
 bash tests/test-wrapper-safety.sh
 python3 tests/test-html-normalization.py
+python3 tests/test-conversion-report.py
 ```
 
 Voraussetzungen sind pandoc, perl und ein Clipboard-Werkzeug (macOS: `pbpaste`;

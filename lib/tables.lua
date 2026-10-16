@@ -1,6 +1,21 @@
 -- Inhalt und Tabellen vor dem Markdown-Writer prüfen. HTML-Regulärausdrücke können weder
 -- verschachtelte Zellen noch Kommentare/Attribute zuverlässig unterscheiden.
-local simplified = false
+local flattened_cells = 0
+local strict = os.getenv('MD_CLIP_STRICT') == '1'
+
+local function report(code, count)
+  local path = os.getenv('MD_CLIP_RESULT_FILE')
+  if path and path ~= '' then
+    local file = assert(io.open(path, 'a'))
+    file:write(code, '\t', tostring(count), '\n')
+    file:close()
+  end
+end
+
+local function reject(code, message)
+  report(code, 1)
+  error(message)
+end
 
 function Span(span)
   local has_break = false
@@ -35,11 +50,11 @@ function Table(tbl)
   local nested = false
   tbl:walk { Table = function() nested = true end }
   if nested then
-    error('Verschachtelte Tabellen sind nicht verlustfrei darstellbar.')
+    reject('table-nested', 'Verschachtelte Tabellen sind nicht verlustfrei darstellbar.')
   end
   local function cell(c)
     if c.row_span > 1 or c.col_span > 1 then
-      error('Verbundene Tabellenzellen sind nicht verlustfrei darstellbar.')
+      reject('table-spanned', 'Verbundene Tabellenzellen sind nicht verlustfrei darstellbar.')
     end
     if FORMAT:match('^markdown') then return c end
     local complex = #c.contents > 1
@@ -86,7 +101,7 @@ function Table(tbl)
       end
     }
     c.contents = { plain }
-    if complex then simplified = true end
+    if complex then flattened_cells = flattened_cells + 1 end
     return c
   end
   local function rows(rs)
@@ -132,14 +147,12 @@ function Pandoc(doc)
     print $text =~ /[^\s\p{White_Space}\p{Default_Ignorable_Code_Point}]/ ? 'yes' : 'no';
   ]] }, table.concat(content, '\n'))
   if verdict ~= 'yes' then
-    error('Dokument enthält keinen sichtbaren Inhalt.')
+    reject('empty-document', 'Dokument enthält keinen sichtbaren Inhalt.')
   end
-  if simplified then
-    local path = os.getenv('MD_CLIP_RESULT_FILE')
-    if path and path ~= '' then
-      local file = assert(io.open(path, 'w'))
-      file:write('simplified\n')
-      file:close()
+  if flattened_cells > 0 then
+    report('table-cells-flattened', flattened_cells)
+    if strict then
+      error('Strenger Modus: Tabellenzellen müssten strukturell vereinfacht werden.')
     end
   end
   return doc

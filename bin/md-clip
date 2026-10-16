@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.4.7"
+VERSION="1.5.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -173,6 +173,7 @@ fi
 INPUT_MODE=clipboard
 INPUT_PATH=""
 PREVIEW=0
+STRICT=0
 DOCTOR=0
 JSON=0
 REPLACE=0       # --replace: Ergebnis ins Clipboard schreiben statt stdout
@@ -279,6 +280,8 @@ OPTIONS
       --json           JSON-Ausgabe für --doctor.
       --preview        Vor --replace Ergebnis auf stderr zeigen und am Terminal
                        bestätigen; Abbruch liefert Exit 4.
+      --strict         Bekannte Strukturvereinfachungen und den Rückfall von
+                       Rich Text auf Klartext ablehnen (Exit 3).
   -r, --replace        Markdown-Ergebnis zurück ins Clipboard schreiben
                        (statt nach stdout); alle Formate für Undo sichern.
       --undo           Letzte erfolgreiche Ersetzung einmalig zurücknehmen.
@@ -507,6 +510,7 @@ while [ "$#" -gt 0 ]; do
     --doctor) DOCTOR=1 ;;
     --json) JSON=1 ;;
     --preview) PREVIEW=1 ;;
+    --strict) STRICT=1; CONVERSION_OPTIONS=1 ;;
     -r|--replace)   REPLACE=1 ;;
     -p|--plain)     PLAIN=1; CONVERSION_OPTIONS=1 ;;
     -f|--from)
@@ -638,7 +642,7 @@ doctor() {
   pandoc_supports_rtf && rtf=true
   pandoc_supports_table_filter && lua=true
   if [ "$JSON" -eq 1 ]; then
-    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
+    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"strict":true,"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
   else
     printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
     printf 'stdin/Datei: ja; Vorschau: Terminal; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$undo" "$sandbox" "$rtf" "$lua"
@@ -727,6 +731,7 @@ is_mso_html() {
 
 # ---------- Quellenwahl und Eingabevertrag ----------
 
+export MD_CLIP_STRICT="$STRICT"
 [ "$JSON" -eq 0 ] || [ "$DOCTOR" -eq 1 ] || die 2 "--json benötigt --doctor."
 if [ "$UNDO" -eq 1 ]; then
   [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$DOCTOR" -eq 0 ] || die 2 "--undo ist nicht mit Konvertierung, Vorschau oder --doctor kombinierbar."
@@ -737,7 +742,7 @@ if [ "$UNDO" -eq 1 ]; then
   exit 0
 fi
 if [ "$DOCTOR" -eq 1 ]; then
-  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] || die 2 "--doctor ist nicht mit Eingabe oder Ersetzen kombinierbar."
+  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen oder --strict kombinierbar."
   doctor
   exit 0
 fi
@@ -811,9 +816,77 @@ fi
 # ---------- Konvertierung und Ergebnisbewertung ----------
 CONVERTED=0
 RESULT=""
+TABLE_CELLS_FLATTENED=0
+LAYOUT_TABLES_FLATTENED=0
+SOURCE_REASON=""
+
+# Der Bericht enthält nur feste Kennungen und Anzahlen, niemals Nutztext.
+# Neue Kennungen werden ausdrücklich aufgenommen, statt fremde Daten als
+# Shell-Ausdruck oder als erfolgreich bewertete Konvertierung zu behandeln.
+read_conversion_report() {
+  local record="" code count count_value
+  TABLE_CELLS_FLATTENED=0
+  LAYOUT_TABLES_FLATTENED=0
+  SOURCE_REASON=""
+  while IFS= read -r record; do
+    case "$record" in
+      *$'\t'*) code=${record%%$'\t'*}; count=${record#*$'\t'} ;;
+      *) err "Ungültiger Konvertierungsbericht."; return 3 ;;
+    esac
+    case "$count" in
+      ""|*[!0-9]*) err "Ungültiger Konvertierungsbericht."; return 3 ;;
+    esac
+    [ "${#count}" -le 9 ] || { err "Ungültiger Konvertierungsbericht."; return 3; }
+    count_value=$((10#$count))
+    [ "$count_value" -gt 0 ] || { err "Ungültiger Konvertierungsbericht."; return 3; }
+    case "$code" in
+      table-cells-flattened) TABLE_CELLS_FLATTENED=$((TABLE_CELLS_FLATTENED + count_value)) ;;
+      layout-tables-flattened) LAYOUT_TABLES_FLATTENED=$((LAYOUT_TABLES_FLATTENED + count_value)) ;;
+      table-nested|table-spanned|empty-document)
+        [ -n "$SOURCE_REASON" ] || SOURCE_REASON="$code" ;;
+      *) err "Unbekannter Konvertierungsbericht: $code"; return 3 ;;
+    esac
+  done < "$MD_CLIP_RESULT_FILE"
+  [ -z "$record" ] || { err "Unvollständiger Konvertierungsbericht."; return 3; }
+}
+
+source_label() {
+  case "$1" in html) printf 'HTML' ;; rtf) printf 'RTF' ;; plain) printf 'Klartext' ;; esac
+}
+
+source_failure_reason() {
+  if [ "$STRICT" -eq 1 ] && { [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; }; then
+    printf 'Strenger Modus verbietet die nötige Strukturvereinfachung'
+    return
+  fi
+  case "$SOURCE_REASON" in
+    table-nested) printf 'verschachtelte Tabelle nicht darstellbar' ;;
+    table-spanned) printf 'verbundene Tabellenzellen nicht darstellbar' ;;
+    empty-document) printf 'kein sichtbarer Rich-Text-Inhalt' ;;
+    *)
+      if [ "$1" -eq 2 ]; then printf 'benötigtes Werkzeug oder Fähigkeit fehlt'
+      else printf 'Konvertierung fehlgeschlagen'; fi ;;
+  esac
+}
+
+report_simplifications() {
+  local label
+  if [ "$TABLE_CELLS_FLATTENED" -gt 0 ]; then
+    label=Tabellenzellen
+    if [ "$TABLE_CELLS_FLATTENED" -eq 1 ]; then label=Tabellenzelle; fi
+    log "md-clip: Vereinfachung: $TABLE_CELLS_FLATTENED $label; Blockgrenzen und Umbrüche zusammengeführt."
+  fi
+  if [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; then
+    label=RTF-Layouttabellen
+    if [ "$LAYOUT_TABLES_FLATTENED" -eq 1 ]; then label=RTF-Layouttabelle; fi
+    log "md-clip: Vereinfachung: $LAYOUT_TABLES_FLATTENED $label in Absätze umgewandelt."
+  fi
+}
+
 convert_source() {
   local kind="$1" status
   : > "$MD_CLIP_RESULT_FILE"
+  read_conversion_report || return 3
   if [ "$kind" = plain ]; then
     cat "$WORK_DIR/plain" > "$OUTPUT_FILE" || return 3
     RESULT="Klartext übernommen"
@@ -823,30 +896,46 @@ convert_source() {
   if "convert_$kind" "$TO" < "$WORK_DIR/$kind" > "$OUTPUT_FILE"; then
     [ -s "$OUTPUT_FILE" ] || return 3
   else
+    read_conversion_report || return 3
     return 3
   fi
+  read_conversion_report || return 3
   CONVERTED=1
   RESULT="Markdown erzeugt"
-  if [ -s "$MD_CLIP_RESULT_FILE" ]; then RESULT="Struktur vereinfacht; Markdown erzeugt"; fi
+  if [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; then
+    RESULT="Struktur vereinfacht; Markdown erzeugt"
+  fi
 }
 
 HAD_SOURCE=0
+FAILED_RICH=0
 for source_kind in $ORDER; do
   if [ ! -s "$WORK_DIR/$source_kind" ]; then
     [ "$FROM" = auto ] && continue
     die 1 "Quelle $source_kind ist leer."
   fi
   HAD_SOURCE=1
+  if [ "$source_kind" = plain ] && [ "$STRICT" -eq 1 ] && [ "$FAILED_RICH" -eq 1 ]; then
+    die 3 "Strenger Modus: Rich Text konnte nicht übernommen werden; Rückfall auf Klartext abgelehnt."
+  fi
   if convert_source "$source_kind" 2> "$WORK_DIR/diagnostic"; then
     if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
     vlog "Quelle: $source_kind"
+    if [ "$FAILED_RICH" -eq 1 ]; then log "md-clip: Rückfall: $(source_label "$source_kind") verwendet."; fi
+    report_simplifications
     break
   else
     status=$?
     if [ "$FROM" != auto ]; then
+      if [ -n "$SOURCE_REASON" ] || [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; then
+        if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
+        die "$status" "Konvertierung von $(source_label "$source_kind") abgelehnt: $(source_failure_reason "$status")."
+      fi
       cat "$WORK_DIR/diagnostic" >&2
       die "$status" "Konvertierung von $source_kind fehlgeschlagen."
     fi
+    FAILED_RICH=1
+    log "md-clip: $(source_label "$source_kind") übersprungen: $(source_failure_reason "$status")."
     vlog "Quelle $source_kind nicht konvertierbar (Exit $status); nächste Quelle"
     if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
   fi

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0 — 2026-10-16
+
+- `--strict` lehnt erkannte Tabellenvereinfachungen und den Auto-Rückfall von
+  Rich Text auf Klartext vor Ausgabe oder Clipboard-Ersetzung ab. Ein erfolgreicher
+  Wechsel zwischen HTML und RTF sowie ursprünglicher/gewählter Klartext bleiben
+  zulässig. Vorbereitete Undo-Sicherungen werden bei Abbruch storniert.
+- Statusmeldungen nennen Anzahlen vereinfachter Tabellenzellen und RTF-
+  Layouttabellen sowie Gründe übersprungener Quellen und den verwendeten Rückfall.
+- Ein interner Bericht mit festen Kennungen trennt die Ergebnisbewertung von
+  Nutzdaten und Diagnose. Ungültige Berichte werden vor der Ausgabe abgelehnt.
+
 ## 1.4.7 — 2026-10-16
 
 - HTML-Attribute mit Anführungszeichen, Zeilenumbrüchen oder `>` verändern den

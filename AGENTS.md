@@ -172,6 +172,7 @@
 - [todo.md](todo.md) — offene Punkte, die eine Person von Hand erledigen muss.
 - [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) — Projektdokumentation.
 - [docs/ENCODING.md](docs/ENCODING.md) — Projektdokumentation.
+- [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md) — Ergebnisbewertung und strenger Modus.
 - [docs/SPARKLE-RELEASE.md](docs/SPARKLE-RELEASE.md) — Sparkle-Updates bauen, signieren und veröffentlichen.
 - [docs/archive/BLUEPRINT.md](docs/archive/BLUEPRINT.md) — Projektdokumentation.
 - `assets/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.

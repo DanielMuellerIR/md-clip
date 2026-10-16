@@ -37,6 +37,7 @@ rtf_fix_escaped_newlines() {
 flatten_layout_tables() {
   perl -0pe '
     my $cursor = 0;
+    my $flattened = 0;
 
     while (1) {
       pos($_) = $cursor;
@@ -80,6 +81,16 @@ flatten_layout_tables() {
       # einspaltige Tabellen ohne Kopfzelle. Echte Datenmatrizen bleiben für
       # pandoc als Tabelle erhalten, damit Zeilen und Spalten nicht zerfallen.
       if ($nested || (!$has_heading && !$has_multi_cell_row)) {
+        my $table_count = () = $table =~ /<table\b[^>]*>/gi;
+        $flattened += $table_count;
+        if (($ENV{MD_CLIP_STRICT} // q{}) eq q{1}) {
+          if (my $path = $ENV{MD_CLIP_RESULT_FILE}) {
+            open(my $status, q{>>}, $path) or die "Statusdatei: $!";
+            print {$status} "layout-tables-flattened\t$flattened\n";
+            close($status) or die "Statusdatei: $!";
+          }
+          die "Strenger Modus: RTF-Layouttabelle müsste vereinfacht werden.\n";
+        }
         my $replacement = $table;
         $replacement =~ s{<colgroup\b[^>]*>.*?</colgroup>}{}gis;
         $replacement =~ s{</?colgroup\b[^>]*>}{}gi;
@@ -89,16 +100,16 @@ flatten_layout_tables() {
         $replacement =~ s{</?tr\b[^>]*>}{}gi;
         $replacement =~ s{<t[dh]\b[^>]*>}{<p>}gi;
         $replacement =~ s{</t[dh]>}{</p>}gi;
-        if (my $path = $ENV{MD_CLIP_RESULT_FILE}) {
-          open(my $status, q{>}, $path) or die "Statusdatei: $!";
-          print {$status} "simplified\n";
-          close($status) or die "Statusdatei: $!";
-        }
         substr($_, $start, $end - $start, $replacement);
         $cursor = $start + length($replacement);
       } else {
         $cursor = $end;
       }
+    }
+    if ($flattened && (my $path = $ENV{MD_CLIP_RESULT_FILE})) {
+      open(my $status, q{>>}, $path) or die "Statusdatei: $!";
+      print {$status} "layout-tables-flattened\t$flattened\n";
+      close($status) or die "Statusdatei: $!";
     }
   '
 }
