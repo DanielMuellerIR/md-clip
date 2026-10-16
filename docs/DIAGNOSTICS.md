@@ -13,7 +13,9 @@ Tabellenkonvertierung durch und prüft Sitzungsmetadaten. Unter X11 wird eine
 Verbindung mit XFixes geprüft; unter Wayland werden Registry und Seat-Angebot
 abgefragt, ohne ein Data-Control-Gerät für Clipboard-Angebote zu binden.
 Unter macOS werden Konsolensitzung und Benutzer anhand von CoreGraphics-Metadaten
-geprüft, ohne auf NSPasteboard zuzugreifen.
+geprüft. Ist die native Vorschau vorhanden, prüft Doctor zusätzlich ihr
+Statusprotokoll. Ein bereits laufender Undo-Dienst verwendet dafür den
+NSPasteboard-Änderungszähler; er fordert keine Formate oder Nutzdaten an.
 
 `undo` meldet die Bereitschaft des Helfers. Es sagt nichts über eine vorhandene,
 noch gültige Undo-Sicherung aus. Doctor prüft keine versprochenen Nutzdaten,

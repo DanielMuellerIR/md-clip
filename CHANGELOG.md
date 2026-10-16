@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.1 — 2026-10-16
+
+- X11 liest bereits in Xlib gepufferte Formatantworten vor dem Warten auf die
+  Socket-Verbindung. Dadurch wird eine vollständige Sicherung nicht durch ein
+  fälschliches Zeitlimit verworfen. Die bestehenden Lese-/Gesamtfristen bleiben
+  erhalten; ein nativer Regressionstest prüft den vollständigen Formatinhalt.
+- Die Classroom-Bereinigung erkennt Vorschaubilder am tatsächlichen Host und
+  Pfad. Ähnliche URL-Teilstrings entfernen keine normalen Bilder mehr; deren
+  Bildpolitik und Strict-Prüfung bleiben wirksam. Die Linkbereinigung entfernt
+  wiederholte `authuser`-Query-Parameter vollständig und erhält Fragmentkennungen.
+
 ## 1.10.0 — 2026-10-16
 
 - Native macOS-Vorschau über App-Aktion `--preview` oder CLI

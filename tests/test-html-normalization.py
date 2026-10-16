@@ -76,6 +76,20 @@ for attrs in ('class="mvRF3b" title="a > b"', "title='a > b' class='other mvRF3b
     cases.append(("classroom-" + attrs,
                   '<a title="a > b" href="https://example.test/doc?authuser=0&amp;x=1#part"><img src="https://classroom.google.com/webthumbnail/x"><div ' + attrs + '>Title</div></a>',
                   '<ul><li><a href="https://example.test/doc?x=1#part">Title</a></li></ul>'))
+for src in ('HTTPS://CLASSROOM.GOOGLE.COM/webthumbnail/x', '//classroom.google.com/webthumbnail?x=1'):
+    cases.append(("classroom-url-" + src,
+                  '<a href="https://example.test/doc"><img src="' + src + '"><div class="mvRF3b">Title</div></a>',
+                  '<ul><li><a href="https://example.test/doc">Title</a></li></ul>'))
+for href, cleaned in (
+    ('', ''), ('?authuser=0&amp;authuser=1', ''),
+    ('https://example.test/doc?x=1&amp;authuser=0&amp;y=2', 'https://example.test/doc?x=1&amp;y=2'),
+    ('https://example.test/doc?authuser=0&amp;authuser=1&amp;x=2', 'https://example.test/doc?x=2'),
+    ('https://example.test/doc#section?authuser=0', 'https://example.test/doc#section?authuser=0'),
+    ('https://example.test/doc?x=1#section&amp;authuser=0', 'https://example.test/doc?x=1#section&amp;authuser=0'),
+    ('https://example.test/doc?x=1&amp;authuser=0#part?authuser=inside', 'https://example.test/doc?x=1#part?authuser=inside')):
+    cases.append(("classroom-query-" + href,
+                  '<a href="' + href + '"><img src="https://classroom.google.com/webthumbnail/x"><div class="mvRF3b">Title</div></a>',
+                  '<ul><li><a href="' + cleaned + '">Title</a></li></ul>'))
 
 failed = []
 for name, source, expected in cases:

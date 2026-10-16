@@ -119,7 +119,7 @@ sub closing_tag {
 sub thumbnail {
     my ($token) = @_;
     return ($token->{name} // '') eq 'img' && !$token->{close}
-        && ($token->{attrs}{src} // '') =~ m{classroom\.google\.com/webthumbnail};
+        && ($token->{attrs}{src} // '') =~ m{\A(?:(?i:https?):)?//(?i:classroom\.google\.com)/webthumbnail(?:[/?#]|\z)};
 }
 
 my $output = '';
@@ -141,10 +141,15 @@ for (my $i = 0; $i < @tokens; $i++) {
             }
             my $href = $token->{attrs}{href};
             $href =~ s/&amp;/&/gi;
-            $href =~ s/([?&])authuser=[^&#]*&/$1/g;
-            $href =~ s/[?&]authuser=[^&#]*//g;
-            $href =~ s/\?&/?/g;
-            $href =~ s/[?&](?=#|$)//g;
+            # Nur Query-Parameter entfernen; gleichnamiger Fragmenttext ist
+            # Teil des Linkziels. Wiederholte Parameter einzeln behandeln.
+            my ($address, $fragment) = split /#/, $href, 2;
+            my ($path, $query) = split /\?/, ($address // ''), 2;
+            if (defined $query) {
+                my @parameters = grep { !/^authuser=/ } split /&/, $query, -1;
+                $href = $path . (@parameters ? '?' . join('&', @parameters) : '')
+                    . (defined($fragment) ? '#' . $fragment : '');
+            }
             # Bereits maskierte Anführungszeichen bleiben maskiert; nur nackte
             # Query-Trenner werden für das neu erzeugte Attribut kodiert.
             $href =~ s/&(?!(?:\#\d+|\#x[0-9a-f]+|[a-z][a-z0-9]+);)/&amp;/gi;

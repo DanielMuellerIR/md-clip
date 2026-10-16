@@ -45,6 +45,18 @@ with tempfile.TemporaryDirectory(prefix="md-clip-images-") as tmp:
     for target in ("gfm", "markdown", "commonmark"):
         doc, records = convert('<img src="x" alt="Diagramm">', "keep", target, strict=True)
         assert len(nodes(doc, "Image")) == 1 and not records
+        for url in ('https://example.invalid/classroom.google.com/webthumbnail/x',
+                    'https://otherclassroom.google.com/webthumbnail/x',
+                    'https://example.invalid/a?next=https://classroom.google.com/webthumbnail/x',
+                    'https://classroom.google.com/webthumbnail-other/x'):
+            for mode in ('keep', 'alt', 'omit'):
+                source = '<p>before <a href="https://example.invalid/t"><img src="' + url + '" alt="Diagramm"></a> after</p>'
+                doc, records = convert(source, mode, target, strict=mode == 'keep')
+                images = nodes(doc, 'Image')
+                assert len(images) == (mode == 'keep'), (url, mode, images)
+                if images: assert images[0]['c'][2][0] == url
+                assert ('Diagramm' in [n['c'] for n in nodes(doc, 'Str')]) == (mode != 'omit')
+                assert records == ({} if mode == 'keep' else {'images-' + ('alt' if mode == 'alt' else 'omitted'): '1'}), records
         for mode in ("keep", "alt", "omit"):
             doc, records = convert('<p>before <img src="https://example.invalid/a.png" alt="Diagramm"> after</p>', mode, target)
             assert len(nodes(doc, "Image")) == (1 if mode == "keep" else 0)

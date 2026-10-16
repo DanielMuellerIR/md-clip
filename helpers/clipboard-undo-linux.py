@@ -602,8 +602,12 @@ class X11:
         self.x.XConvertSelection(self.display, self.clipboard, target, self.property_atom, self.read_window, 0)
         self.x.XFlush(self.display)
         while not self.selection_events:
+            if time.monotonic() >= deadline:
+                raise UndoError("Zeitlimit beim Lesen des Clipboards erreicht.")
             self.pump()
-            if not self.selection_events:
+            # XFlush am Ende von pump kann Antworten bereits in Xlib puffern.
+            # Dann ist der Socket leer, obwohl die nächste Antwort bereitliegt.
+            if not self.selection_events and not self.x.XPending(self.display):
                 deadline_wait(self.fileno(), deadline)
         event = self.selection_events.pop(0)
         if event.target != target or not event.property:

@@ -265,6 +265,10 @@ entfällt das Bild. `--images omit` entfernt die Bilder vollständig. Die Anzahl
 erscheint als Vereinfachung auf stderr. Die Politik gilt für konvertiertes HTML/RTF;
 ursprünglicher oder ausdrücklich gewählter Klartext bleibt bytegenau.
 
+Die Quellenbereinigung entfernt zuvor Classroom-Vorschaubilder und bildet
+Anhangskarten als Titellinks ab. Diese Quellenreparatur wird nicht als
+Bildvereinfachung gezählt.
+
 Ein Link um ein Bild behält Ziel und Titel. Wird sein Inhalt durch die Bildpolitik
 leer, erscheint wie bei anderen leeren Links die Ziel-URL als Linktext.
 SVG ohne Alternativtext kann mit `alt` deshalb entfallen. Ein ausschließlich

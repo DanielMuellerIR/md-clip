@@ -630,6 +630,32 @@ class NativeTests(unittest.TestCase):
         token = self.run_helper("prepare")
         self.run_helper("cancel", token)
 
+    def test_x11_selection_already_buffered_by_xlib(self):
+        clip = undo.backend()
+        try:
+            if not isinstance(clip, undo.X11):
+                self.skipTest("Xlibs Ereigniswarteschlange betrifft nur X11")
+            clip.x.XPutBackEvent.restype = undo.C.c_int
+            clip.x.XPutBackEvent.argtypes = [undo.P, undo.C.POINTER(undo.Event)]
+            pump = clip.pump
+            buffered = []
+            def queue_after_pump(*args):
+                pump(*args)
+                if not buffered and clip.selection_events:
+                    # Eine echte Antwort in Xlibs Queue nachbilden, nachdem
+                    # der letzte Pump-Durchlauf sie noch nicht übernehmen konnte.
+                    event = undo.Event()
+                    event.selection = clip.selection_events.pop(0)
+                    clip.x.XPutBackEvent(clip.display, undo.C.byref(event))
+                    clip.x.XSync(clip.display, 0)
+                    buffered.append(event.selection.target)
+            clip.pump = queue_after_pump
+            _, snapshot = clip.capture()
+            self.assertTrue(buffered)
+            self.assertEqual(fixture(clip), snapshot)
+        finally:
+            clip.close()
+
     def test_delayed_capture_aborts_without_write(self):
         self.source_command("delay")
         start = time.monotonic()
