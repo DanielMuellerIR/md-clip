@@ -317,6 +317,29 @@ local function finalize_document(doc)
   return doc
 end
 
+local function preserve_heading_braces(heading)
+  if FORMAT ~= 'markdown' and FORMAT ~= 'gfm' and FORMAT ~= 'commonmark' then return nil end
+  -- Der Markdown-Writer maskiert getippte {#id}/Klassen am Überschriftsende
+  -- nicht. Beim erneuten Lesen würden sie als Attribute statt Text verschwinden.
+  -- Ältere GFM-/CommonMark-Writer verlieren die Klammer zudem hinter einem
+  -- getippten Backslash. Die Maskierung erhält in allen drei Zielen den Text.
+  return heading:walk { Str = function(str)
+    if not str.text:find('{', 1, true) then return nil end
+    local out = pandoc.List()
+    local start = 1
+    while true do
+      local opening = str.text:find('{', start, true)
+      if not opening then
+        if start <= #str.text then out:insert(pandoc.Str(str.text:sub(start))) end
+        return out
+      end
+      if opening > start then out:insert(pandoc.Str(str.text:sub(start, opening - 1))) end
+      out:insert(pandoc.RawInline('markdown', '\\{'))
+      start = opening + 1
+    end
+  end }
+end
+
 -- Komplexe Außentabellen vor dem üblichen Bottom-up-Lauf umwandeln. Sonst
 -- verschwände die verschachtelte Tabelle, bevor ihr Container sie erkennen kann.
 return { { Pandoc = function(doc)
@@ -335,5 +358,5 @@ return { { Pandoc = function(doc)
   end
   doc = doc:walk { Span = Span, Div = Div, Image = Image, Link = Link, Table = Table,
                    BlockQuote = preserve_quoted_code }
-  return finalize_document(doc)
+  return finalize_document(doc):walk { Header = preserve_heading_braces }
 end } }

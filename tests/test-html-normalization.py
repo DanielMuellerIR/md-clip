@@ -81,6 +81,18 @@ cases.extend([
     ("table-spans", '<table><tr><th>A</th><th>B</th></tr><tr><td><span title="a > b">eins</span></td><td><strong>zwei</strong></td></tr></table>', '<table><tr><th>A</th><th>B</th></tr><tr><td>eins</td><td><strong>zwei</strong></td></tr></table>'),
     ("heading", '<h2><span title="a > b">Titel</span></h2>', '<h2>Titel</h2>'),
 ])
+for literal in ('{#literal}', '{.literal}', '{key="value"}',
+                '{#literal .class key="value"}', '{#literal} tail', '{braces}', '{', '\\{#literal}'):
+    source = '<h2>Heading ' + literal + '</h2>'
+    cases.append(('literal-heading-' + literal, source, source))
+cases.extend([
+    ('formatted-heading-attribute', '<h2>Heading <em>{#literal}</em></h2>',
+     '<h2>Heading <em>{#literal}</em></h2>'),
+    ('heading-code-attribute', '<h2>Heading <code>{#literal}</code></h2>',
+     '<h2>Heading <code>{#literal}</code></h2>'),
+    ('heading-real-and-literal-attribute', '<h2 id="real">Heading {#literal}</h2>',
+     '<h2 id="real">Heading {#literal}</h2>'),
+])
 for attrs in ('title="a > b" href="https://example.test/a_(b)?x=1&amp;y=2"',
               "href='https://example.test/a_(b)?x=1&amp;y=2' title='a > b'",
               'TITLE="a > b" HREF="https://example.test/a_(b)?x=1&amp;y=2"'):
@@ -124,6 +136,9 @@ for name, source, expected in cases:
         # Hier werden explizite HTML-Links geprüft, keine bloßen Text-URLs.
         reader = {"gfm": "gfm-autolink_bare_uris", "commonmark": "commonmark+pipe_tables"}.get(target, target)
         actual = signature(json.loads(run(["pandoc", "-f", reader, "-t", "json"], output)))
+        if name == 'heading-real-and-literal-attribute' and target == 'markdown':
+            parsed = json.loads(run(["pandoc", "-f", reader, "-t", "json"], output))
+            assert parsed['blocks'][0]['c'][1][0] == 'real', 'Echte Überschrifts-ID verändert'
         if actual != wanted:
             failed.append((name, target, output.decode(), repr(actual), repr(wanted)))
 for failure in failed:

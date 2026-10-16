@@ -21,3 +21,24 @@ mehrzeilige Attribute, Kommentare sowie Code und prüft den geparsten Roundtrip.
 Die Bild- und Tabellenmodusprüfungen ergänzen synthetische Grenzfälle mit eigenen
 Inhaltsinvarianten. Reale komplexe Word-Bild-/Tabellenoriginale fehlen weiterhin;
 dies ist eine Abnahmelücke, kein durch synthetische Tests ersetzter Originalbeleg.
+
+Zusätzliche private Prüfungen verwenden bereinigte Ableitungen vorhandener
+Browser-HTML- und Textverarbeitungs-/RTF-Aufnahmen. Text und Linkziele werden
+neutralisiert, persönliche Metadaten und eingebettete RTF-Bilder entfernt;
+HTML-/RTF-Strukturen bleiben die Grundlage der Prüfung. Solche Ableitungen
+belegen weder eine bestimmte Programmversion noch den ursprünglichen Bildinhalt.
+Originaldateien und Betriebsbelege gehören nicht ins öffentliche Repository.
+
+Für jeden tatsächlich geprüften Stand werden Absatzgruppen, Listen außerhalb
+von Tabellen, Linkziele, Code und Bildreferenzen sowie Tabellenzellen nach dem
+Markdown-Roundtrip verglichen. Dokumentierte Tabellenvereinfachungen werden
+separat ausgewiesen und gegen `--strict` geprüft. Ein fehlender historischer
+Mitschnitt wird als Lücke festgehalten und nicht synthetisch nachgebildet.
+
+Prüfungen am allgemeinen Clipboard benötigen eine vollständige RAM-Sicherung
+aller Items und Formate sowie Generationskontrolle. Unbekannte Bytes sind kein
+Beweis einer fremden Kopie: Die Sicherung bleibt bis zur ausdrücklichen Klärung
+erhalten, ohne den unbekannten Zustand zu überschreiben. EOF, Abbruch und
+Controllerverlust müssen zuvor auf privaten Pasteboards geprüft werden.
+Dateiprüfungen ohne `--replace` und Fixtures mit `MD_CLIP_SKIP_CLIPBOARD=1`
+benötigen diesen Zugriff nicht.

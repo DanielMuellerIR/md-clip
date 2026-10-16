@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.13 — 2026-10-16
+
+- Getippte Attributsyntax wie `{#beispiel}` bleibt in HTML-Überschriften auch
+  beim Ziel `markdown` sichtbarer Text. Echte Überschriftsattribute und Code
+  bleiben erhalten. Auch ältere GFM-/CommonMark-Writer verlieren die Klammer
+  hinter einem getippten Backslash nicht mehr.
+
 ## 1.10.12 — 2026-10-16
 
 - Hilfe- und Fehlerdialoge zeigen Umlaute und andere Unicode-Zeichen korrekt.
