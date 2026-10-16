@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.8 — 2026-10-16
+
+- Weitere INT/TERM während der laufenden Bereinigung ändern den ersten Exit-Status
+  nicht mehr. Eigene Kindprozesse, einmalige Stornierung und private Temp-Dateien
+  werden weiterhin vollständig aufgeräumt.
+
 ## 1.10.7 — 2026-10-16
 
 - Die macOS-CI baut zusätzlich ein unsigniertes Bundle und prüft Konvertierungen

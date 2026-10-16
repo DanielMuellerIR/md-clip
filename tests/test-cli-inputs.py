@@ -45,7 +45,12 @@ if undo:
     if args[0]=='prepare':
         if os.environ.get('UNDO_FAIL_PREPARE'):sys.exit(1)
         print('mock-token');sys.exit()
-    if args[0]=='cancel':sys.exit()
+    if args[0]=='cancel':
+        if os.environ.get('UNDO_PAUSE_CANCEL'):
+            (b/'cancel-start').write_text(str(os.getpid()))
+            import time
+            time.sleep(1)
+        sys.exit()
     if args[0]=='replace':
         if os.environ.get('UNDO_FAIL_REPLACE'):sys.exit(1)
         (b/'written').write_bytes(sys.stdin.buffer.read());sys.exit()
@@ -485,6 +490,42 @@ sys.exit(int(os.environ.get('MOCK_PREVIEW_STATUS','0')))
             if proc.poll() is None:proc.kill()
             proc.wait(timeout=3)
         env.pop('MOCK_TRACK_CAT')
+        signal_work=base/'signal-work';signal_work.mkdir(exist_ok=True)
+        previous_tmp=env.get('TMPDIR')
+        env.update(TMPDIR=str(signal_work),UNDO_PAUSE_CANCEL='1',MOCK_TRACK_CAT='1')
+        for first,second,expected in ((signal.SIGINT,signal.SIGTERM,130),(signal.SIGTERM,signal.SIGINT,143)):
+            undo_calls();(base/'cancel-start').unlink(missing_ok=True);(base/'io-cat-pid').unlink(missing_ok=True)
+            (base/'written').write_bytes(b'protected')
+            proc=subprocess.Popen([str(runtime/'md-clip'),'--stdin','--plain','--replace','--quiet'],
+                                  stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True)
+            try:
+                proc.stdin.write(b'synthetic incomplete input');proc.stdin.flush()
+                end=time.monotonic()+8
+                while time.monotonic()<end:
+                    sources=list(signal_work.glob('md-clip.*/plain'))
+                    if sources and sources[0].read_bytes()==b'synthetic incomplete input':break
+                    time.sleep(.01)
+                else:raise AssertionError('Private Teilquelle nicht erreicht')
+                proc.send_signal(first)
+                end=time.monotonic()+5
+                while not (base/'cancel-start').exists() and time.monotonic()<end:time.sleep(.01)
+                assert (base/'cancel-start').exists(), 'Stornierung begann nicht'
+                proc.send_signal(second)
+                assert proc.wait(timeout=5)==expected, 'Weiteres Signal änderte ersten Exit'
+                out,error=proc.communicate(timeout=2)
+                assert not out and not list(signal_work.iterdir()), (out,error,list(signal_work.iterdir()))
+                assert (base/'written').read_bytes()==b'protected' and undo_calls()==['prepare','cancel']
+                for marker in ('io-cat-pid','cancel-start'):
+                    child=int((base/marker).read_text())
+                    try:os.kill(child,0)
+                    except ProcessLookupError:pass
+                    else:raise AssertionError('Cleanup-Kindprozess blieb aktiv')
+            finally:
+                if proc.poll() is None:os.killpg(proc.pid,signal.SIGKILL)
+                proc.communicate(timeout=3)
+        for name in ('UNDO_PAUSE_CANCEL','MOCK_TRACK_CAT'):env.pop(name)
+        if previous_tmp is None:env.pop('TMPDIR')
+        else:env['TMPDIR']=previous_tmp
         print('OK:',platform,wayland or 'default','Tabellen/Fallback/Strict/Schreibschutz')
     # Echte Terminalabfrage, aber ausschließlich auf den Clipboard-Attrappen.
     for answer, expected_rc in ((b'nein\n',4),(b'ja\n',0),(b'\x04',4)):

@@ -302,6 +302,8 @@ INT/TERM an die CLI beendet auch eine noch offene stdin-/Dateikopie oder eine
 blockierte stdout-Kopie und storniert eine vorbereitete Ersetzung. Die CLI endet
 mit 130 beziehungsweise 143. Bereits nach stdout geschriebene Teilbytes lassen
 sich nicht zurücknehmen; Aufrufer sollten sie bei diesem Exit verwerfen.
+Weitere INT/TERM während der laufenden Bereinigung ändern diesen ersten
+Exit-Status nicht und unterbrechen die Entfernung privater Temp-Dateien nicht.
 
 ```bash
 md-clip --preview --replace

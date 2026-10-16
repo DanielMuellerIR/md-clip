@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.10.7"
+VERSION="1.10.8"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -997,6 +997,8 @@ run_io_command() {
   return "$status"
 }
 cleanup_output() {
+  # Weitere Signale dürfen das laufende Cleanup und den ersten Exit nicht ersetzen.
+  trap ':' INT TERM
   if [ -n "$RAW_IO_PID" ]; then
     kill -TERM "$RAW_IO_PID" >/dev/null 2>&1 || true
     wait "$RAW_IO_PID" 2>/dev/null || true
