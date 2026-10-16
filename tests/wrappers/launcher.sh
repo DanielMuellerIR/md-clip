@@ -6,10 +6,9 @@ MD_CLIP_HOST_PATH="$PATH"
 mkdir -p "$TEST_ROOT/fake-bin" "$TEST_ROOT/capture"
 cat > "$TEST_ROOT/fake-bin/osascript" <<'SH'
 #!/bin/sh
-# Der Meldungsdialog ist am gesetzten MD_CLIP_DIALOG_TEXT erkennbar: Nur
-# show_error_dialog reicht Text über die Umgebung weiter.
-if [ -n "${MD_CLIP_DIALOG_TEXT:-}" ]; then
-  printf '%s' "$MD_CLIP_DIALOG_TEXT" > "$MD_CLIP_CAPTURE/error-text"
+# Meldungsdialoge erhalten Text und Symbolart als Argumente.
+if [ "${1:-}" = "-" ] && [ "$#" -eq 3 ]; then
+  printf '%s' "$2" > "$MD_CLIP_CAPTURE/error-text"
   cat > "$MD_CLIP_CAPTURE/error-source"
   exit 0
 fi
@@ -50,7 +49,7 @@ grep -Fq 'Der Kommandozeilen-Befehl konnte nicht' "$TEST_ROOT/capture/error-text
 # Wie beim privilegierten Befehl gilt auch hier: Der Text darf nur als Daten
 # ankommen. Stünde er im AppleScript-Quelltext, könnte ein Anführungszeichen
 # darin den Parser verlassen.
-grep -Fq 'system attribute "MD_CLIP_DIALOG_TEXT"' "$TEST_ROOT/capture/error-source"
+grep -Fq 'set dialogText to item 1 of arguments' "$TEST_ROOT/capture/error-source"
 if grep -Fq 'Der Kommandozeilen-Befehl konnte nicht' "$TEST_ROOT/capture/error-source"; then
   echo "✗ Launcher interpoliert den Meldungstext in AppleScript-Quelltext" >&2
   exit 1

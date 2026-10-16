@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='md-clip-actions-') as tmp:
     source = source.replace('SYSTEM_CLI="/usr/local/bin/md-clip"', 'SYSTEM_CLI="$MOCK_SYSTEM_CLI"')
     launcher.write_text(source)
     launcher.chmod(0o755)
-    mock = '#!' + os.path.realpath(sys.executable) + '\n' + '''import os,sys,pathlib,json
+    mock = '#!' + os.path.realpath(sys.executable) + '\n' + '''import os,sys,pathlib,json,subprocess
 name=pathlib.Path(sys.argv[0]).name
 base=pathlib.Path(os.environ['MOCK_ROOT'])
 if name=='md-clip':
@@ -37,6 +37,15 @@ if name=='osascript':
     (base/'dialog-source').write_text(source)
     text=os.environ.get('MD_CLIP_DIALOG_TEXT','')
     kind=os.environ.get('MD_CLIP_DIALOG_KIND','setup')
+    if sys.argv[1:2]==['-']:
+        text=sys.argv[2];kind=sys.argv[3]
+    # Native Dekodierung ohne Dialog: Die Attrappe allein würde MacRoman übersehen.
+    if text and os.environ.get('MOCK_NATIVE_DIALOG_DECODING')=='1':
+        if sys.argv[1:2]==['-']:
+            result=subprocess.run(['/usr/bin/osascript','-',*sys.argv[2:]],input='on run arguments\\nreturn item 1 of arguments\\nend run\\n',text=True,capture_output=True,check=True)
+        else:
+            result=subprocess.run(['/usr/bin/osascript','-e','return system attribute "MD_CLIP_DIALOG_TEXT"'],text=True,capture_output=True,check=True)
+        text=result.stdout.removesuffix('\\n')
     (base/'dialog').write_text(json.dumps([kind,text]))
     print('Später');sys.exit()
 if name=='defaults':
@@ -48,6 +57,7 @@ sys.exit(91)
     env = dict(os.environ, HOME=str(base), MOCK_ROOT=str(base), MOCK_SYSTEM_CLI=str(base / 'system/md-clip'),
                PATH=str(tools) + ':' + os.environ['PATH'])
     env.pop('MD_CLIP_LAUNCHER_SOURCE_ONLY', None)
+    if sys.platform=='darwin':env['MOCK_NATIVE_DIALOG_DECODING']='1'
 
     def run(args, status=0, cli_status=0):
         for name in ('cli','updater','dialog','defaults','dialog-source'):
@@ -82,6 +92,7 @@ sys.exit(91)
         run(args)
         kind, message = json.loads((base/'dialog').read_text())
         assert kind == 'info' and '--undo' in message and 'open -n' in message
+        assert 'prüfen' in message and 'zurücknehmen' in message and 'ausführt' in message
         assert not any((base/name).exists() for name in ('cli','defaults','updater'))
     for args in (['--unknown'], ['--undo','--convert'], ['--help','extra'], ['-psn_1_bad'], ['$(touch NIE)']):
         run(args,status=2)

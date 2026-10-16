@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.12 — 2026-10-16
+
+- Hilfe- und Fehlerdialoge zeigen Umlaute und andere Unicode-Zeichen korrekt.
+  Dynamische Texte werden als Argumente unverändert an AppleScript übergeben.
+
 ## 1.10.11 — 2026-10-16
 
 - Tab und Shift-Tab erreichen Hinweise, Markdown und alle verfügbaren

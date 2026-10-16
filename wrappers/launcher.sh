@@ -106,18 +106,22 @@ decide_cli_action() {
 # kein Fenster, kein Dock-Symbol, und ihr stderr sieht beim Dock-Klick niemand.
 # Ohne Dialog bliebe ein Fehler für den Nutzer schlicht unsichtbar.
 #
-# Der Text kommt über die Umgebung und nicht als Zeichenkette in die
-# AppleScript-Quelle: So kann er weder Anführungszeichen ausbrechen noch
-# eigenen Code einschleusen. `|| true`, weil eine gescheiterte Meldung nichts
-# schlimmer machen darf als den Fehler, den sie melden wollte.
+# Der Text kommt als Argument und nicht als Zeichenkette in die AppleScript-
+# Quelle: Anführungszeichen bleiben Daten. system attribute dekodiert UTF-8-
+# Umgebungswerte auf macOS als MacRoman und beschädigt Umlaute. `|| true`, weil
+# eine gescheiterte Meldung nichts schlimmer machen darf als der ursprüngliche Fehler.
 show_message_dialog() {
-  MD_CLIP_DIALOG_TEXT="$1" MD_CLIP_DIALOG_KIND="${2:-error}" osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
-tell application "System Events"
-  activate
-  set dialogIcon to caution
-  if (system attribute "MD_CLIP_DIALOG_KIND") is "info" then set dialogIcon to note
-  display dialog (system attribute "MD_CLIP_DIALOG_TEXT") buttons {"OK"} default button "OK" with title "md-clip" with icon dialogIcon
-end tell
+  osascript - "$1" "${2:-error}" <<'APPLESCRIPT' >/dev/null 2>&1 || true
+on run arguments
+  set dialogText to item 1 of arguments
+  set dialogKind to item 2 of arguments
+  tell application "System Events"
+    activate
+    set dialogIcon to caution
+    if dialogKind is "info" then set dialogIcon to note
+    display dialog dialogText buttons {"OK"} default button "OK" with title "md-clip" with icon dialogIcon
+  end tell
+end run
 APPLESCRIPT
 }
 
