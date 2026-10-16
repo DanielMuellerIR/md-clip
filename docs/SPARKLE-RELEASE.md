@@ -53,7 +53,7 @@ kompilierte Helfer `Contents/MacOS/md-clip-updater`
   legt Sparkles Lizenz unter `Contents/Resources/Licenses/Sparkle-LICENSE.txt`
   ab. Die Update-Schlüssel stehen im Info.plist-Heredoc derselben Datei.
 - `wrappers/sign-bundle.sh` signiert von innen nach außen: Werkzeuge in
-  `Resources/bin`, Updater-Helfer, Sparkles `Autoupdate`, `Updater.app`,
+  `Resources/bin`, HUD-, Vorschau- und Updater-Helfer, Sparkles `Autoupdate`, `Updater.app`,
   Framework, zuletzt die App. Installation (`install-app.sh`) und Release
   (`wrappers/sign-and-release.sh`) benutzen dieselbe Datei.
 - `wrappers/verify-bundle.sh` prüft das Produkt: Framework ohne XPC-Dienste,
@@ -116,6 +116,6 @@ fehlgeschlagen ist. Ein älteres Tag, Prerelease oder Entwurf wird abgelehnt.
 Das Release muss genau ein `*.dmg` enthalten; der Feed enthält nur das aktuelle
 Vollupdate und keine Deltas.
 
-Die Pipeline-Ressourcen `pipeline.sh`, `tidy-markdown.pl` und `tables.lua`
+Die Pipeline-Ressourcen `pipeline.sh`, `preprocess-html.pl`, `tidy-markdown.pl` und `tables.lua`
 liegen gemeinsam unter `Contents/Resources/bin/`. Der Bundle-Prüfer lehnt
 fehlende oder leere Perl-/Lua-Ressourcen vor dem Start des Produktcodes ab.

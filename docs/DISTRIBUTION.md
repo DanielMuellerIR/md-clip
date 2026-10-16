@@ -4,13 +4,14 @@ Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
 macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
 einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 
-## Status (Stand: 2026-10-13)
+## Status (Stand: 2026-10-16)
 
 - Verbindlich für die Version sind zwei Quellen, nicht dieses Dokument:
   `bin/md-clip --version` nennt die Produktversion im Quellcode,
   `git describe --tags --abbrev=0` den jüngsten Release-Tag. Zwischen zwei
-  Releases liegt die Produktversion eine Nummer vor dem Tag — beim Release
-  ziehen Tag und DMG nach. Der Sparkle-Update-Weg ist vollständig belegt:
+  Releases kann die Produktversion weiter als der jüngste veröffentlichte Tag
+  sein — beim Release müssen Quelle, Tag, App und DMG übereinstimmen.
+  Der Sparkle-Update-Weg ist vollständig belegt:
   Eine installierte App lädt ein signiertes DMG, prüft es und tauscht sich
   ohne ungefragten Neustart aus.
 
@@ -25,6 +26,9 @@ einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
 - **Sparkle-Auto-Update** (Framework im Bundle, Updater-Helfer,
   Appcast-Workflow). ✅ Erledigt in v1.2.0 — Details in
   [SPARKLE-RELEASE.md](SPARKLE-RELEASE.md).
+- **Native Vorschau und eigene Undo-App-Aktion.** Seit v1.10.0 beziehungsweise
+  v1.9.0 im Bundle; Bedienung und Prüfgrenzen stehen in
+  [PREVIEW.md](PREVIEW.md) und [CLIPBOARD-UNDO.md](CLIPBOARD-UNDO.md).
 - **Stufe C — GitHub Action für automatisierte DMG-Releases.** ⏳ Geplant.
   Appcast-Erzeugung und Veröffentlichung laufen bereits getrennt und
   abgesichert über GitHub Actions.
@@ -97,11 +101,15 @@ Terminal-Wissen läuft. Im Bundle liegen:
   `--replace --notify`.
 - `Contents/Resources/bin/md-clip` — Kopie des Hauptskripts
 - `Contents/Resources/bin/pipeline.sh` — gemeinsame Produkt-/Test-Pipeline
+- `Contents/Resources/bin/preprocess-html.pl` — HTML-Quellenreparaturen
 - `Contents/Resources/bin/tidy-markdown.pl` — Markdown-Strukturerkennung und Aufräumregeln
 - `Contents/Resources/bin/tables.lua` — strukturelle Tabellenprüfung in pandoc
 - `Contents/Resources/bin/pandoc` — pandoc 3.9.0.2, arm64-only
 - `Contents/Resources/bin/clipboard-html`, `clipboard-rtf` — kompilierte
   Swift-Helper
+- `Contents/Resources/bin/clipboard-undo` — native Sicherung und Rücknahme
+- `Contents/MacOS/md-clip-preview`, `md-clip-hud`, `md-clip-updater` — native
+  Vorschau, Erfolgsmeldung und Sparkle-Laufzeit
 - `Contents/Resources/Licenses/` — GPL-Volltext für pandoc, MIT-Hinweis
 - `Contents/Resources/md-clip.icns` — App-Icon
 - `Contents/Info.plist` — Bundle-Metadaten (Identifier
