@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0 — 2026-10-16
+
+- Die macOS-App bietet `--undo` als eigene Aktion für einen zweiten Hotkey.
+  Sie nimmt die letzte Ersetzung zurück und zeigt verständliche Fehlerzustände,
+  ohne Konvertierung, CLI-Setup oder Update-Suche auszulösen.
+- `--help` erklärt die App-Aktionen. Unbekannte oder kombinierte Aktionen werden
+  vor Clipboard-Zugriff abgelehnt; der normale Dock-Klick konvertiert weiterhin.
+
 ## 1.8.1 — 2026-10-16
 
 - CI prüft das exakt gebündelte pandoc zusätzlich zum aktuellen System-pandoc;

@@ -7,11 +7,11 @@
 #      sauber in /usr/local/bin/ liegt, einen Dialog zeigen und auf
 #      Wunsch einen Symlink ins App-Bundle anlegen.
 #
-#   2. Den eigentlichen md-clip-Lauf starten: Clipboard-Inhalt nach
-#      Markdown konvertieren und wieder ins Clipboard schreiben.
+#   2. Die gewählte Aktion starten: standardmäßig konvertieren, mit --undo
+#      zurücknehmen oder mit --help die Aktionen erklären.
 #
-# Wichtig: keine Fehler nach außen lassen, die den eigentlichen Lauf
-# verhindern. Wenn der Symlink-Schritt aus irgendeinem Grund scheitert,
+# Ein Fehler beim optionalen CLI-Setup darf die eigentliche Aktion
+# nicht verhindern. Wenn der Symlink-Schritt aus irgendeinem Grund scheitert,
 # soll md-clip trotzdem die Konvertierung durchführen.
 
 # Bundle-Identifier; wird auch als Domain für `defaults` verwendet, um
@@ -102,7 +102,7 @@ decide_cli_action() {
   echo "install-ok"
 }
 
-# Zeigt eine Fehlermeldung als Dialog. md-clip.app ist eine LSUIElement-App:
+# Zeigt eine Meldung als Systemdialog. md-clip.app ist eine LSUIElement-App:
 # kein Fenster, kein Dock-Symbol, und ihr stderr sieht beim Dock-Klick niemand.
 # Ohne Dialog bliebe ein Fehler für den Nutzer schlicht unsichtbar.
 #
@@ -110,13 +110,27 @@ decide_cli_action() {
 # AppleScript-Quelle: So kann er weder Anführungszeichen ausbrechen noch
 # eigenen Code einschleusen. `|| true`, weil eine gescheiterte Meldung nichts
 # schlimmer machen darf als den Fehler, den sie melden wollte.
-show_error_dialog() {
-  MD_CLIP_DIALOG_TEXT="$1" osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+show_message_dialog() {
+  MD_CLIP_DIALOG_TEXT="$1" MD_CLIP_DIALOG_KIND="${2:-error}" osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
 tell application "System Events"
   activate
-  display dialog (system attribute "MD_CLIP_DIALOG_TEXT") buttons {"OK"} default button "OK" with title "md-clip" with icon caution
+  set dialogIcon to caution
+  if (system attribute "MD_CLIP_DIALOG_KIND") is "info" then set dialogIcon to note
+  display dialog (system attribute "MD_CLIP_DIALOG_TEXT") buttons {"OK"} default button "OK" with title "md-clip" with icon dialogIcon
 end tell
 APPLESCRIPT
+}
+
+show_error_dialog() { show_message_dialog "$1" error; }
+
+show_action_help() {
+  show_message_dialog "md-clip: Aktionen
+
+Ohne Argument oder mit --convert: Clipboard nach Markdown konvertieren.
+--undo: Letzte Ersetzung einmalig zurücknehmen.
+--help: Diese Hilfe anzeigen.
+
+Undo gilt zehn Minuten und nur bis zum nächsten Kopieren. App-Hotkeys mit open -n starten, damit jeder Aufruf eine eigene Aktion ausführt." info
 }
 
 # Erstellt /usr/local/bin/md-clip als Symlink ins Bundle. Die Pfade werden
@@ -212,7 +226,46 @@ start_update_check() {
 # ---------- Hauptlogik ----------
 
 launcher_main() {
-  local action answer
+  local action answer mode=convert diagnostic cli_status
+  # Vor Setup-Dialogen und Clipboard-Zugriff entscheiden. LaunchServices kann
+  # beim Finder-Start noch eine alte Prozessseriennummer übergeben.
+  if [ "$#" -gt 1 ]; then
+    show_error_dialog "Nur eine App-Aktion erlaubt: --convert, --undo oder --help."
+    return 2
+  fi
+  case "${1:-}" in
+    ""|--convert) ;;
+    --undo) mode=undo ;;
+    --help|-h) show_action_help; return 0 ;;
+    *)
+      if ! [[ "$1" =~ ^-psn_[0-9]+_[0-9]+$ ]]; then
+        show_error_dialog "Unbekannte App-Aktion. Erlaubt sind --convert, --undo und --help."
+        return 2
+      fi ;;
+  esac
+  if [ ! -x "$BUNDLE_CLI" ]; then
+    show_error_dialog "md-clip ist unvollständig: Der eingebettete Befehl fehlt oder ist nicht ausführbar. Bitte die App neu installieren."
+    return 2
+  fi
+  if [ "$mode" = undo ]; then
+    if diagnostic=$("$BUNDLE_CLI" --undo --notify 2>&1 >/dev/null); then
+      return 0
+    else
+      cli_status=$?
+      if [ "$cli_status" -eq 1 ]; then
+        show_error_dialog "Keine gültige Rücknahme verfügbar.
+
+Eine Ersetzung lässt sich zehn Minuten lang, einmalig und nur bis zum nächsten Kopieren zurücknehmen.
+
+$diagnostic"
+      else
+        show_error_dialog "Die Rücknahme ist fehlgeschlagen.
+
+$diagnostic"
+      fi
+      return "$cli_status"
+    fi
+  fi
   action="$(decide_cli_action)"
 
   case "$action" in
@@ -244,19 +297,8 @@ launcher_main() {
       ;;
   esac
 
-  # Fehlt die eingebettete CLI, ist das Bundle beschädigt. Ohne diese Prüfung
-  # gäbe es überhaupt keine Rückmeldung: bash schriebe „No such file or
-  # directory" nach stderr, und das sieht beim Dock-Klick niemand — der Klick
-  # sähe für den Nutzer aus, als täte die App gar nichts. Exit 2 wie bei einer
-  # fehlenden Abhängigkeit in bin/md-clip. Die Update-Suche darunter bleibt
-  # aus: Bei einem kaputten Bundle ist die Meldung das Einzige, was zählt.
-  if [ ! -x "$BUNDLE_CLI" ]; then
-    show_error_dialog "md-clip ist unvollständig: Der eingebettete Befehl fehlt oder ist nicht ausführbar. Bitte die App neu installieren."
-    return 2
-  fi
-
   # Jetzt der eigentliche md-clip-Lauf. --replace ersetzt das Clipboard,
-  # --notify zeigt eine macOS-Benachrichtigung bei Erfolg.
+  # --notify zeigt bei Erfolg das HUD.
   "$BUNDLE_CLI" --replace --notify
   local cli_status=$?
 
@@ -269,5 +311,5 @@ launcher_main() {
 
 # Tests dürfen die Funktionen laden, ohne Dialoge oder das Bundle zu starten.
 if [ "${MD_CLIP_LAUNCHER_SOURCE_ONLY:-0}" != "1" ]; then
-  launcher_main
+  launcher_main "$@"
 fi

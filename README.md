@@ -370,6 +370,35 @@ Ab jetzt: Text irgendwo markieren, `⌘C`, `⌃⌥⌘M`, `⌘V` — das Eingefü
 
 **Hinweis für macOS Tahoe (und vermutlich neuere Versionen):** Beim ersten Auslösen erscheint die Meldung *„Diese Aktion kann nicht ausgeführt werden, da Skriptaktionen deaktiviert sind"*. Aus Sicherheitsgründen sind Skript-Ausführungen in Kurzbefehlen standardmäßig blockiert. Über den Hinweis-Dialog oder in den Einstellungen von Kurzbefehle.app **Skriptaktionen erlauben** aktivieren, dann läuft es.
 
+### Eigener Hotkey für Undo
+
+Die App akzeptiert genau eine Aktion. Ein normaler Dock-/Finder-Start oder
+`--convert` konvertiert das Clipboard. `--undo` nimmt die letzte erfolgreiche
+Ersetzung zurück; `--help` erklärt die Aktionen. Hilfe und ungültige Argumente
+lösen keine Konvertierung aus. Undo zeigt keinen Erststart-Installationsdialog
+und stößt keine Update-Suche an.
+
+Für einen zweiten Kurzbefehl eine Aktion „Shell-Skript ausführen“ mit diesem
+Befehl anlegen und eine freie Tastenkombination zuweisen:
+
+```bash
+open -n -a "md-clip" --args --undo
+```
+
+`-n` startet für jeden Hotkey-Aufruf eine neue App-Aktion, auch wenn noch ein HUD
+oder Update-Helfer läuft. Ohne CLI-Installation funktioniert dieser App-Weg
+weiterhin. Mit eingerichtetem Terminalbefehl ist auch Folgendes möglich:
+
+```bash
+md-clip --undo --notify
+```
+
+Nach Erfolg bestätigt das HUD die Wiederherstellung. Gibt es keine gültige
+Sicherung, zeigt die App eine Erklärung: Undo gilt zehn Minuten, einmalig und
+nur bis zum nächsten Kopieren. Ein Ablauf oder neuer Clipboard-Eigentümer
+verändert das aktuelle Clipboard beim Undo-Versuch nicht. Andere technische
+Fehler werden mit ihrem Grund angezeigt.
+
 ## Vergleich mit der eingebauten macOS-Alternative
 
 macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Markdown aus formatiertem Text erstellen"** (in älteren Versionen „Aus Rich Text Markdown erstellen"). Für einfache Texte reicht sie. Bei dokumenten-typischem Material — Tabellen, Code-Schnipsel, längerem Aufbau — fallen reproduzierbare Unterschiede auf.
@@ -422,6 +451,7 @@ python3 tests/test-images.py
 python3 tests/test-tables-text.py
 python3 tests/test-doctor.py
 python3 tests/test-pandoc-pin.py
+python3 tests/test-app-actions.py
 python3 tests/test-undo-linux.py
 python3 tests/test-undo-macos.py
 ```

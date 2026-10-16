@@ -70,6 +70,7 @@ jobs:
           "$TEST_PYTHON" tests/test-tables-text.py
           "$TEST_PYTHON" tests/test-doctor.py
           "$TEST_PYTHON" tests/test-pandoc-pin.py
+          "$TEST_PYTHON" tests/test-app-actions.py
           "$TEST_PYTHON" tests/test-undo-linux.py
 
       - name: Undo mit isoliertem X11-Clipboard
@@ -168,4 +169,5 @@ jobs:
           "$TEST_PYTHON" tests/test-tables-text.py
           "$TEST_PYTHON" tests/test-doctor.py
           "$TEST_PYTHON" tests/test-pandoc-pin.py
+          "$TEST_PYTHON" tests/test-app-actions.py
           "$TEST_PYTHON" tests/test-undo-macos.py
