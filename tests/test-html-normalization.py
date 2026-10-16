@@ -129,8 +129,12 @@ for name, source, expected in cases:
 for failure in failed:
     print("FAIL:", *failure, sep="\n")
 assert not failed, f"{len(failed)} HTML-Roundtrips fehlgeschlagen"
-for raw in ('<!-- <div data-line="1" style="x">hidden</div><div></div> -->',
-            '<script>const sample = \'<div data-line="1" style="x">literal</div>\';</script>'):
+raw_cases = ['<!-- <div data-line="1" style="x">hidden</div><div></div> -->',
+             '<script>const sample = \'<div data-line="1" style="x">literal</div>\';</script>']
+for tag in ('textarea','title','script','style'):
+    content = '<td rowspan="0"><div data-line="1" style="x">☀</div><div></div><li data-md-clip-classroom="1">literal</li>'
+    raw_cases.extend(['<'+tag+'>'+content+'</'+tag+'>', '<'+tag.upper()+'>'+content+'</'+tag.upper()+' >', '<'+tag+'>'+content])
+for raw in raw_cases:
     for mode in ("claude_desktop", "google_classroom"):
         assert run(["bash", "-c", 'source "$1"; "preprocess_$2"',
                     "html-test", str(ROOT / "lib/pipeline.sh"), mode], raw.encode()) == raw.encode()
@@ -138,4 +142,4 @@ unfinished = ('<svg>' * 30000 + 'end').encode()
 for mode in ('claude_desktop','google_classroom'):
     assert run(['bash','-c','source "$1"; "preprocess_$2"',
                 'html-test',str(ROOT/'lib/pipeline.sh'),mode],unfinished) == unfinished
-print(f"OK: {len(cases) * 3} HTML-Roundtrips, vier Rohtextprüfungen und unvollständige SVG-Eingaben; Text, Code, Links, Auszeichnung, Listen und Tabellen erhalten")
+print(f"OK: {len(cases) * 3} HTML-Roundtrips, {len(raw_cases)*2} Rohtextprüfungen und unvollständige SVG-Eingaben; Text, Code, Links, Auszeichnung, Listen und Tabellen erhalten")

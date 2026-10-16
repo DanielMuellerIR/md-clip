@@ -35,15 +35,18 @@ while ($html =~ /$markup/g) {
         $token->{self_closing} = substr($raw, pos($raw) // $offset) =~ m{\A\s*/>\z};
     }
     push @tokens, $token;
-    # JavaScript/CSS sind Rohtext; deren String-Literale sind keine HTML-Tags.
-    if ($token->{name} && !$token->{close} && $token->{name} =~ /^(script|style)$/) {
+    # Auch RCDATA in textarea/title enthält keine inneren HTML-Tags. Reader
+    # dekodieren dort Zeichenreferenzen selbst; die Quellbytes bleiben unangetastet.
+    if ($token->{name} && !$token->{close} && $token->{name} =~ /^(script|style|textarea|title)$/) {
         my $name = $token->{name};
         pos($html) = $cursor;
         if ($html =~ m{</\Q$name\E\s*>}ig) {
-            push @tokens, { raw => substr($html, $cursor, $-[0] - $cursor) };
+            push @tokens, { raw => substr($html, $cursor, $-[0] - $cursor), opaque => 1 };
             push @tokens, { raw => $&, name => $name, close => 1, attrs => {} };
             $cursor = $+[0];
         } else {
+            push @tokens, { raw => substr($html, $cursor), opaque => 1 };
+            $cursor = length $html;
             last;
         }
     }
@@ -83,7 +86,7 @@ if ($mode eq 'tables') {
         for my $name ('rowspan', 'colspan') {
             next unless exists $token->{attrs}{$name};
             my $value = $token->{attrs}{$name};
-            $value =~ s/&#(?:x([0-9a-f]+)|(\d+));/chr(defined($1) ? hex($1) : $2)/gie;
+            $value =~ s/&#(?:x([0-9a-f]+)|(\d+));?/chr(defined($1) ? hex($1) : $2)/gie;
             $value =~ s/^\s+|\s+$//g;
             my $duplicates = grep { $_->[2] eq $name } @{$token->{ranges}};
             if ($value !~ /^0*[1-9][0-9]*$/ || $duplicates != 1) {
@@ -192,7 +195,7 @@ sub cleanup_classroom {
 my $output = '';
 for (my $i = 0; $i < @tokens; $i++) {
     my $token = $tokens[$i];
-    if ($token->{svg}) {
+    if ($token->{svg} || $token->{opaque}) {
         print cleanup_classroom($output), $token->{raw};
         $output = '';
         next;

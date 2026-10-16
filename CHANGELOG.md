@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.6 — 2026-10-16
+
+- Scheinbare Tags in `textarea` und `title` lösen keine Tabellenfehler aus.
+  Quellenreparaturen erhalten diese Textbereiche einschließlich unvollständiger
+  Bereiche; tatsächliche Zellen außerhalb werden weiterhin geprüft.
+- Numerische HTML-Zeichenreferenzen in `rowspan`/`colspan` dürfen wie beim Reader
+  ohne Semikolon enden. Ungültige und doppelte Spannweiten bleiben abgelehnt;
+  Strict verweigert weiterhin eine notwendige Tabellen-Textdarstellung.
+
 ## 1.10.5 — 2026-10-16
 
 - INT/TERM nur an die CLI beendet auch eine offene stdin-/Dateikopie oder eine

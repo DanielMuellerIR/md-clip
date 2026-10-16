@@ -187,6 +187,17 @@ sys.stdout.buffer.write(f.read_bytes())
     env.pop('MD_CLIP_STRICT')
     env.pop('MD_CLIP_IMAGES')
     env.pop('MD_CLIP_TABLES')
+    for target in ('gfm','markdown','commonmark'):
+        for tag in ('textarea','title'):
+            source=('<p>BEFORE</p><'+tag+'><td rowspan="0">literal</'+tag+'><p>AFTER</p>').encode()
+            result=run(['--stdin','--from','html','--to',target,'--tables','text','--strict','--quiet'],source)
+            assert b'BEFORE' in result.stdout and b'AFTER' in result.stdout and not result.stderr
+        for value in ('&#50','&#x32'):
+            source=('<table><tr><td colspan="'+value+'">CELL</td></tr></table>').encode()
+            result=run(['--stdin','--from','html','--to',target,'--tables','text'],source)
+            assert b'CELL' in result.stdout and b'2 Spalten' in result.stdout and b'beschrifteten Text' in result.stderr
+            result=run(['--stdin','--from','html','--to',target,'--tables','text','--strict'],source,3)
+            assert not result.stdout and b'Strukturvereinfachung' in result.stderr
     assert not (base/'calls').exists(), 'Datei/stdin/Doctor berührten Clipboard'
     # Kein pandoc-Aufruf im Plain-Weg, auch bei vorhandenem defektem Binary.
     (runtime/'pandoc').unlink()

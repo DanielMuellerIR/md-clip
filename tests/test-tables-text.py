@@ -108,9 +108,39 @@ with tempfile.TemporaryDirectory(prefix='md-clip-tables-') as tmp:
         encoded = '<table><tr><td title="a > b" COLSPAN = "&#50;">ENTITY</td></tr></table>'
         entity, reasons, _ = convert(encoded, target)
         assert reasons == {'tables-text': 1} and 'ENTITY' in text(entity)
+        for attribute in ('colspan','rowspan'):
+            template = ('<table><tr><td '+attribute+'="VALUE">ENTITY</td><td>ONE</td></tr>'
+                        + ('<tr><td>TWO</td></tr>' if attribute=='rowspan' else '') + '</table>')
+            expected, _, expected_output = convert(template.replace('VALUE','2'),target)
+            for value in ('&#50;', '&#50', '&#x32;', '&#x32', '&#X00032', '&#00050', '&#48&#50', ' &#50 '):
+                source = template.replace('VALUE',value)
+                actual, reasons, output = convert(source,target)
+                assert output==expected_output and actual==expected and reasons=={'tables-text':1},(attribute,value,output)
+                _, reasons, _ = convert(source,target,strict=True,success=False)
+                assert reasons=={'tables-text':1}
+                _, reasons, _ = convert(source,target,mode='reject',success=False)
+                assert reasons=={'table-spanned':1}
+        for value in ('&#48', '&#x30', '&#45;1', '&#x', '&#;', '&#50x', '&#x32z'):
+            _, reasons, _ = convert('<table><tr><td colspan="'+value+'">X</td></tr></table>',target,success=False)
+            assert reasons['table-ambiguous']==1 and not reasons['tables-text'],(value,reasons)
         protected = '<p title="<td rowspan=0>">TEXT</p><!-- <td rowspan="0"> --><script>"<td rowspan=0>"</script><pre><code>&lt;td rowspan="0"&gt;</code></pre>'
         _, reasons, _ = convert(protected, target)
         assert not reasons
+        for tag in ('textarea','title'):
+            source = '<p>BEFORE</p><'+tag+'><td rowspan="0">literal</'+tag+'><p>AFTER</p>'
+            reference = '<p>BEFORE</p>'+('<p>literal</p>' if tag=='title' else '')+'<p>AFTER</p>'
+            expected, _, _ = convert(reference,target)
+            for strict in (False,True):
+                actual, reasons, _ = convert(source,target,strict=strict)
+                assert actual==expected and not reasons,(tag,actual,reasons)
+            for position in ('before','after'):
+                bad = '<table><tr><td rowspan="0">REAL</td></tr></table>'
+                _, reasons, _ = convert(bad+source if position=='before' else source+bad,target,success=False)
+                assert reasons['table-ambiguous']==1 and not reasons['tables-text']
+        headed = '<html><head><title><td rowspan="0">literal</title></head><body><p>BODY</p></body></html>'
+        actual, reasons, _ = convert(headed,target,strict=True)
+        reference, _, _ = convert('<p>BODY</p>',target)
+        assert actual==reference and not reasons
 
     # Der HTML-Reader repariert manche defekten Matrizen bereits. Die Grenze des
     # Renderers deshalb zusätzlich an einer gezielt ungültigen geparsten Matrix prüfen.

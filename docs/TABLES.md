@@ -52,7 +52,11 @@ allgemeine Garantie verlustfreier Rich-Text-Konvertierung.
 Nicht positive, nicht numerische oder mehrfach angegebene `rowspan`-/`colspan`-
 Attribute werden im Textmodus schon vor pandoc abgelehnt. Dazu gehört die
 HTML-Sonderform `rowspan="0"`; sie wird nicht als Eins geraten. Positive
-Dezimalzahlen mit Leerraum und numerischen HTML-Zeichenreferenzen sind zulässig.
+Dezimalzahlen mit Leerraum und numerischen HTML-Zeichenreferenzen sind zulässig,
+auch hexadezimal und ohne abschließendes Semikolon (`&#50`, `&#x32`). Der
+[HTML-Parserstandard](https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-state)
+beschreibt diese vom Reader unterstützten Formen. Scheinbare Zell-Tags innerhalb
+von `textarea`-/`title`-Text werden nicht als Tabellenstruktur geprüft.
 Ein geparstes Raster mit Überlappungen, fehlenden Positionen oder Spannweiten
 außerhalb seiner Zeilengruppe wird ebenfalls abgelehnt.
 
