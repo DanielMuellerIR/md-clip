@@ -2,8 +2,10 @@
 
 ## 1.10.14 — 2026-10-16
 
-- Das gebündelte pandoc erhält sprachlose Codeblöcke auch innerhalb von Listen.
-  Explizite Codezäune verhindern, dass daraus normaler Listentext wird.
+- Das gebündelte pandoc und ältere unterstützte Versionen erhalten sprachlose
+  Codeblöcke auch innerhalb von Listen. Explizite Codezäune verhindern, dass
+  daraus normaler Listentext wird. Das Ziel `markdown` verwendet Tilde-Zäune,
+  die auch der ältere Reader unmittelbar hinter einem Listenmarker erkennt.
 
 ## 1.10.13 — 2026-10-16
 

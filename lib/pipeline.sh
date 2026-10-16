@@ -245,11 +245,17 @@ pandoc_table_extensions() {
 }
 
 run_pandoc() {
-  local target_format="${1:-gfm}" table_extensions
+  local target_format="${1:-gfm}" table_extensions code_extensions
   table_extensions="$(pandoc_table_extensions "$target_format")"
+  # pandoc 3.1.3 liest einen sprachlosen Backtick-Zaun direkt hinter einem
+  # Listenmarker als Inline-Code. Tilde-Zäune erhalten dort den Codeblock.
+  case "$target_format" in
+    markdown) code_extensions=-backtick_code_blocks ;;
+    *) code_extensions= ;;
+  esac
   # Der AST-Filter prüft auch Dokumente ohne Tabellen auf sichtbaren Inhalt.
   # Erst danach darf der Writer Auszeichnungsmarker hinzufügen.
-  pandoc -f html -t "${target_format}-raw_html${table_extensions}" \
+  pandoc -f html -t "${target_format}-raw_html${table_extensions}${code_extensions}" \
     --wrap=none --sandbox --lua-filter="$_MD_CLIP_LIB_DIR/tables.lua"
 }
 

@@ -55,10 +55,10 @@ function Div(div)
 end
 
 local function preserve_container_code(container)
-  if PANDOC_VERSION ~= pandoc.types.Version('3.9.0.2') then return nil end
+  if PANDOC_VERSION > pandoc.types.Version('3.9.0.2') then return nil end
   return container:walk {
     CodeBlock = function(code)
-      -- pandoc 3.9.0.2 verliert bei Code in Zitaten oder Listen Einrückung
+      -- pandoc bis 3.9.0.2 verliert bei Code in Zitaten oder Listen Einrückung
       -- und damit teils den Codeblock selbst. Die leere Klasse erzwingt
       -- sprachlose Zäune ohne erfundene Sprache oder zusätzliche Attribute.
       if #code.classes == 0 and code.identifier == '' and #code.attributes == 0 then
