@@ -93,6 +93,9 @@ entsperrte macOS-Konsolensitzung sowie eine ausdrückliche Freigabe:
 python3 tests/test-preview-foreground.py --allow-focus --output /tmp/md-clip-keyboard-results
 ```
 
+Die Prüfung kontrolliert zusätzlich zum globalen Konsolenstatus die eigene
+Benutzersitzung. Eine gesperrte Sitzung wird vor dem ersten Fenster abgelehnt.
+
 Der Ergebnisordner muss neu sein. Die Prüfung baut eine isolierte Test-App und
 steuert echte Tasten für Übernehmen, Abbrechen, Undo, Auswahl und Kopieren.
 CLI, Vorschau und Undo verwenden ausschließlich ein privates Pasteboard.

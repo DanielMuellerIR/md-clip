@@ -26,7 +26,15 @@ if not args.allow_focus:
     parser.error('Diese Prüfung übernimmt den Fensterfokus; --allow-focus ist erforderlich.')
 console = plistlib.loads(subprocess.check_output(['ioreg', '-n', 'Root', '-d1', '-a']))
 console = console[0] if isinstance(console, list) else console
-if console.get('IOConsoleLocked') is not False or os.stat('/dev/console').st_uid != os.getuid():
+# Der globale Wert kann bereits frei melden, während die Benutzersitzung noch gesperrt ist.
+session_unlocked = any(
+    session.get('kCGSSessionOnConsoleKey') is True
+    and session.get('kCGSSessionUserIDKey') == os.getuid()
+    and session.get('CGSSessionScreenIsLocked', False) is False
+    for session in console.get('IOConsoleUsers', [])
+)
+if (console.get('IOConsoleLocked') is not False
+        or os.stat('/dev/console').st_uid != os.getuid() or not session_unlocked):
     parser.error('Die eigene Konsolensitzung muss entsperrt sein.')
 args.output = args.output.resolve()
 args.output.mkdir(parents=True, exist_ok=False)
