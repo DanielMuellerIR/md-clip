@@ -8,6 +8,21 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix="md-clip-report-") as tmp:
     result_file = Path(tmp) / "result"
+    source_file = Path(tmp) / 'RTF source with space'
+    for data, valid in ((br'{\rtf1\ansi text}', True), (br'{\rtf1}', True),
+                        (br'{\rtf1', True),
+                        (b' ' * 4094 + br'{\rtf1\ansi text}', True),
+                        (b'\xef\xbb\xbf' + b' ' * 10000 + br'{\rtf1\ansi text}', True),
+                        (br'{\rtf1\bin4 '+b'\x00\xff\x01\x02}', True),
+                        (b'plain', False), (b'<p>text</p>', False), (b' ' * 20000, False),
+                        (br'{\rtf10\ansi text}', False), (br'{\rtf1broken}', False)):
+        source_file.write_bytes(data);result_file.write_bytes(b'')
+        p = subprocess.run(['bash','-c','source "$1"; check_rtf_header "$2"',
+                            'rtf-header-test',str(ROOT/'lib/pipeline.sh'),str(source_file)],
+                           env=dict(os.environ,MD_CLIP_RESULT_FILE=str(result_file)),capture_output=True,timeout=5)
+        assert p.returncode == (0 if valid else 1), p.stderr
+        assert not p.stdout and source_file.read_bytes() == data
+        assert result_file.read_text() == ('' if valid else 'rtf-header-invalid\t1\n')
 
     def pipeline(function, data, strict=False, target="gfm", success=True):
         result_file.write_bytes(b"")

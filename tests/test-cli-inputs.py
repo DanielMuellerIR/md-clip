@@ -76,12 +76,21 @@ sys.stdout.buffer.write(f.read_bytes())
         path.unlink(missing_ok=True)
         return calls
     env['NO_CLIP']='1'
-    for raw in (b'abc',b'abc\n\n',b'\x00\xff\r\n',b'\n\n'):
+    for raw in (b'abc',b'abc\n\n',b'\x00\xff\r\n',b'\n\n',br'{\rtf1 literal}'+b'\x00\xff\n'):
         assert run(['--stdin','--plain'],raw).stdout==raw
         assert run(['--stdin','--plain','--strict'],raw).stdout==raw
     for args in (['--stdin'],['--stdin','--input','x'],['--json'],['--preview'],['--plain','--from','html'],['--input','missing.html']):
         run(args,b'x',2)
     run(['--doctor','--strict'],rc=2)
+    for raw in (b'plain tagged as RTF', b'<p>HTML tagged as RTF</p>',
+                br'{\rtf10\ansi wrong version}', br'{\rtf1broken}'):
+        for target in ('gfm','markdown','commonmark'):
+            invalid=run(['--stdin','--from','rtf','--to',target],raw,3)
+            assert not invalid.stdout and b'RTF-Kopf' in invalid.stderr
+    wrong_rtf = base/'RTF source with space.rtf'
+    wrong_rtf.write_bytes(b'plain tagged as RTF\n\n')
+    assert b'RTF-Kopf' in run(['--input',str(wrong_rtf)],rc=3).stderr
+    assert run(['--input',str(wrong_rtf),'--plain']).stdout == wrong_rtf.read_bytes()
     for args in (['--preview-window'], ['--undo','--preview-window'],
                  ['--doctor','--preview-window'], ['--replace','--preview-window','--preview']):
         run(args,rc=2)
@@ -226,6 +235,24 @@ sys.exit(int(os.environ.get('MOCK_PREVIEW_STATUS','0')))
             assert (base/'written').read_bytes()==b'protected'
             assert undo_calls()==(['prepare'] if flag=='UNDO_FAIL_PREPARE' else ['prepare','replace','cancel'])
             env.pop(flag)
+        (base/'html').write_bytes(b'<html xmlns:o="urn:schemas-microsoft-com:office:office"><p>HTML rescue</p></html>')
+        (base/'rtf').write_bytes(b'plain tagged as RTF')
+        (base/'plain').write_bytes(b'plain fallback\n\n')
+        for strict in (False, True):
+            undo_calls()
+            p=run(['--replace',*(['--strict'] if strict else [])])
+            assert (base/'written').read_bytes()==b'HTML rescue' and b'RTF-Kopf' in p.stderr
+            assert undo_calls()==['prepare','replace']
+        (base/'html').unlink()
+        undo_calls()
+        p=run(['--replace'])
+        assert (base/'written').read_bytes()==b'plain fallback\n\n' and b'RTF-Kopf' in p.stderr
+        assert undo_calls()==['prepare','replace']
+        (base/'written').write_bytes(b'protected');undo_calls()
+        run(['--replace','--strict'],rc=3)
+        assert (base/'written').read_bytes()==b'protected' and undo_calls()==['prepare','cancel']
+        run(['--replace','--from','rtf'],rc=3)
+        assert (base/'written').read_bytes()==b'protected' and undo_calls()==['prepare','cancel']
         (base/'plain').write_bytes(b'plain\n\n')
         for target in ('gfm','markdown','commonmark'):
             (base/'html').write_bytes(NESTED)

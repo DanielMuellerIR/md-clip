@@ -34,6 +34,34 @@ rtf_fix_escaped_newlines() {
   perl -0pe 's/(?<!\\)((?:\\\\)*)\\(\r?\n)/$1\\par$2/g'
 }
 
+# Nur die bereits erfasste Quelle prüfen, ohne ihre Bytes zum Reader umzuschreiben.
+check_rtf_header() {
+  [ "$#" -eq 1 ] || return 2
+  perl -e '
+    open(my $input, q{<}, $ARGV[0]) or die "RTF-Quelle konnte nicht geöffnet werden.\n";
+    binmode($input);
+    my $head = q{};
+    my $first = 1;
+    while (length($head) < 7) {
+      my $count = read($input, my $chunk, 4096);
+      die "RTF-Kopf konnte nicht gelesen werden.\n" unless defined $count;
+      last unless $count;
+      $head .= $chunk;
+      $head =~ s/\A\xEF\xBB\xBF// if $first;
+      $first = 0;
+      $head =~ s/\A[ \t\r\n\f\x0b]+//;
+    }
+    close($input);
+    exit 0 if $head =~ /\A\{\\rtf1(?=[^A-Za-z0-9]|$)/;
+    if (my $path = $ENV{MD_CLIP_RESULT_FILE}) {
+      open(my $status, q{>>}, $path) or die "Statusdatei: $!";
+      print {$status} "rtf-header-invalid\t1\n";
+      close($status) or die "Statusdatei: $!";
+    }
+    exit 1;
+  ' -- "$1"
+}
+
 flatten_layout_tables() {
   # Der optionale Tabellenmodus braucht die geparste ursprüngliche Matrix.
   # Die historische RTF-Layoutreparatur würde sie vorher in Absätze auflösen.

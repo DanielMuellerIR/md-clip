@@ -719,6 +719,19 @@ class NativeTests(unittest.TestCase):
         self.run_helper("undo")
         self.assertFalse(json.loads(self.run_helper("status"))["undo_available"])
 
+    def test_invalid_rtf_preserves_previous_real_undo(self):
+        original = self.read_clipboard()
+        self.run_helper("replace", self.run_helper("prepare"), b"previous")
+        before = self.read_clipboard()
+        result = subprocess.run([str(ROOT/"bin/md-clip"),"--stdin","--from","rtf","--replace","--quiet"],
+                                input=b"plain tagged as RTF",capture_output=True,timeout=20)
+        self.assertEqual(3,result.returncode,result.stderr.decode())
+        self.assertEqual(b"",result.stdout)
+        self.assertIn(b"RTF-Kopf",result.stderr)
+        self.assertEqual(before,self.read_clipboard())
+        self.run_helper("undo")
+        self.assertEqual(original,self.read_clipboard())
+
     def test_diagnose_reads_no_formats(self):
         self.source_command("delay")
         start = time.monotonic()

@@ -189,6 +189,11 @@ Lua-Filter-Unterstützung sowie Perl ohne Zusatzmodule. RTF benötigt außerdem
 weiterhin die vollständige Clipboard-Installation; die CLI prüft nur den
 benötigten Weg.
 
+Als RTF deklarierte Eingaben benötigen einen grundlegenden RTF-1-Kopf. Falsch
+benannter oder angebotener Klartext wird vor dem Reader abgelehnt; Auto versucht
+die nächste Quelle, `--from rtf` liefert Exit 3. Die Kopfprüfung verändert keine
+Bytes und ersetzt keine vollständige Syntaxprüfung. `--plain` bleibt bytegenau.
+
 ### Reihenfolge und Inhaltsgrenzen
 
 HTML-Layoutcontainer und leere Links werden nach dem HTML-Parsing normalisiert.

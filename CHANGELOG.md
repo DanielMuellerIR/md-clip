@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.4 — 2026-10-16
+
+- RTF-Quellen benötigen vor dem Reader einen grundlegenden RTF-1-Kopf. Falsch
+  als RTF angebotener Klartext zählt dadurch auch unter Linux nicht mehr als
+  erfolgreicher Rich-Text-Versuch. Auto/Strict und explizite Eingaben nennen den
+  Ablehnungsgrund; vorhandenes Clipboard und Undo bleiben geschützt.
+- Die Kopfprüfung verändert keine Eingabebytes und akzeptiert BOM/Whitespace-
+  Präfixe. Die weitere Syntaxprüfung bleibt Aufgabe des jeweiligen Readers.
+
 ## 1.10.3 — 2026-10-16
 
 - Reine vorformatierte HTML-Texte ohne `code`-Kind bleiben als Codeblock erhalten,

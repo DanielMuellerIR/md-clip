@@ -68,7 +68,9 @@ Das Fenster fragt asynchron und ohne überlappende Abfragen nach. Eine einzelne
 Abfrage ist begrenzt; die UI bleibt abbrechbar. Die CLI verfolgt ihren GUI-Prozess.
 INT/TERM schließen ihn und stornieren den Token. Bei unerwartetem Elternende
 storniert der Vorschau-Helfer seine eigene Vorbereitung und beendet sich ebenfalls.
-Die vollständigen Formatbytes bleiben ausschließlich in der bestehenden RAM-Sicherung.
+Die vollständige Undo-Sicherung bleibt ausschließlich im RAM. Eingelesene Quellen,
+Konvertierungsergebnis und Hinweise liegen während des CLI-Laufs in privaten
+temporären Dateien und werden beim normalen Abschluss/Abbruch entfernt.
 
 ## Prüfgrenzen
 

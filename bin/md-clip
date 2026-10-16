@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.10.3"
+VERSION="1.10.4"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -1065,7 +1065,7 @@ read_conversion_report() {
       tables-text) TABLES_TEXT=$((TABLES_TEXT + count_value)) ;;
       images-alt) IMAGES_ALT=$((IMAGES_ALT + count_value)) ;;
       images-omitted) IMAGES_OMITTED=$((IMAGES_OMITTED + count_value)) ;;
-      table-nested|table-spanned|table-ambiguous|empty-document)
+      table-nested|table-spanned|table-ambiguous|empty-document|rtf-header-invalid)
         [ -n "$SOURCE_REASON" ] || SOURCE_REASON="$code" ;;
       *) err "Unbekannter Konvertierungsbericht: $code"; return 3 ;;
     esac
@@ -1087,6 +1087,7 @@ source_failure_reason() {
     return
   fi
   case "$SOURCE_REASON" in
+    rtf-header-invalid) printf 'kein gültiger RTF-Kopf' ;;
     table-nested) printf 'verschachtelte Tabelle nicht darstellbar' ;;
     table-spanned) printf 'verbundene Tabellenzellen nicht darstellbar' ;;
     table-ambiguous) printf 'Tabellenzellen nicht eindeutig zuordenbar' ;;
@@ -1144,6 +1145,10 @@ convert_source() {
     return 0
   fi
   check_dependencies "$kind" || return 2
+  if [ "$kind" = rtf ] && ! check_rtf_header "$WORK_DIR/rtf"; then
+    read_conversion_report || return 3
+    return 3
+  fi
   if "convert_$kind" "$TO" < "$WORK_DIR/$kind" > "$OUTPUT_FILE"; then
     [ -s "$OUTPUT_FILE" ] || return 3
   else

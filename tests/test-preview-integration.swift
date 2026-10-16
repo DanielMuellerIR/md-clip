@@ -125,6 +125,11 @@ func run() throws {
         try require(result.output.isEmpty && raw() == before && board.changeCount == count, "Abgelehnte Vorschau änderte Clipboard")
         try cliUndo(original)
     }
+    let rtfOriginal = try seed(true), rtfBefore = raw(), rtfCount = board.changeCount
+    let invalidRTF = try finish(launch(cli, ["--stdin", "--from", "rtf", "--replace", "--preview-window", "--quiet"], Data("plain tagged as RTF".utf8)))
+    try expect(invalidRTF, 3, "falsche RTF-Quelle")
+    try require(invalidRTF.output.isEmpty && invalidRTF.error.contains("RTF-Kopf") && raw() == rtfBefore && board.changeCount == rtfCount, "Falsche RTF-Quelle änderte Clipboard oder fehlender Grund")
+    try cliUndo(rtfOriginal)
     let original = try seed(true), before = raw(), count = board.changeCount
     let resource = URL(fileURLWithPath: cli).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("helpers/md-clip-preview").path
     try FileManager.default.moveItem(atPath: resource, toPath: resource + ".hidden")
@@ -134,7 +139,7 @@ func run() throws {
     } catch { try? FileManager.default.moveItem(atPath: resource + ".hidden", toPath: resource); throw error }
     try FileManager.default.moveItem(atPath: resource + ".hidden", toPath: resource)
     try cliUndo(original)
-    print("OK: echte CLI und nativer Undo-Dienst schützen Formate/Undo bei UTF-8-, Größen- und Ressourcenfehlern ohne GUI")
+    print("OK: echte CLI und nativer Undo-Dienst schützen Formate/Undo bei RTF-, UTF-8-, Größen- und Ressourcenfehlern ohne GUI")
     if !ui { return }
 
     let acceptedOriginal = try seed(false)

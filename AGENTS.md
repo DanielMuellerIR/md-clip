@@ -80,6 +80,10 @@
   Auto versucht HTML/RTF/Plain, bei Word RTF/HTML/Plain; explizites `--from` ist
   strikt. Datei/stdin ohne `--replace` darf keine Clipboard-Werkzeuge verlangen
   oder aufrufen. Plain-Text bleibt ohne pandoc bytegenau.
+  Als RTF ausgewählte Quellen prüft die CLI vor dem Reader mit
+  `check_rtf_header` aus `lib/pipeline.sh`. Die Prüfung liest nur die erfasste
+  Datei, meldet `rtf-header-invalid` und ersetzt keine vollständige Syntaxprüfung.
+  Kein Readerwechsel oder Umdeuten ausdrücklich gewählten Klartexts.
 - **Die Perl-Schnipsel benutzen nur Kernbordmittel — kein `use <Modul>`.**
   Debian und Ubuntu liefern als Pflichtpaket nur `perl-base` aus; Module wie
   `Encode` stecken erst im vollen `perl`-Paket. `command -v perl` bestand auf

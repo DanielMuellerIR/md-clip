@@ -26,12 +26,23 @@ verhindern die Übernahme des betreffenden Konvertierungsergebnisses.
 | `table-nested` | Strukturelle Ablehnung einer verschachtelten Tabelle |
 | `table-spanned` | Strukturelle Ablehnung verbundener Tabellenzellen |
 | `empty-document` | Dokument ohne sichtbaren darstellbaren Inhalt |
+| `rtf-header-invalid` | Als RTF deklarierte Quelle ohne erkannten RTF-1-Kopf; vor dem Reader abgelehnt |
 | `images-alt` | Nach Quellenbereinigung auf Alternativtext reduzierte Bildknoten, auch bei leerem Alternativtext |
 | `images-omitted` | Nach Quellenbereinigung entfernte Bildknoten |
 
 Bei einer frühzeitigen Ablehnung beschreiben Anzahlen nur die bis zum Abbruch
 erkannten Vorgänge. Sie sind keine vollständige Bestandsaufnahme der Eingabe.
 Neue Kennungen brauchen einen ausdrücklichen CLI-Handler und passende Tests.
+
+Die RTF-Kopfprüfung liest nur die bereits erfasste Quelldatei und verändert sie
+nicht. Sie prüft die grundlegende Sequenz `{\rtf1` mit einer Token-Grenze;
+optionale UTF-8-BOM und führender ASCII-Whitespace sind zulässig. Sie ist keine
+vollständige RTF-Syntaxprüfung: Der Plattformreader bewertet das weitere Dokument.
+Datei/stdin und Clipboard verwenden dieselbe Prüfung. Expliziter Klartext wird
+dadurch weder erkannt noch umgedeutet.
+Die grundlegende Kopfsequenz ist in Microsofts
+[Beschreibung des RTF-Dokumentkopfs](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxrtfex/3cf14977-3883-404a-8ed8-57c99263fb76)
+festgehalten.
 
 ## Strenger Modus
 
