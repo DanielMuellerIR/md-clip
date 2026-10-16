@@ -151,6 +151,12 @@ jobs:
           test_python="$(command -v python3)"
           printf 'TEST_PYTHON=%s\n' "$test_python" >> "$GITHUB_ENV"
           "$test_python" --version
+      - name: CLI an den ausgewählten Konverter binden
+        run: |
+          # Die macOS-CLI ergänzt Homebrew im PATH. Der explizite lokale
+          # Konverter hat Vorrang und hält Writer und Roundtrip-Reader gleich.
+          test ! -e bin/pandoc && test ! -L bin/pandoc
+          ln -s "$(command -v pandoc)" bin/pandoc
       - name: Fixtures, CLI und isolierte Wrapper
         env:
           MD_CLIP_SKIP_CLIPBOARD: '1'

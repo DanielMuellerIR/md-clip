@@ -49,16 +49,26 @@ code_blocks() {
 result=[]
 def visit(value):
     if isinstance(value, dict):
-        if value.get("t") == "CodeBlock": result.append(value["c"][1])
+        if value.get("t") == "CodeBlock": result.append(value["c"])
         for child in value.values(): visit(child)
     elif isinstance(value, list):
         for child in value: visit(child)
 visit(json.load(sys.stdin)); print(json.dumps(result))'
 }
-html=$'<ol start="10"><li><p>outer</p><blockquote><pre><code>x&#92;\nnext\n&#92;# keep\n</code></pre></blockquote></li></ol>'
-for format in gfm markdown commonmark; do
-  actual=$(printf '%s' "$html" | "$ROOT/bin/md-clip" --stdin --from html --to "$format" --quiet | pandoc -f "$format" -t json | code_blocks)
-  expected=$(printf '%s' "$html" | pandoc -f html -t json | code_blocks)
-  check "two_digit_list_quote_code_$format" "$actual" "$expected"
+for start in 1 9 10 99 100; do
+  html="<ol start=\"$start\"><li><p>outer</p><blockquote><pre><code>"$'x&#92;\nnext\n&#92;# keep\n'"</code></pre></blockquote></li></ol>"
+  for format in gfm markdown commonmark; do
+    actual=$(printf '%s' "$html" | "$ROOT/bin/md-clip" --stdin --from html --to "$format" --quiet | pandoc -f "$format" -t json | code_blocks)
+    expected=$(printf '%s' "$html" | pandoc -f html -t json | code_blocks)
+    check "ordered_quote_code_${start}_$format" "$actual" "$expected"
+  done
+done
+for language in '' ' class="language-sh"'; do
+  html="<blockquote><pre><code$language>"$'```\nx&#92;\nnext\n&#92;# keep\n'"</code></pre></blockquote>"
+  for format in gfm markdown commonmark; do
+    actual=$(printf '%s' "$html" | "$ROOT/bin/md-clip" --stdin --from html --to "$format" --quiet | pandoc -f "$format" -t json | code_blocks)
+    expected=$(printf '%s' "$html" | pandoc -f html -t json | code_blocks)
+    check "standalone_quote_code_${language:-unlabelled}_$format" "$actual" "$expected"
+  done
 done
 [ "$failed" -eq 0 ]

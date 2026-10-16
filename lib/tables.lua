@@ -54,6 +54,21 @@ function Div(div)
   return div.content
 end
 
+local function preserve_quoted_code(quote)
+  if PANDOC_VERSION ~= pandoc.types.Version('3.9.0.2') then return nil end
+  return quote:walk {
+    CodeBlock = function(code)
+      -- pandoc 3.9.0.2 verliert bei zitiertem Code die erste Einrückung. Eine
+      -- leere Klasse erzwingt sprachlose Zäune ohne erfundene Sprache oder
+      -- zusätzliche Attribute im erzeugten Markdown.
+      if #code.classes == 0 and code.identifier == '' and #code.attributes == 0 then
+        code.classes = { '' }
+      end
+      return code
+    end
+  }
+end
+
 function Link(link)
   local has_image = false
   pandoc.Span(link.content):walk { Image = function() has_image = true end }
@@ -318,6 +333,7 @@ return { { Pandoc = function(doc)
       end
     }
   end
-  doc = doc:walk { Span = Span, Div = Div, Image = Image, Link = Link, Table = Table }
+  doc = doc:walk { Span = Span, Div = Div, Image = Image, Link = Link, Table = Table,
+                   BlockQuote = preserve_quoted_code }
   return finalize_document(doc)
 end } }

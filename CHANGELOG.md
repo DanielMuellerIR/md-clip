@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.9 — 2026-10-16
+
+- Das gebündelte pandoc erhält Code in Zitaten, auch innerhalb nummerierter
+  Listen. Sprachlose Codezäune umgehen dessen Writer-Fehler,
+  ohne Text, Backslashes oder Sprachangaben zu verändern. macOS 14 bleibt unterstützt.
+- Die macOS-CI bindet auch die CLI ausdrücklich an den Konverter ihrer Matrix,
+  damit Writer und Roundtrip-Reader dieselbe pandoc-Version verwenden.
+
 ## 1.10.8 — 2026-10-16
 
 - Weitere INT/TERM während der laufenden Bereinigung ändern den ersten Exit-Status
