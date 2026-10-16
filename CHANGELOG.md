@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.10 — 2026-10-16
+
+- Return übernimmt die native Vorschau auch bei Fokus im Markdown oder in den
+  Konvertierungshinweisen. Nicht mehr verfügbare Übernahmen bleiben gesperrt;
+  Auswahl, Kopieren und andere Tastenkürzel behalten ihr Verhalten.
+
 ## 1.10.9 — 2026-10-16
 
 - Das gebündelte pandoc erhält Code in Zitaten, auch innerhalb nummerierter

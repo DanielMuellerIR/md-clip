@@ -9,6 +9,7 @@ import platform
 import plistlib
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,13 @@ ROOT = Path(__file__).resolve().parents[1]
 BODY = '# Tastatur ä😀\n\nErste Zeile.\nZweite Zeile.\n\n```sh\nprintf "%s" \\\n  "\\# unverändert"\n```\n'
 results = []
 children = []
+
+
+def interrupted(_signum, _frame):
+    raise KeyboardInterrupt('Vordergrundprüfung abgebrochen')
+
+
+signal.signal(signal.SIGTERM, interrupted)
 
 
 def osa(source, *arguments):
@@ -171,6 +179,7 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
         for name, location, command, expected in (
             ('return-initial', None, 'key code 36', 0),
             ('return-content', 'content', 'key code 36', 0),
+            ('enter-content', 'content', 'key code 76', 0),
             ('return-notes', 'notes', 'key code 36', 0),
             ('escape-content', 'content', 'key code 53', 4),
             ('escape-notes', 'notes', 'key code 53', 4),
@@ -208,19 +217,25 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
         process, pid = start()
         try:
             initial = observation(process)
-            forward = tab_sequence(process, pid)
-            backward = tab_sequence(process, pid, reverse=True)
-            expected = {'content', 'notes'}
             if initial['keyboard_access']:
-                expected.update({'accept', 'cancel', 'undo'})
-            record('tab-and-shift-tab', expected.issubset(forward) and expected.issubset(backward),
-                   keyboard_access=initial['keyboard_access'], forward=forward, backward=backward)
+                forward = tab_sequence(process, pid)
+                backward = tab_sequence(process, pid, reverse=True)
+                expected = {'content', 'notes', 'accept', 'cancel', 'undo'}
+                record('tab-and-shift-tab', expected.issubset(forward) and expected.issubset(backward),
+                       keyboard_access=True, forward=forward, backward=backward)
+            else:
+                record('tab-disabled-by-system', True, skipped=True,
+                       reason='Vollständige Tastaturnavigation ist aus; die Prüfung aller Tab-Ziele steht noch aus.',
+                       keyboard_access=False)
             board('write', text='Neue private Generation')
             invalid = observation(process, lambda value: not value.get('accept') and not value.get('undo'))
-            forward = tab_sequence(process, pid)
-            backward = tab_sequence(process, pid, reverse=True)
-            record('tab-skips-unavailable-actions', not {'accept', 'undo'}.intersection(forward+backward),
-                   status=invalid['status'], forward=forward, backward=backward)
+            if initial['keyboard_access']:
+                forward = tab_sequence(process, pid)
+                backward = tab_sequence(process, pid, reverse=True)
+                record('tab-skips-unavailable-actions', not {'accept', 'undo'}.intersection(forward+backward),
+                       status=invalid['status'], forward=forward, backward=backward)
+            else:
+                record('tab-unavailable-actions-disabled-by-system', True, skipped=True, keyboard_access=False)
         finally:
             terminate(process)
 
@@ -239,7 +254,9 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
             snapshot = board('snapshot')
             encoded = base64.b64encode(BODY.encode()).decode()
             record('copy-private-and-invalidate', snapshot['items'] == [{'public.utf8-plain-text': encoded}]
-                   and snapshot['host_change_count'] == seeded['host_change_count'], status=invalid['status'])
+                   and snapshot['host_change_count'] == seeded['host_change_count'], status=invalid['status'],
+                   private_items=snapshot['items'], host_change_count_before=seeded['host_change_count'],
+                   host_change_count_after=snapshot['host_change_count'])
             events(pid, 'key code 36')
             time.sleep(.3)
             record('invalid-return-does-not-write', process.poll() is None and board('snapshot')['change_count'] == snapshot['change_count'])

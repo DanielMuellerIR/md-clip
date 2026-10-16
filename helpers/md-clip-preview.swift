@@ -99,20 +99,31 @@ private let backgroundPreview: Bool = {
 #endif
 }()
 
-#if TEST
 private final class PreviewTextView: NSTextView {
+    override func keyDown(with event: NSEvent) {
+        // Schreibgeschützte Textansichten verbrauchen Return sonst vor dem Standardbutton.
+        if (event.keyCode == 36 || event.keyCode == 76),
+           event.modifierFlags.intersection([.shift, .control, .option, .command]).isEmpty {
+            if let button = window?.defaultButtonCell?.controlView as? NSButton, button.isEnabled {
+                button.performClick(nil)
+            }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+#if TEST
     override func copy(_ sender: Any?) {
         // Echte Copy-Tasten dürfen im Test nur das private Pasteboard ändern.
         guard let name = ProcessInfo.processInfo.environment["MD_CLIP_TEST_PASTEBOARD"],
               name != NSPasteboard.Name.general.rawValue else { return }
         let board = NSPasteboard(name: NSPasteboard.Name(name))
-        board.clearContents()
-        _ = writeSelection(to: board, type: .string)
+        let types = writablePasteboardTypes
+        board.declareTypes(types, owner: nil)
+        _ = writeSelection(to: board, types: types)
     }
-}
-#else
-private typealias PreviewTextView = NSTextView
 #endif
+}
 
 private final class PreviewController: NSObject, NSWindowDelegate, NSMenuItemValidation {
     let window: NSWindow
@@ -297,7 +308,7 @@ private final class PreviewController: NSObject, NSWindowDelegate, NSMenuItemVal
             let responder = window.firstResponder
             let focus = responder === textView ? "content" : responder === notesView ? "notes" :
                 responder === acceptButton ? "accept" : responder === cancelButton ? "cancel" :
-                responder === undoButton ? "undo" : String(describing: type(of: responder))
+                responder === undoButton ? "undo" : responder.map { String(describing: type(of: $0)) } ?? "none"
             let selected = textView.selectedRange(), selectedNotes = notesView.selectedRange()
             let observed: [String: Any] = ["accept": acceptButton.isEnabled, "undo": undoButton.isEnabled,
                 "visible": window.isVisible, "status": statusLabel.stringValue,

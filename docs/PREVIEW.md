@@ -98,6 +98,8 @@ steuert echte Tasten für Übernehmen, Abbrechen, Undo, Auswahl und Kopieren.
 CLI, Vorschau und Undo verwenden ausschließlich ein privates Pasteboard.
 Auch Kopieren wird nur im TEST-Build auf dieses Board umgeleitet. Die
 Tab-Reihenfolge wird anhand der tatsächlichen macOS-Tastaturnavigation bewertet;
-deaktivierte Aktionen dürfen dabei nicht erreichbar sein. Das JSON-Protokoll
+bei ausgeschalteter Navigation wird die vollständige Reihenfolge ausdrücklich
+als übersprungen protokolliert. Deaktivierte Aktionen dürfen dabei nicht
+erreichbar sein. Das JSON-Protokoll
 enthält synthetische Testdaten. VoiceOver-Ausgabe und die notarisiert installierte
 App sind gesondert abzunehmen; der Tastaturtest bestätigt sie nicht.
