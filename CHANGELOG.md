@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.3 — 2026-10-16
+
+- Reine vorformatierte HTML-Texte ohne `code`-Kind bleiben als Codeblock erhalten,
+  auch mit Syntax-Spans und `br`-Umbrüchen. Zeilen, Einrückungen und Backslashes
+  gehen dadurch nicht in normalen Markdown-Absätzen verloren.
+- Bestehende Code-Kinder/Sprachangaben sowie Blöcke mit Links, Bildern oder anderem
+  Rich-Inhalt bleiben von dieser Reparatur ausgenommen.
+
 ## 1.10.2 — 2026-10-16
 
 - Eingebettete SVGs behalten Styles, Datenattribute und foreignObject-Inhalte.

@@ -197,6 +197,13 @@ Linkziele und Linktitel bleiben erhalten. Quellenreparaturen für Claude-Codezei
 und Classroom-Anhänge berücksichtigen auch einfache Anführungszeichen und
 großgeschriebene Attributnamen. Maskiertes HTML in Code bleibt unverändert.
 
+Reine vorformatierte HTML-Texte in `<pre>` werden auch ohne eigenes `<code>`
+als Codeblock erhalten. Syntax-Spans und `<br>` sind dabei erlaubt; Zeilen,
+Einrückungen und Backslashes bleiben im Code. Vorhandene Code-Kinder und
+Sprachangaben bleiben erhalten. Blöcke mit Links, Bildern oder anderem Rich-Inhalt
+sowie unvollständige oder verschachtelte Pre-Strukturen sind davon ausgenommen.
+Eine Programmiersprache wird nicht geraten.
+
 Bei Clipboard-`auto` liest md-clip die vorhandenen HTML-, RTF- und Klartext-
 Quellen einmal ein. Es versucht HTML → RTF → Klartext. Erkennt es Microsoft-
 Word-HTML, gilt RTF → HTML → Klartext. Eine leere, unsichtbare, nicht verfügbare
@@ -260,7 +267,7 @@ insbesondere `rowspan="0"`. Details und ein Beispiel stehen in
 
 HTML-Bildreferenzen und Inline-SVG bleiben mit `--images keep` erhalten. Dabei
 werden keine Bilder heruntergeladen oder aus Word-Dokumenten extrahiert.
-SVG-Styles und eingebetteter Inhalt bleiben vor dem Reader unverändert.
+Vollständige SVG-Elemente behalten Styles und eingebetteten Inhalt vor dem Reader.
 `--images alt` ersetzt erkannte Bilder durch ihren Alternativtext; fehlt dieser,
 entfällt das Bild. `--images omit` entfernt die Bilder vollständig. Die Anzahl
 erscheint als Vereinfachung auf stderr. Die Politik gilt für konvertiertes HTML/RTF;

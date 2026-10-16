@@ -70,6 +70,12 @@
   zum Bild; die Quellenreparaturen dürfen sie nicht als Dokumentinhalt behandeln.
   `tests/test-images.py` vergleicht die vollständigen Bilddaten mit dem direkt
   geparsten SVG und prüft, dass nachfolgende echte Tabellen weiter validiert werden.
+- **Reine Pre-Texte brauchen Code-Semantik vor dem Reader.** Pandoc liest `pre`
+  ohne `code` als normalen Text. Die HTML-Quellenreparatur ergänzt das Code-Kind
+  nur bei vollständigen, nicht verschachtelten Blöcken mit Text, Spans und br.
+  Bestehende Code-/Sprachangaben und Rich-Inhalt bleiben ausgenommen. br wird nur
+  in neu reparierten Blöcken zum echten LF. Kein nachträgliches Rekonstruieren
+  verlorener Einrückung aus Markdown; keine Programmiersprache raten.
 - **Quelle, Konvertierung, Bewertung und Ausgabe bleiben getrennt.** Clipboard-
   Auto versucht HTML/RTF/Plain, bei Word RTF/HTML/Plain; explizites `--from` ist
   strikt. Datei/stdin ohne `--replace` darf keine Clipboard-Werkzeuge verlangen

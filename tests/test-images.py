@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix="md-clip-images-") as tmp:
             '<svg xmlns="http://www.w3.org/2000/svg" style="fill:red" data-keep="root"><svg width="1" height="1"/><rect width="2" height="2" style="stroke:blue" data-keep="shape"/></svg>',
             '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="2" height="2"><div xmlns="http://www.w3.org/1999/xhtml" data-line="1"><img src="https://classroom.google.com/webthumbnail/x"/></div></foreignObject></svg>',
             '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="2" height="2"><table xmlns="http://www.w3.org/1999/xhtml"><tr><td colspan="0">inside</td></tr></table></foreignObject></svg>',
+            '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="2" height="2"><pre xmlns="http://www.w3.org/1999/xhtml"><span style="color:red">  one\n  two</span></pre></foreignObject></svg>',
             '<svg xmlns="http://www.w3.org/2000/svg"><text><![CDATA[x > </svg> literal]]></text><rect style="fill:blue"/></svg>',
             '<svg xmlns="http://www.w3.org/2000/svg"><?keep literal="</svg>"?><rect style="fill:blue"/></svg>')
         for svg_source in svg_sources:

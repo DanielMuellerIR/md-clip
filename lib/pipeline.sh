@@ -20,8 +20,8 @@ case "$_MD_CLIP_LIB_DIR" in
   *) _MD_CLIP_LIB_DIR="$PWD/$_MD_CLIP_LIB_DIR" ;;
 esac
 
-# Quellenreparaturen vor pandoc; die allgemeine Span-/Link-Normalisierung
-# läuft danach auf geparsten Knoten in tables.lua.
+# Pre-Semantik und Quellenzeilen vor pandoc reparieren; die allgemeine Span-/
+# Link-Normalisierung läuft danach auf geparsten Knoten in tables.lua.
 preprocess_claude_desktop() {
   perl "$_MD_CLIP_LIB_DIR/preprocess-html.pl" claude
 }

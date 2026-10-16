@@ -24,8 +24,10 @@ def signature(document):
             kind, content = value.get("t"), value.get("c")
             if kind in ("Link", "Image"):
                 found[kind].append(content[2])
-            elif kind in ("Code", "CodeBlock"):
+            elif kind == "Code":
                 found[kind].append(content[-1])
+            elif kind == "CodeBlock":
+                found[kind].append([content[0][1], content[-1]])
             elif kind == "OrderedList":
                 found[kind].append([content[0][0], len(content[1])])
             elif kind == "BulletList":
@@ -55,6 +57,22 @@ for attrs in ('title="a > b"', "title='a > b'", 'title="a &gt; b"',
               'title="a >\nb"', 'TITLE="a > b"'):
     cases.append(("span-" + attrs, '<p><span ' + attrs + '>Hallo</span></p>', '<p>Hallo</p>'))
 cases.extend([
+    ("preformatted-text", '<pre>  printf "%s" \\\n    "\\# literal"\n\n  next\\\n</pre>',
+     '<pre><code>  printf "%s" \\\n    "\\# literal"\n\n  next\\\n</code></pre>'),
+    ("preformatted-spans", '<pre><span title="a > b"># literal ☀</span>\n<span><span>  | x | y | \\#</span></span></pre>',
+     '<pre><code># literal ☀\n  | x | y | \\#</code></pre>'),
+    ("preformatted-br", '<pre><span>one</span><br style="color:red" class="x"><span>  two</span></pre>',
+     '<pre><code>one\n  two</code></pre>'),
+    ("preformatted-list", '<ul><li>before<pre><span>  one\n    two</span></pre>after</li></ul>',
+     '<ul><li>before<pre><code>  one\n    two</code></pre>after</li></ul>'),
+    ("existing-code-language", '<pre><code class="language-python">  print("☀")\n</code></pre>',
+     '<pre><code class="language-python">  print("☀")\n</code></pre>'),
+    ("preformatted-link", '<pre><a href="https://example.test/pre" title="TARGET">one\ntwo</a></pre>',
+     '<pre><a href="https://example.test/pre" title="TARGET">one\ntwo</a></pre>'),
+    ("preformatted-image", '<pre>before <img src="x.png" alt="ICON"> after</pre>',
+     '<pre>before <img src="x.png" alt="ICON"> after</pre>'),
+    ("nested-pre-unchanged", '<pre>one<pre>two</pre>three</pre>',
+     '<pre>one<pre>two</pre>three</pre>'),
     ("nested-spans", '<p><span title="a > b">A <span><strong>B</strong></span> C</span></p>', '<p>A <strong>B</strong> C</p>'),
     ("significant-space", '<p><strong>A</strong><span title="a > b"> </span><em>B</em></p>', '<p><strong>A</strong> <em>B</em></p>'),
     ("comment", '<!-- <span title="a > b">hidden</span> --><p>visible</p>', '<p>visible</p>'),

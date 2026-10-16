@@ -51,7 +51,7 @@ while ($html =~ /$markup/g) {
 }
 push @tokens, { raw => substr($html, $cursor) } if $cursor < length $html;
 
-# SVG ist Bildinhalt. Auch Styles, foreignObject-HTML und data-line darin
+# Vollständiges SVG ist Bildinhalt. Styles, foreignObject-HTML und data-line darin
 # müssen unverändert zum Reader gelangen, statt Quellenreparaturen auszulösen.
 my @protected;
 my $svg_start;
@@ -101,6 +101,32 @@ if ($mode eq 'tables') {
 }
 
 if ($mode eq 'claude') {
+    # Reiner pre-Text braucht ein code-Kind, damit pandoc die Vorformatierung
+    # erhält. Rich-Inhalt und unvollständige/verschachtelte pre-Blöcke ausnehmen.
+    my @pre_frames;
+    for my $i (0 .. $#tokens) {
+        my $token = $tokens[$i];
+        my $name = $token->{name} // '';
+        if ($name eq 'pre') {
+            if (!$token->{close}) {
+                $pre_frames[-1]{eligible} = 0 if @pre_frames;
+                push @pre_frames, { start => $i, eligible => !@pre_frames && !$token->{self_closing}, breaks => [] };
+            } elsif (@pre_frames) {
+                my $frame = pop @pre_frames;
+                if ($frame->{eligible} && !$frame->{code}) {
+                    $tokens[$frame->{start}]{raw} .= '<code>';
+                    $token->{raw} = '</code>' . $token->{raw};
+                    for my $line_break (@{$frame->{breaks}}) { $tokens[$line_break] = { raw => "\n" }; }
+                }
+            }
+        } elsif (@pre_frames) {
+            my $frame = $pre_frames[-1];
+            if ($name eq 'code') { $frame->{code} = 1; }
+            elsif ($name eq 'br') { push @{$frame->{breaks}}, $i; }
+            elsif (($name ne '' && $name ne 'span') || $token->{svg}
+                   || $token->{raw} =~ /^<[!?]/) { $frame->{eligible} = 0; }
+        }
+    }
     my $pre_depth = 0;
     my @divs;
     for my $token (@tokens) {
