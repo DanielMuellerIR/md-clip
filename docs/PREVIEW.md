@@ -74,7 +74,12 @@ Die vollständigen Formatbytes bleiben ausschließlich in der bestehenden RAM-Si
 
 Die automatischen nativen Ansichten laufen ohne Fokusübernahme. Sie prüfen
 Controls, Command-Tastaturaktionen, Größen, Hell/Dunkel, unveränderte Textbytes,
-wirklich sichtbares Scrollende sowie Status- und Prozesswechsel. Sie ersetzen
+wirklich sichtbares Scrollende sowie Status- und Prozesswechsel. Zusätzlich
+laufen CLI, Fenster und Undo-Dienst gemeinsam gegen ein privates Pasteboard:
+Übernehmen, Abbrechen, Undo, neues Kopieren und Signale sowie UTF-8-, Größen-
+und Ressourcenfehler werden mit vollständigen Formatbytes geprüft. Die dafür
+verwendete Fenstersteuerung existiert ausschließlich in TEST-Builds.
+Diese Hintergrundprüfungen ersetzen
 keine Abnahme der vollständigen notarisiert installierten App einschließlich
 Vordergrund-Fokus, Return/Escape und Systemdialogen. Diese Abnahme gehört zum
 Installations-/Release-Meilenstein.

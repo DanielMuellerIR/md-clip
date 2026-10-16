@@ -287,6 +287,16 @@ private final class PreviewController: NSObject, NSWindowDelegate, NSMenuItemVal
                 "preview_pid": Int(getpid())]
             try? JSONSerialization.data(withJSONObject: observed).write(to: URL(fileURLWithPath: path), options: .atomic)
         }
+        if let path = ProcessInfo.processInfo.environment["MD_CLIP_TEST_PREVIEW_ACTION"],
+           let action = try? String(contentsOfFile: path, encoding: .utf8) {
+            try? FileManager.default.removeItem(atPath: path)
+            switch action {
+            case "accept": acceptButton.performClick(nil)
+            case "cancel": cancelButton.performClick(nil)
+            case "undo": undoButton.performClick(nil)
+            default: break
+            }
+        }
 #endif
     }
 

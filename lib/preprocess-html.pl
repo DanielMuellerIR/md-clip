@@ -7,7 +7,7 @@ die "HTML-Vorverarbeitung: claude|classroom|tables erwartet\n"
     unless $mode eq 'claude' || $mode eq 'classroom' || $mode eq 'tables';
 my $html = do { local $/; <STDIN> } // '';
 my $tag_body = qr/(?:[^"'<>]|"[^"]*"|'[^']*')*/;
-my $markup = qr/<!--.*?-->|<![^>]*>|<\/?[A-Za-z][A-Za-z0-9:_-]*$tag_body>/s;
+my $markup = qr/<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>|<![^>]*>|<\/?[A-Za-z][A-Za-z0-9:_-]*$tag_body>/s;
 my @tokens;
 my $cursor = 0;
 
@@ -18,7 +18,7 @@ while ($html =~ /$markup/g) {
     my $raw = $&;
     $cursor = $+[0];
     my $token = { raw => $raw };
-    if ($raw =~ /^<(\/?)([A-Za-z][A-Za-z0-9:_-]*)\b/) {
+    if ($raw =~ /^<(\/?)([A-Za-z][A-Za-z0-9:_-]*)(?=[\s\/>])/) {
         $token->{close} = $1 ne '';
         $token->{name} = lc $2;
         my $offset = $+[0];
@@ -32,6 +32,7 @@ while ($html =~ /$markup/g) {
         }
         $token->{attrs} = \%attrs;
         $token->{ranges} = \@ranges;
+        $token->{self_closing} = substr($raw, pos($raw) // $offset) =~ m{\A\s*/>\z};
     }
     push @tokens, $token;
     # JavaScript/CSS sind Rohtext; deren String-Literale sind keine HTML-Tags.
@@ -49,6 +50,32 @@ while ($html =~ /$markup/g) {
     pos($html) = $cursor;
 }
 push @tokens, { raw => substr($html, $cursor) } if $cursor < length $html;
+
+# SVG ist Bildinhalt. Auch Styles, foreignObject-HTML und data-line darin
+# müssen unverändert zum Reader gelangen, statt Quellenreparaturen auszulösen.
+my @protected;
+my $svg_start;
+my $svg_depth = 0;
+for (my $i = 0; $i < @tokens; $i++) {
+    my $token = $tokens[$i];
+    my $svg = ($token->{name} // '') eq 'svg';
+    if (defined $svg_start) {
+        $svg_depth += $token->{close} ? -1 : $token->{self_closing} ? 0 : 1 if $svg;
+        if (!$svg_depth) {
+            push @protected, { raw => join('', map { $_->{raw} } @tokens[$svg_start .. $i]), svg => 1 };
+            undef $svg_start;
+        }
+        next;
+    }
+    if ($svg && !$token->{close}) {
+        if ($token->{self_closing}) { push @protected, { raw => $token->{raw}, svg => 1 }; }
+        else { $svg_start = $i; $svg_depth = 1; }
+        next;
+    }
+    push @protected, $token;
+}
+push @protected, @tokens[$svg_start .. $#tokens] if defined $svg_start;
+@tokens = @protected;
 
 if ($mode eq 'tables') {
     for my $token (@tokens) {
@@ -122,9 +149,28 @@ sub thumbnail {
         && ($token->{attrs}{src} // '') =~ m{\A(?:(?i:https?):)?//(?i:classroom\.google\.com)/webthumbnail(?:[/?#]|\z)};
 }
 
+sub cleanup_classroom {
+    my ($output) = @_;
+    my $div = qr/<\/?div\b$tag_body>/i;
+    my $opaque = qr{<!--.*?-->|<script\b$tag_body>.*?</script\s*>|<style\b$tag_body>.*?</style\s*>}is;
+    1 while $output =~ s{$opaque(*SKIP)(*F)|<div\b$tag_body>\s*</div\s*>}{}gi;
+    1 while $output =~ s{$opaque(*SKIP)(*F)|(<li data-md-clip-classroom="1">.*?</li>)(?:\s*$div\s*)+(?=<li data-md-clip-classroom="1">)}{$1}gs;
+    $output =~ s{$opaque(*SKIP)(*F)|(?:<li data-md-clip-classroom="1">.*?</li>\s*)+}{
+        my $items = $&;
+        $items =~ s/ data-md-clip-classroom="1"//g;
+        "<ul>$items</ul>";
+    }gse;
+    return $output;
+}
+
 my $output = '';
 for (my $i = 0; $i < @tokens; $i++) {
     my $token = $tokens[$i];
+    if ($token->{svg}) {
+        print cleanup_classroom($output), $token->{raw};
+        $output = '';
+        next;
+    }
     if (($token->{name} // '') eq 'a' && !$token->{close} && exists $token->{attrs}{href}) {
         my $end = closing_tag($i, 'a');
         if (defined $end && grep { thumbnail($_) } @tokens[$i + 1 .. $end - 1]) {
@@ -164,13 +210,4 @@ for (my $i = 0; $i < @tokens; $i++) {
     $output .= $token->{raw} unless thumbnail($token);
 }
 
-my $div = qr/<\/?div\b$tag_body>/i;
-my $opaque = qr{<!--.*?-->|<script\b$tag_body>.*?</script\s*>|<style\b$tag_body>.*?</style\s*>}is;
-1 while $output =~ s{$opaque(*SKIP)(*F)|<div\b$tag_body>\s*</div\s*>}{}gi;
-1 while $output =~ s{$opaque(*SKIP)(*F)|(<li data-md-clip-classroom="1">.*?</li>)(?:\s*$div\s*)+(?=<li data-md-clip-classroom="1">)}{$1}gs;
-$output =~ s{$opaque(*SKIP)(*F)|(?:<li data-md-clip-classroom="1">.*?</li>\s*)+}{
-    my $items = $&;
-    $items =~ s/ data-md-clip-classroom="1"//g;
-    "<ul>$items</ul>";
-}gse;
-print $output;
+print cleanup_classroom($output);

@@ -116,4 +116,8 @@ for raw in ('<!-- <div data-line="1" style="x">hidden</div><div></div> -->',
     for mode in ("claude_desktop", "google_classroom"):
         assert run(["bash", "-c", 'source "$1"; "preprocess_$2"',
                     "html-test", str(ROOT / "lib/pipeline.sh"), mode], raw.encode()) == raw.encode()
-print(f"OK: {len(cases) * 3} HTML-Roundtrips und vier Rohtextprüfungen; Text, Code, Links, Auszeichnung, Listen und Tabellen erhalten")
+unfinished = ('<svg>' * 30000 + 'end').encode()
+for mode in ('claude_desktop','google_classroom'):
+    assert run(['bash','-c','source "$1"; "preprocess_$2"',
+                'html-test',str(ROOT/'lib/pipeline.sh'),mode],unfinished) == unfinished
+print(f"OK: {len(cases) * 3} HTML-Roundtrips, vier Rohtextprüfungen und unvollständige SVG-Eingaben; Text, Code, Links, Auszeichnung, Listen und Tabellen erhalten")

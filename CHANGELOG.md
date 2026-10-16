@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.2 — 2026-10-16
+
+- Eingebettete SVGs behalten Styles, Datenattribute und foreignObject-Inhalte.
+  HTML-Quellenreparaturen und Tabellenprüfungen behandeln ihre inneren Elemente
+  nicht mehr als Dokumentinhalt; `--images keep` erhält die vollständigen Bilddaten.
+- Native Integrationstests verbinden CLI, Vorschau und Undo-Dienst auf einem
+  privaten Pasteboard. Übernahme, Abbruch/Undo, neues Kopieren, Signale und
+  abgelehnte Eingaben werden gemeinsam geprüft. Die Teststeuerung ist im
+  normalen Build ausgeschlossen.
+
 ## 1.10.1 — 2026-10-16
 
 - X11 liest bereits in Xlib gepufferte Formatantworten vor dem Warten auf die

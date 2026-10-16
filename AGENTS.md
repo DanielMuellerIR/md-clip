@@ -64,6 +64,12 @@
   `lib/preprocess-html.pl`, `lib/tidy-markdown.pl` und `lib/tables.lua` liegen im
   Bundle daneben. Build,
   Bundle-Prüfer und isolierte Testkopien müssen neue Ressourcen mitführen.
+- **SVG-Inhalt bleibt vor dem Reader unverändert.** Der HTML-Tokenizer schützt
+  vollständige SVG-Elemente einschließlich verschachtelter/self-closing SVGs.
+  Styles, data-line-Divs, Classroom-Bilder und Tabellen in foreignObject gehören
+  zum Bild; die Quellenreparaturen dürfen sie nicht als Dokumentinhalt behandeln.
+  `tests/test-images.py` vergleicht die vollständigen Bilddaten mit dem direkt
+  geparsten SVG und prüft, dass nachfolgende echte Tabellen weiter validiert werden.
 - **Quelle, Konvertierung, Bewertung und Ausgabe bleiben getrennt.** Clipboard-
   Auto versucht HTML/RTF/Plain, bei Word RTF/HTML/Plain; explizites `--from` ist
   strikt. Datei/stdin ohne `--replace` darf keine Clipboard-Werkzeuge verlangen

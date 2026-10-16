@@ -25,10 +25,10 @@ def nodes(value, kind):
 with tempfile.TemporaryDirectory(prefix="md-clip-images-") as tmp:
     report = Path(tmp) / "result"
 
-    def convert(html, mode, target, strict=False, success=True):
+    def convert(html, mode, target, strict=False, success=True, tables='reject'):
         report.write_bytes(b"")
         env = dict(os.environ, MD_CLIP_RESULT_FILE=str(report), MD_CLIP_IMAGES=mode,
-                   MD_CLIP_STRICT="1" if strict else "0")
+                   MD_CLIP_STRICT="1" if strict else "0", MD_CLIP_TABLES=tables)
         p = subprocess.run(["bash", "-c", 'set -o pipefail; source "$1"; convert_html "$2"',
                             "image-test", str(ROOT / "lib/pipeline.sh"), target],
                            input=html.encode(), capture_output=True, env=env, timeout=20)
@@ -43,6 +43,28 @@ with tempfile.TemporaryDirectory(prefix="md-clip-images-") as tmp:
         return json.loads(parsed.stdout), records
 
     for target in ("gfm", "markdown", "commonmark"):
+        svg_sources = (
+            '<svg xmlns="http://www.w3.org/2000/svg" style="fill:red" data-keep="root"><svg width="1" height="1"/><rect width="2" height="2" style="stroke:blue" data-keep="shape"/></svg>',
+            '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="2" height="2"><div xmlns="http://www.w3.org/1999/xhtml" data-line="1"><img src="https://classroom.google.com/webthumbnail/x"/></div></foreignObject></svg>',
+            '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="2" height="2"><table xmlns="http://www.w3.org/1999/xhtml"><tr><td colspan="0">inside</td></tr></table></foreignObject></svg>',
+            '<svg xmlns="http://www.w3.org/2000/svg"><text><![CDATA[x > </svg> literal]]></text><rect style="fill:blue"/></svg>',
+            '<svg xmlns="http://www.w3.org/2000/svg"><?keep literal="</svg>"?><rect style="fill:blue"/></svg>')
+        for svg_source in svg_sources:
+            source = '<p>before</p>' + svg_source + '<p>after</p>'
+            reference = json.loads(subprocess.check_output(['pandoc','--sandbox','-f','html','-t','json'],input=source.encode()))
+            expected = [node['c'][2] for node in nodes(reference,'Image')]
+            assert len(expected) == 1
+            doc, records = convert(source,'keep',target,strict=True,tables='text')
+            assert [node['c'][2] for node in nodes(doc,'Image')] == expected, 'SVG-Bilddaten verändert'
+            assert not records
+            assert [node['c'] for node in nodes(doc,'Str')] == ['before','after']
+        for prefix in ('<svg xmlns="http://www.w3.org/2000/svg"/>', svg_sources[0]):
+            _, records = convert(prefix+'<table><tr><td colspan="0">outside</td></tr></table>',
+                                 'keep',target,tables='text',success=False)
+            assert records['table-ambiguous'] == '1'
+        _, records = convert('<svg-><table><tr><td colspan="0">outside</td></tr></table></svg->',
+                             'keep',target,tables='text',success=False)
+        assert records['table-ambiguous'] == '1'
         doc, records = convert('<img src="x" alt="Diagramm">', "keep", target, strict=True)
         assert len(nodes(doc, "Image")) == 1 and not records
         for url in ('https://example.invalid/classroom.google.com/webthumbnail/x',

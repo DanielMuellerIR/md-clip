@@ -20,11 +20,13 @@ if platform.system() != 'Darwin':
     print('SKIP: native Vorschau benötigt macOS')
     raise SystemExit(0)
 ROOT = Path(__file__).resolve().parents[1]
-with tempfile.TemporaryDirectory(prefix='md-clip-preview-tests-') as tmp:
+with tempfile.TemporaryDirectory(prefix='md-clip-preview-tests-', dir='/private/tmp') as tmp:
     work = Path(tmp)
     binary = work / 'preview-tests'
     subprocess.run(['swiftc', '-D', 'TEST', '-target', platform.machine() + '-apple-macos14.0',
                     str(ROOT / 'helpers/md-clip-preview.swift'), '-o', str(binary)], check=True)
+    invalid = subprocess.run([str(binary)],capture_output=True,timeout=5)
+    assert invalid.returncode == 64 and b'UTF-8' in invalid.stderr
     helper = work / 'helper with space'
     data = work / 'status.json'
     calls = work / 'calls'
@@ -43,7 +45,7 @@ sys.exit(2 if (root/'fail').exists() else 0)
 ''')
     helper.chmod(0o755)
     env = dict(os.environ, PREVIEW_TEST_ROOT=str(work))
-    for key in ('MD_CLIP_TEST_PREVIEW_BACKGROUND','MD_CLIP_TEST_PREVIEW_EVIDENCE'):env.pop(key,None)
+    for key in ('MD_CLIP_TEST_PREVIEW_BACKGROUND','MD_CLIP_TEST_PREVIEW_EVIDENCE','MD_CLIP_TEST_PREVIEW_ACTION'):env.pop(key,None)
     for payload, expected in (({'version':1,'undo_available':True,'pending_valid':True},0),
                               ({'version':99,'undo_available':True,'pending_valid':True},2), ({},2)):
         data.write_text(json.dumps(payload))
@@ -69,13 +71,33 @@ sys.exit(2 if (root/'fail').exists() else 0)
     (work/'delay').unlink()
     body = work / 'body.txt';notes = work / 'notes.txt';notes.write_text('Quelle: Klartext')
     body.write_bytes(b'\xff')
-    for arguments in ([], [str(body),str(notes),str(helper),'fixed']):
+    for arguments in ([str(body),str(notes),str(helper),'fixed'],):
         result = subprocess.run([str(binary),*arguments],env=env,capture_output=True,timeout=5)
         assert result.returncode == 64 and b'UTF-8' in result.stderr
     with body.open('wb') as out:out.truncate(64*1024*1024+1)
     assert subprocess.run([str(binary),str(body),str(notes),str(helper),'fixed'],env=env,capture_output=True,timeout=5).returncode == 64
     print('OK: native Status-IPC, Schema, Fehler, Zeitlimit, UTF-8 und Größenprüfung ohne GUI')
+    native_undo = work / 'native-undo'
+    integration = work / 'preview-integration'
+    for source, target, flags in ((ROOT/'helpers/clipboard-undo.swift',native_undo,['-O','-D','TEST']),
+                                  (ROOT/'tests/test-preview-integration.swift',integration,[])):
+        subprocess.run(['swiftc','-target',platform.machine()+'-apple-macos14.0',*flags,str(source),'-o',str(target)],check=True)
+    runtime = work / 'runtime'
+    (runtime/'bin').mkdir(parents=True);(runtime/'helpers').mkdir()
+    shutil.copy2(ROOT/'bin/md-clip',runtime/'bin/md-clip')
+    shutil.copytree(ROOT/'lib',runtime/'lib')
+    (runtime/'helpers/clipboard-undo').symlink_to(native_undo)
+    (runtime/'helpers/md-clip-preview').symlink_to(binary)
+    integration_root = work / 'integration'
+    def run_integration(ui=False):
+        try:
+            subprocess.run([str(integration),str(native_undo),str(runtime/'bin/md-clip'),str(integration_root),*(['--ui'] if ui else [])],
+                           env=env,check=True,timeout=150)
+        finally:
+            subprocess.run([str(native_undo),'stop'],env=dict(env,MD_CLIP_TEST_DIRECTORY=str(integration_root/'service')),
+                           stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
     if not args.ui:
+        run_integration()
         print('INFO: Ansichten separat mit --ui auf einem entsperrten Test-Mac prüfen')
         raise SystemExit(0)
 
@@ -92,6 +114,7 @@ sys.exit(2 if (root/'fail').exists() else 0)
     if not locked or any(locked):
         print('BLOCKIERT: Test-Mac ist gesperrt oder Sperrzustand nicht prüfbar')
         raise SystemExit(2)
+    run_integration(ui=True)
     artifacts = work / 'artifacts'
     subprocess.run([str(binary),'--self-test',str(artifacts)],env=env,check=True,timeout=55)
     evidence = json.loads((artifacts/'result.json').read_text())
