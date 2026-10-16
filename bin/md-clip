@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.10.4"
+VERSION="1.10.5"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -175,6 +175,9 @@ INPUT_PATH=""
 PREVIEW=0
 NATIVE_PREVIEW=0
 NATIVE_PREVIEW_PID=""
+RAW_IO_PID=""
+RAW_IO_STARTING=0
+RAW_IO_SIGNAL=0
 PREVIEW_NOTES_FILE=""
 STRICT=0
 IMAGES=keep
@@ -977,7 +980,28 @@ if [ "$NATIVE_PREVIEW" -eq 1 ]; then
   PREVIEW_NOTES_FILE="$WORK_DIR/preview-notes"
   : > "$PREVIEW_NOTES_FILE"
 fi
+handle_interrupt() {
+  if [ "$RAW_IO_STARTING" -eq 1 ]; then RAW_IO_SIGNAL="$1"
+  else exit "$1"; fi
+}
+run_io_command() {
+  local status
+  # Erst den eigenen Kindprozess erfassen, bevor ein Signal das Cleanup auslöst.
+  RAW_IO_STARTING=1
+  "$@" <&0 &
+  RAW_IO_PID=$!
+  RAW_IO_STARTING=0
+  [ "$RAW_IO_SIGNAL" -eq 0 ] || exit "$RAW_IO_SIGNAL"
+  if wait "$RAW_IO_PID"; then status=0; else status=$?; fi
+  RAW_IO_PID=""
+  return "$status"
+}
 cleanup_output() {
+  if [ -n "$RAW_IO_PID" ]; then
+    kill -TERM "$RAW_IO_PID" >/dev/null 2>&1 || true
+    wait "$RAW_IO_PID" 2>/dev/null || true
+    RAW_IO_PID=""
+  fi
   if [ -n "$NATIVE_PREVIEW_PID" ]; then
     kill -TERM "$NATIVE_PREVIEW_PID" >/dev/null 2>&1 || true
     wait "$NATIVE_PREVIEW_PID" 2>/dev/null || true
@@ -986,8 +1010,8 @@ cleanup_output() {
   rm -rf "$WORK_DIR"
 }
 trap cleanup_output EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'handle_interrupt 130' INT
+trap 'handle_interrupt 143' TERM
 
 if [ "$REPLACE" -eq 1 ]; then
   UNDO_TOKEN=$(clip_prepare_replace) || exit $?
@@ -1000,8 +1024,8 @@ fi
 # Transport über Shell-Variablen; nur die Word-Heuristik liest einen HTML-String.
 read_source() {
   local kind="$1" dest="$2"
-  if [ "$INPUT_MODE" = stdin ]; then cat > "$dest"
-  elif [ "$INPUT_MODE" = file ]; then cat < "$INPUT_PATH" > "$dest"
+  if [ "$INPUT_MODE" = stdin ]; then run_io_command cat > "$dest"
+  elif [ "$INPUT_MODE" = file ]; then run_io_command cat < "$INPUT_PATH" > "$dest"
   else
     case "$kind" in
       html) clip_read_html > "$dest" ;;
@@ -1140,7 +1164,7 @@ convert_source() {
   : > "$MD_CLIP_RESULT_FILE"
   read_conversion_report || return 3
   if [ "$kind" = plain ]; then
-    cat "$WORK_DIR/plain" > "$OUTPUT_FILE" || return 3
+    run_io_command cat "$WORK_DIR/plain" > "$OUTPUT_FILE" || return 3
     RESULT="Klartext übernommen"
     return 0
   fi
@@ -1262,7 +1286,7 @@ if [ "$REPLACE" -eq 1 ]; then
   log "md-clip: $RESULT; Clipboard ersetzt (${OUTPUT_CHARS} Zeichen). Undo: md-clip --undo (zehn Minuten)."
   notify "$RESULT; im Clipboard."
 else
-  cat "$OUTPUT_FILE" || die 3 "stdout konnte nicht geschrieben werden."
+  run_io_command cat "$OUTPUT_FILE" || die 3 "stdout konnte nicht geschrieben werden."
   log "md-clip: $RESULT."
   notify "$RESULT; auf stdout."
 fi

@@ -85,6 +85,9 @@ sys.exit(2 if (root/'fail').exists() else 0)
     runtime = work / 'runtime'
     (runtime/'bin').mkdir(parents=True);(runtime/'helpers').mkdir()
     shutil.copy2(ROOT/'bin/md-clip',runtime/'bin/md-clip')
+    cat = runtime/'bin/cat'
+    cat.write_text('#!/bin/sh\nif [ -n "${MD_CLIP_TEST_IO_PID:-}" ]; then printf \'%s\\n\' "$$" > "$MD_CLIP_TEST_IO_PID"; fi\nexec /bin/cat "$@"\n')
+    cat.chmod(0o755)
     shutil.copytree(ROOT/'lib',runtime/'lib')
     (runtime/'helpers/clipboard-undo').symlink_to(native_undo)
     (runtime/'helpers/md-clip-preview').symlink_to(binary)

@@ -65,6 +65,9 @@ sys.stdout.buffer.write(f.read_bytes())
     decoy=runtime/'python3'
     decoy.write_text('#!/bin/sh\n[ "$1" = --version ] && { echo "Python 3.test"; exit 0; }\necho unwanted > "$MOCK_ROOT/unwanted-interpreter"\nexit 92\n')
     decoy.chmod(0o755)
+    cat_mock=runtime/'cat'
+    cat_mock.write_text('#!/bin/sh\nif [ "${MOCK_TRACK_CAT:-}" = 1 ]; then printf \'%s\\n\' "$$" > "$MOCK_ROOT/io-cat-pid"; fi\nexec /bin/cat "$@"\n')
+    cat_mock.chmod(0o755)
     env=dict(os.environ, PATH=str(runtime)+':'+os.environ['PATH'], MOCK_ROOT=str(base), MOCK_PLATFORM='Linux')
     def run(args=(), data=None, rc=0):
         p=subprocess.run([str(runtime/'md-clip'),*args],input=data,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=20)
@@ -419,6 +422,58 @@ sys.exit(int(os.environ.get('MOCK_PREVIEW_STATUS','0')))
             (base/'preview-data').unlink(missing_ok=True)
             run(['--replace','--preview-window'],rc=2)
             assert not (base/'preview-data').exists() and not undo_calls()
+        env['MOCK_TRACK_CAT']='1'
+        for io_mode in ('stdin','stdout'):
+            for interruption, expected_code in ((signal.SIGINT,130),(signal.SIGTERM,143)):
+                undo_calls();(base/'io-cat-pid').unlink(missing_ok=True)
+                if io_mode=='stdin':
+                    command=[str(runtime/'md-clip'),'--stdin','--plain','--replace']
+                else:
+                    source=base/'large-plain.txt';source.write_bytes(b'X'*(4*1024*1024))
+                    command=[str(runtime/'md-clip'),'--input',str(source),'--plain']
+                proc=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True)
+                group=proc.pid
+                try:
+                    deadline=time.monotonic()+8
+                    if io_mode=='stdout':
+                        assert select.select([proc.stdout],[],[],8)[0], 'stdout-Kopie begann nicht'
+                        assert proc.stdout.read(1)==b'X'
+                    else:
+                        while not (base/'io-cat-pid').exists() and time.monotonic()<deadline:time.sleep(.01)
+                    assert (base/'io-cat-pid').exists(), 'I/O-Kindprozess begann nicht'
+                    child=int((base/'io-cat-pid').read_text())
+                    proc.send_signal(interruption)
+                    deadline=time.monotonic()+5
+                    while proc.poll() is None and time.monotonic()<deadline:time.sleep(.01)
+                    assert proc.returncode==expected_code, 'Elternsignal benötigte EOF/freien stdout: '+io_mode
+                    # Erst nach der Exit-Prüfung stdin schließen/stdout leeren.
+                    out,error=proc.communicate(timeout=2)
+                    if io_mode=='stdin':assert not out and undo_calls()==['prepare','cancel']
+                    else:assert len(out)<4*1024*1024 and not undo_calls()
+                    try:os.kill(child,0)
+                    except ProcessLookupError:pass
+                    else:raise AssertionError('I/O-Kindprozess blieb aktiv')
+                finally:
+                    try:os.killpg(group,signal.SIGKILL)
+                    except ProcessLookupError:pass
+                    proc.communicate(timeout=3)
+        master,slave=pty.openpty()
+        attributes=termios.tcgetattr(slave)
+        attributes[3] &= ~(termios.ECHO | termios.ECHONL)
+        termios.tcsetattr(slave,termios.TCSANOW,attributes)
+        proc=subprocess.Popen([str(runtime/'md-clip'),'--stdin','--plain'],stdin=slave,
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True)
+        os.close(slave)
+        try:
+            terminal_bytes='Terminal ä😀\n'.encode()
+            os.write(master,terminal_bytes+b'\x04')
+            out,error=proc.communicate(timeout=10)
+            assert proc.returncode==0 and out==terminal_bytes,(proc.returncode,out,error)
+        finally:
+            os.close(master)
+            if proc.poll() is None:proc.kill()
+            proc.wait(timeout=3)
+        env.pop('MOCK_TRACK_CAT')
         print('OK:',platform,wayland or 'default','Tabellen/Fallback/Strict/Schreibschutz')
     # Echte Terminalabfrage, aber ausschließlich auf den Clipboard-Attrappen.
     for answer, expected_rc in ((b'nein\n',4),(b'ja\n',0),(b'\x04',4)):

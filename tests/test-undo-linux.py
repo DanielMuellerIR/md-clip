@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import select
+import signal
 import shutil
 import subprocess
 import sys
@@ -731,6 +732,36 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(before,self.read_clipboard())
         self.run_helper("undo")
         self.assertEqual(original,self.read_clipboard())
+
+    def test_parent_only_signal_with_open_stdin_preserves_real_undo(self):
+        for interruption, expected in ((signal.SIGINT,130),(signal.SIGTERM,143)):
+            with self.subTest(signal=interruption):
+                original = self.read_clipboard()
+                self.run_helper("replace", self.run_helper("prepare"), b"previous")
+                before = self.read_clipboard()
+                proc = subprocess.Popen([str(ROOT/"bin/md-clip"),"--stdin","--plain","--replace","--quiet"],
+                                        stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+                try:
+                    end = time.monotonic()+8; child = None
+                    while time.monotonic()<end and proc.poll() is None:
+                        for value in Path('/proc/%s/task/%s/children'%(proc.pid,proc.pid)).read_text().split():
+                            path = Path('/proc')/value/'comm'
+                            if path.exists() and path.read_text().strip()=='cat':child=int(value);break
+                        if child is not None:break
+                        time.sleep(.01)
+                    self.assertIsNotNone(child, 'stdin-Kopie wurde nicht erreicht')
+                    proc.send_signal(interruption)
+                    self.assertEqual(expected,proc.wait(timeout=5))
+                    out,error=proc.communicate(timeout=2)
+                    self.assertEqual(b'',out,error.decode())
+                    self.assertFalse(Path('/proc/%s'%child).exists(), 'stdin-Kindprozess blieb aktiv')
+                    self.assertEqual(before,self.read_clipboard())
+                    self.run_helper('cancel',self.run_helper('prepare'))
+                    self.run_helper('undo')
+                    self.assertEqual(original,self.read_clipboard())
+                finally:
+                    if proc.poll() is None:os.killpg(proc.pid,signal.SIGKILL)
+                    proc.communicate(timeout=3)
 
     def test_diagnose_reads_no_formats(self):
         self.source_command("delay")

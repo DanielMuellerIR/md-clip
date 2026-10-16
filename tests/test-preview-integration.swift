@@ -16,6 +16,8 @@ environment["MD_CLIP_TEST_DIRECTORY"] = root + "/service"
 environment["MD_CLIP_TEST_PREVIEW_BACKGROUND"] = "1"
 environment["MD_CLIP_TEST_PREVIEW_EVIDENCE"] = observed
 environment["MD_CLIP_TEST_PREVIEW_ACTION"] = action
+environment["MD_CLIP_TEST_IO_PID"] = root + "/io.pid"
+environment["PATH"] = URL(fileURLWithPath: cli).deletingLastPathComponent().path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
 for key in ["MD_CLIP_TEST_TTL", "MD_CLIP_TEST_PENDING_TTL", "MD_CLIP_TEST_WORKER_SECONDS"] { environment.removeValue(forKey: key) }
 var children: [Process] = []
 struct Running { let process: Process; let output: Pipe; let error: Pipe; let writer: DispatchGroup }
@@ -31,12 +33,14 @@ func stop(_ process: Process) {
     if process.isRunning { kill(process.processIdentifier, SIGKILL) }
     process.waitUntilExit()
 }
-func launch(_ executable: String, _ arguments: [String], _ data: Data? = nil) throws -> Running {
+func launch(_ executable: String, _ arguments: [String], _ data: Data? = nil, heldInput: Pipe? = nil) throws -> Running {
     let process = Process(), output = Pipe(), error = Pipe(), writer = DispatchGroup()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = arguments; process.environment = environment
     process.standardOutput = output; process.standardError = error
-    if let data {
+    if let input = heldInput {
+        process.standardInput = input; try process.run()
+    } else if let data {
         let input = Pipe(); process.standardInput = input
         try process.run()
         writer.enter()
@@ -130,6 +134,24 @@ func run() throws {
     try expect(invalidRTF, 3, "falsche RTF-Quelle")
     try require(invalidRTF.output.isEmpty && invalidRTF.error.contains("RTF-Kopf") && raw() == rtfBefore && board.changeCount == rtfCount, "Falsche RTF-Quelle änderte Clipboard oder fehlender Grund")
     try cliUndo(rtfOriginal)
+    for interruption in [SIGINT, SIGTERM] {
+        let original = try seed(true), previous = raw(), count = board.changeCount
+        let input = Pipe(), marker = environment["MD_CLIP_TEST_IO_PID"]!
+        try? FileManager.default.removeItem(atPath: marker)
+        let running = try launch(cli, ["--stdin", "--plain", "--replace", "--quiet"], heldInput: input)
+        defer { try? input.fileHandleForWriting.close() }
+        let end = ProcessInfo.processInfo.systemUptime + 8
+        while !FileManager.default.fileExists(atPath: marker) && running.process.isRunning && ProcessInfo.processInfo.systemUptime < end { pause(0.01) }
+        guard let bytes = FileManager.default.contents(atPath: marker),
+              let identifier = Int32(String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) else { throw Check.failed("stdin-Kindprozess nicht erreicht") }
+        kill(running.process.processIdentifier, interruption)
+        try expect(finish(running), interruption == SIGINT ? 130 : 143, "Parent-only stdin-Signal ohne EOF")
+        try require(kill(identifier, 0) != 0 && errno == ESRCH, "stdin-Kindprozess blieb aktiv")
+        try require(raw() == previous && board.changeCount == count, "Signal änderte Clipboard")
+        try expect(call(["cancel", token()]), 0, "Signal storniert vorbereiteten Token")
+        try cliUndo(original)
+    }
+    print("OK: Parent-only INT/TERM beendet offene stdin-Kopie ohne EOF und erhält vollständiges natives Undo")
     let original = try seed(true), before = raw(), count = board.changeCount
     let resource = URL(fileURLWithPath: cli).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("helpers/md-clip-preview").path
     try FileManager.default.moveItem(atPath: resource, toPath: resource + ".hidden")

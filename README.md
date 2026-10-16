@@ -298,6 +298,11 @@ berühren diese Eingaben das Clipboard nicht. Leere oder abgelehnte Ergebnisse
 werden niemals geschrieben. Bei konvertiertem Markdown entfällt vor dem
 Schreiben genau pandocs letztes LF; durchgereichter Klartext bleibt bytegenau.
 
+INT/TERM an die CLI beendet auch eine noch offene stdin-/Dateikopie oder eine
+blockierte stdout-Kopie und storniert eine vorbereitete Ersetzung. Die CLI endet
+mit 130 beziehungsweise 143. Bereits nach stdout geschriebene Teilbytes lassen
+sich nicht zurücknehmen; Aufrufer sollten sie bei diesem Exit verwerfen.
+
 ```bash
 md-clip --preview --replace
 ```

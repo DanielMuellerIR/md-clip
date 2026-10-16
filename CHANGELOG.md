@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.5 — 2026-10-16
+
+- INT/TERM nur an die CLI beendet auch eine offene stdin-/Dateikopie oder eine
+  blockierte stdout-Kopie. Eigene Kopierprozesse werden beendet und vorbereitete
+  Undo-Sicherungen storniert; vorheriges Undo bleibt erhalten.
+- Rohbytes und Terminaleingaben bleiben unverändert. Bereits ausgegebene
+  Teilbytes müssen Aufrufer bei Exit 130/143 verwerfen.
+
 ## 1.10.4 — 2026-10-16
 
 - RTF-Quellen benötigen vor dem Reader einen grundlegenden RTF-1-Kopf. Falsch
