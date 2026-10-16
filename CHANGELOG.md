@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0 — 2026-10-16
+
+- `--images keep|alt|omit` erhält Bildreferenzen, reduziert Bilder auf ihren
+  Alternativtext oder entfernt sie. Der Standard bleibt `keep`; SVG/data-URLs
+  werden berücksichtigt, ohne Bilder herunterzuladen oder zu extrahieren.
+- Bildvereinfachungen werden gezählt und mit `--strict` vor der Ausgabe
+  abgelehnt. Ein leeres Ergebnis ersetzt das Clipboard nicht. Bildlinks behalten
+  Ziel und Titel; Code und durchgereichter Klartext bleiben unverändert.
+
 ## 1.5.0 — 2026-10-16
 
 - `--strict` lehnt erkannte Tabellenvereinfachungen und den Auto-Rückfall von

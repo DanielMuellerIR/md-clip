@@ -75,6 +75,8 @@ sys.stdout.buffer.write(f.read_bytes())
     for args in (['--stdin'],['--stdin','--input','x'],['--json'],['--preview'],['--plain','--from','html'],['--input','missing.html']):
         run(args,b'x',2)
     run(['--doctor','--strict'],rc=2)
+    for args in (['--images'], ['--images','invalid'], ['--doctor','--images','alt']):
+        run(args,rc=2)
     f=base/'file with space.txt';f.write_bytes(b'file\n\n')
     assert run(['--input',str(f)]).stdout==f.read_bytes()
     run(['--stdin','--plain'],b'',1)
@@ -143,10 +145,14 @@ sys.stdout.buffer.write(f.read_bytes())
             text=subprocess.check_output([real_pandoc,'-f','json','-t','plain'],input=json.dumps(doc).encode()).decode().strip()
             assert text==expected,(output,text)
     env['MD_CLIP_STRICT']='1'
+    env['MD_CLIP_IMAGES']='omit'
+    assert b'![' in run(['--stdin','--from','html'],b'<img src="x" alt="Y">').stdout
     doctor=json.loads(run(['--doctor','--json']).stdout)
     assert doctor['stdin'] and doctor['sandbox'] and doctor['undo'] and doctor['strict']
+    assert doctor['image_modes']==['keep','alt','omit']
     assert doctor['table_filter'], 'Interne Umgebungswerte dürfen Doctor nicht verändern'
     env.pop('MD_CLIP_STRICT')
+    env.pop('MD_CLIP_IMAGES')
     assert not (base/'calls').exists(), 'Datei/stdin/Doctor berührten Clipboard'
     # Kein pandoc-Aufruf im Plain-Weg, auch bei vorhandenem defektem Binary.
     (runtime/'pandoc').unlink()
@@ -154,6 +160,8 @@ sys.stdout.buffer.write(f.read_bytes())
     (runtime/'pandoc').chmod(0o755)
     assert run(['--stdin','--plain'],b'bytes\n').stdout==b'bytes\n'
     assert run(['--stdin','--plain','--strict'],b'bytes\n').stdout==b'bytes\n'
+    for mode in ('keep','alt','omit'):
+        assert run(['--stdin','--plain','--images',mode],b'![image](x)\x00\n').stdout==b'![image](x)\x00\n'
     assert not (base/'pandoc-called').exists()
     broken=json.loads(run(['--doctor','--json']).stdout)
     assert not broken['sandbox'] and not broken['table_filter']
@@ -165,7 +173,7 @@ sys.stdout.buffer.write(f.read_bytes())
         env.update(MOCK_PLATFORM=platform, WAYLAND_DISPLAY=wayland)
         for args in (['--undo','--replace'], ['--undo','--plain'],
                      ['--undo','--stdin'], ['--undo','--from','auto'],
-                     ['--undo','--doctor'], ['--undo','--preview'], ['--undo','--strict']):
+                     ['--undo','--doctor'], ['--undo','--preview'], ['--undo','--strict'], ['--undo','--images','keep']):
             run(args,rc=2)
         undo_calls()
         run(['--undo'],rc=1)
@@ -239,6 +247,29 @@ sys.stdout.buffer.write(f.read_bytes())
         run(['--strict','--plain','--replace'])
         assert (base/'written').read_bytes()==b'plain\n\n'
         assert undo_calls()==['prepare','replace']
+        image_html=b'<p>Text <img src="https://example.invalid/a.png" alt="Diagramm"></p>'
+        (base/'html').write_bytes(image_html)
+        for target in ('gfm','markdown','commonmark'):
+            for mode in ('alt','omit'):
+                undo_calls()
+                p=run(['--replace','--images',mode,'--to',target])
+                written=(base/'written').read_bytes()
+                assert b'Text' in written and b'![' not in written
+                assert (b'Diagramm' in written)==(mode=='alt')
+                assert b'1 Bild' in p.stderr
+                assert undo_calls()==['prepare','replace']
+                (base/'written').write_bytes(b'protected')
+                p=run(['--replace','--images',mode,'--strict','--to',target],rc=3)
+                assert b'Bildvereinfachung' in p.stderr and not p.stdout
+                assert (base/'written').read_bytes()==b'protected'
+                assert undo_calls()==['prepare','cancel']
+        for mode in ('alt','omit'):
+            (base/'html').write_bytes(b'<img src="x">')
+            (base/'written').write_bytes(b'protected')
+            p=run(['--from','html','--replace','--images',mode],rc=3)
+            assert not p.stdout and (base/'written').read_bytes()==b'protected'
+            assert undo_calls()==['prepare','cancel']
+        (base/'html').write_bytes(NESTED)
         (base/'written').write_bytes(b'protected')
         run(['--preview','--replace'],rc=2)
         assert (base/'written').read_bytes()==b'protected'

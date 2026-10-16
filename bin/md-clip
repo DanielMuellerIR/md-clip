@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -174,6 +174,7 @@ INPUT_MODE=clipboard
 INPUT_PATH=""
 PREVIEW=0
 STRICT=0
+IMAGES=keep
 DOCTOR=0
 JSON=0
 REPLACE=0       # --replace: Ergebnis ins Clipboard schreiben statt stdout
@@ -282,6 +283,8 @@ OPTIONS
                        bestätigen; Abbruch liefert Exit 4.
       --strict         Bekannte Strukturvereinfachungen und den Rückfall von
                        Rich Text auf Klartext ablehnen (Exit 3).
+      --images MODUS   Bilder erhalten, durch Alternativtext ersetzen oder
+                       entfernen: keep|alt|omit (default: keep).
   -r, --replace        Markdown-Ergebnis zurück ins Clipboard schreiben
                        (statt nach stdout); alle Formate für Undo sichern.
       --undo           Letzte erfolgreiche Ersetzung einmalig zurücknehmen.
@@ -511,6 +514,13 @@ while [ "$#" -gt 0 ]; do
     --json) JSON=1 ;;
     --preview) PREVIEW=1 ;;
     --strict) STRICT=1; CONVERSION_OPTIONS=1 ;;
+    --images)
+      CONVERSION_OPTIONS=1
+      shift
+      case "${1:-}" in
+        keep|alt|omit) IMAGES="$1" ;;
+        *) die 2 "Ungültiges --images: '${1:-}' (erlaubt: keep, alt, omit)" ;;
+      esac ;;
     -r|--replace)   REPLACE=1 ;;
     -p|--plain)     PLAIN=1; CONVERSION_OPTIONS=1 ;;
     -f|--from)
@@ -642,7 +652,7 @@ doctor() {
   pandoc_supports_rtf && rtf=true
   pandoc_supports_table_filter && lua=true
   if [ "$JSON" -eq 1 ]; then
-    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"strict":true,"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
+    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"strict":true,"image_modes":["keep","alt","omit"],"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
   else
     printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
     printf 'stdin/Datei: ja; Vorschau: Terminal; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$undo" "$sandbox" "$rtf" "$lua"
@@ -732,6 +742,7 @@ is_mso_html() {
 # ---------- Quellenwahl und Eingabevertrag ----------
 
 export MD_CLIP_STRICT="$STRICT"
+export MD_CLIP_IMAGES="$IMAGES"
 [ "$JSON" -eq 0 ] || [ "$DOCTOR" -eq 1 ] || die 2 "--json benötigt --doctor."
 if [ "$UNDO" -eq 1 ]; then
   [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$DOCTOR" -eq 0 ] || die 2 "--undo ist nicht mit Konvertierung, Vorschau oder --doctor kombinierbar."
@@ -742,7 +753,7 @@ if [ "$UNDO" -eq 1 ]; then
   exit 0
 fi
 if [ "$DOCTOR" -eq 1 ]; then
-  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen oder --strict kombinierbar."
+  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] && [ "$IMAGES" = keep ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen, --strict oder Bildvereinfachung kombinierbar."
   doctor
   exit 0
 fi
@@ -818,6 +829,8 @@ CONVERTED=0
 RESULT=""
 TABLE_CELLS_FLATTENED=0
 LAYOUT_TABLES_FLATTENED=0
+IMAGES_ALT=0
+IMAGES_OMITTED=0
 SOURCE_REASON=""
 
 # Der Bericht enthält nur feste Kennungen und Anzahlen, niemals Nutztext.
@@ -827,6 +840,8 @@ read_conversion_report() {
   local record="" code count count_value
   TABLE_CELLS_FLATTENED=0
   LAYOUT_TABLES_FLATTENED=0
+  IMAGES_ALT=0
+  IMAGES_OMITTED=0
   SOURCE_REASON=""
   while IFS= read -r record; do
     case "$record" in
@@ -842,6 +857,8 @@ read_conversion_report() {
     case "$code" in
       table-cells-flattened) TABLE_CELLS_FLATTENED=$((TABLE_CELLS_FLATTENED + count_value)) ;;
       layout-tables-flattened) LAYOUT_TABLES_FLATTENED=$((LAYOUT_TABLES_FLATTENED + count_value)) ;;
+      images-alt) IMAGES_ALT=$((IMAGES_ALT + count_value)) ;;
+      images-omitted) IMAGES_OMITTED=$((IMAGES_OMITTED + count_value)) ;;
       table-nested|table-spanned|empty-document)
         [ -n "$SOURCE_REASON" ] || SOURCE_REASON="$code" ;;
       *) err "Unbekannter Konvertierungsbericht: $code"; return 3 ;;
@@ -855,6 +872,10 @@ source_label() {
 }
 
 source_failure_reason() {
+  if [ "$STRICT" -eq 1 ] && { [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ]; }; then
+    printf 'Strenger Modus verbietet die Bildvereinfachung'
+    return
+  fi
   if [ "$STRICT" -eq 1 ] && { [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; }; then
     printf 'Strenger Modus verbietet die nötige Strukturvereinfachung'
     return
@@ -862,7 +883,10 @@ source_failure_reason() {
   case "$SOURCE_REASON" in
     table-nested) printf 'verschachtelte Tabelle nicht darstellbar' ;;
     table-spanned) printf 'verbundene Tabellenzellen nicht darstellbar' ;;
-    empty-document) printf 'kein sichtbarer Rich-Text-Inhalt' ;;
+    empty-document)
+      if [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ]; then
+        printf 'Bildbehandlung lässt keinen sichtbaren Inhalt'
+      else printf 'kein sichtbarer Rich-Text-Inhalt'; fi ;;
     *)
       if [ "$1" -eq 2 ]; then printf 'benötigtes Werkzeug oder Fähigkeit fehlt'
       else printf 'Konvertierung fehlgeschlagen'; fi ;;
@@ -881,6 +905,21 @@ report_simplifications() {
     if [ "$LAYOUT_TABLES_FLATTENED" -eq 1 ]; then label=RTF-Layouttabelle; fi
     log "md-clip: Vereinfachung: $LAYOUT_TABLES_FLATTENED $label in Absätze umgewandelt."
   fi
+  if [ "$IMAGES_ALT" -gt 0 ]; then
+    label=Bilder
+    if [ "$IMAGES_ALT" -eq 1 ]; then label=Bild; fi
+    log "md-clip: Vereinfachung: $IMAGES_ALT $label auf Alternativtext reduziert."
+  fi
+  if [ "$IMAGES_OMITTED" -gt 0 ]; then
+    label=Bilder
+    if [ "$IMAGES_OMITTED" -eq 1 ]; then label=Bild; fi
+    log "md-clip: Vereinfachung: $IMAGES_OMITTED $label entfernt."
+  fi
+}
+
+has_simplification() {
+  [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ] \
+    || [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ]
 }
 
 convert_source() {
@@ -902,7 +941,7 @@ convert_source() {
   read_conversion_report || return 3
   CONVERTED=1
   RESULT="Markdown erzeugt"
-  if [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; then
+  if has_simplification; then
     RESULT="Struktur vereinfacht; Markdown erzeugt"
   fi
 }
@@ -927,7 +966,7 @@ for source_kind in $ORDER; do
   else
     status=$?
     if [ "$FROM" != auto ]; then
-      if [ -n "$SOURCE_REASON" ] || [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; then
+      if [ -n "$SOURCE_REASON" ] || has_simplification; then
         if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
         die "$status" "Konvertierung von $(source_label "$source_kind") abgelehnt: $(source_failure_reason "$status")."
       fi

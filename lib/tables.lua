@@ -2,6 +2,11 @@
 -- verschachtelte Zellen noch Kommentare/Attribute zuverlässig unterscheiden.
 local flattened_cells = 0
 local strict = os.getenv('MD_CLIP_STRICT') == '1'
+local image_mode = os.getenv('MD_CLIP_IMAGES') or 'keep'
+if image_mode ~= 'keep' and image_mode ~= 'alt' and image_mode ~= 'omit' then
+  error('Unbekannte Bildbehandlung: keep|alt|omit erwartet.')
+end
+local images_alt, images_omitted = 0, 0
 
 local function report(code, count)
   local path = os.getenv('MD_CLIP_RESULT_FILE')
@@ -15,6 +20,17 @@ end
 local function reject(code, message)
   report(code, 1)
   error(message)
+end
+
+function Image(image)
+  if image_mode == 'alt' then
+    images_alt = images_alt + 1
+    return image.caption
+  elseif image_mode == 'omit' then
+    images_omitted = images_omitted + 1
+    return {}
+  end
+  return image
 end
 
 function Span(span)
@@ -129,6 +145,11 @@ function Table(tbl)
 end
 
 function Pandoc(doc)
+  if images_alt > 0 then report('images-alt', images_alt) end
+  if images_omitted > 0 then report('images-omitted', images_omitted) end
+  if strict and (images_alt > 0 or images_omitted > 0) then
+    error('Strenger Modus: Bildinhalte müssten vereinfacht werden.')
+  end
   -- Nur Nutzinhalt sammeln: Strong/Emph, Listenmarker, Linkziele und
   -- Codezäune dürfen einen unsichtbaren Text nicht als sichtbar ausweisen.
   local content = {}

@@ -24,6 +24,8 @@ verhindern die Übernahme des betreffenden Konvertierungsergebnisses.
 | `table-nested` | Strukturelle Ablehnung einer verschachtelten Tabelle |
 | `table-spanned` | Strukturelle Ablehnung verbundener Tabellenzellen |
 | `empty-document` | Dokument ohne sichtbaren darstellbaren Inhalt |
+| `images-alt` | Nach Quellenbereinigung auf Alternativtext reduzierte Bildknoten, auch bei leerem Alternativtext |
+| `images-omitted` | Nach Quellenbereinigung entfernte Bildknoten |
 
 Bei einer frühzeitigen Ablehnung beschreiben Anzahlen nur die bis zum Abbruch
 erkannten Vorgänge. Sie sind keine vollständige Bestandsaufnahme der Eingabe.
@@ -49,6 +51,10 @@ Sie vergleicht nicht, ob zwei unterschiedliche Angebote denselben Inhalt tragen.
 
 Ursprünglicher Klartext und ausdrücklich gewähltes `--plain`/`--from plain`
 bleiben bytegenau zulässig und brauchen weiterhin weder pandoc noch Perl.
+`--images alt|omit` meldet Bildvereinfachungen über denselben Bericht. Strict
+verweigert diese nur, wenn tatsächlich Bilder verändert würden; Dokumente ohne
+Bilder bleiben zulässig. `keep` erhält bestehende Bildreferenzen auch im strengen
+Modus. Leere Ergebnisse nach einer Bildvereinfachung werden ebenfalls abgelehnt.
 Strict ist keine allgemeine Garantie verlustfreier Markdown-Darstellung.
 
 Abgelehnte Konvertierungen liefern Exit 3, geben keine Nutzdaten aus und schreiben

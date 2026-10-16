@@ -143,6 +143,7 @@ Alle Optionen im Überblick:
 | `--doctor [--json]` | | Backend, Werkzeuge, Versionen und Fähigkeiten; keine Inhalte |
 | `--preview` | | Ergebnis vor `--replace` am Terminal bestätigen |
 | `--strict` | | Erkannte Strukturvereinfachungen und Rich-Text-Rückfall auf Klartext ablehnen |
+| `--images MODUS` | | Bilder: `keep` erhalten (Standard), `alt` auf Alternativtext reduzieren, `omit` entfernen |
 | `--replace` | `-r` | Ergebnis schreiben und alle ursprünglichen Formate für Undo sichern |
 | `--undo` | | Letzte erfolgreiche Ersetzung einmalig zurücknehmen |
 | `--plain` | `-p` | Keine Konvertierung, nur Klartext durchreichen |
@@ -220,6 +221,23 @@ Ein erfolgreicher Wechsel zwischen HTML und RTF bleibt zulässig. Ursprüngliche
 oder ausdrücklich gewählter Klartext bleibt bytegenau verwendbar. Strict prüft
 die bekannten Fälle und ist keine allgemeine Verlustfreiheitsgarantie.
 Der genaue Vertrag steht in [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md).
+
+### Bildbehandlung
+
+HTML-Bildreferenzen und Inline-SVG bleiben mit `--images keep` erhalten. Dabei
+werden keine Bilder heruntergeladen oder aus Word-Dokumenten extrahiert.
+`--images alt` ersetzt erkannte Bilder durch ihren Alternativtext; fehlt dieser,
+entfällt das Bild. `--images omit` entfernt die Bilder vollständig. Die Anzahl
+erscheint als Vereinfachung auf stderr. Die Politik gilt für konvertiertes HTML/RTF;
+ursprünglicher oder ausdrücklich gewählter Klartext bleibt bytegenau.
+
+Ein Link um ein Bild behält Ziel und Titel. Wird sein Inhalt durch die Bildpolitik
+leer, erscheint wie bei anderen leeren Links die Ziel-URL als Linktext.
+SVG ohne Alternativtext kann mit `alt` deshalb entfallen. Ein ausschließlich
+bildhaltiges Dokument ohne verbleibenden Text wird abgelehnt und leert niemals
+das Clipboard. Im Auto-Modus kann dann weiterhin eine andere Quelle verwendet
+werden; `--from html` bleibt strikt. `--strict` lehnt tatsächlich erkannte
+Bildvereinfachungen ab, erlaubt aber unveränderte Bilder mit `keep`.
 
 ### Ersetzen und Vorschau
 
@@ -344,7 +362,9 @@ macOS hat seit einigen Jahren eine eingebaute Kurzbefehl-Aktion namens **„Mark
   `<code>`-Element mitliefert; fehlt die Angabe im Clipboard, ergänzt md-clip
   sie nicht durch Raten.
 - **Zeilenumbrüche innerhalb eines Absatzes** werden als zwei Leerzeichen am Zeilenende geschrieben — das ist in Markdown ein harter Umbruch, aber unsichtbar. Ein Editor, der beim Speichern Leerzeichen am Zeilenende entfernt, löscht damit den Umbruch. Die Alternative wäre ein sichtbarer `\` am Zeilenende; die ist bewusst nicht gewählt.
-- **Bilder** werden weggelassen. Nur Text wird konvertiert.
+- **Bilddaten werden nicht extrahiert.** HTML-Bildreferenzen bleiben standardmäßig
+  erhalten; `--images alt|omit` steuert ihre Vereinfachung. Inline-SVG kann als
+  eingebettete `data:`-Referenz erscheinen.
 - **Microsoft-Word-Dokumente mit komplexer Bild-Einbettung**: Bilder werden nicht extrahiert (keine `![]()`-Referenzen). Der Text und Tabellen-Inhalt kommt sauber raus, Bildplätze aber leer.
 
 ## Tests
@@ -357,6 +377,7 @@ bash tests/test-dependencies.sh
 bash tests/test-wrapper-safety.sh
 python3 tests/test-html-normalization.py
 python3 tests/test-conversion-report.py
+python3 tests/test-images.py
 ```
 
 Voraussetzungen sind pandoc, perl und ein Clipboard-Werkzeug (macOS: `pbpaste`;
