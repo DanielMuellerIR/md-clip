@@ -22,6 +22,8 @@ args=sys.argv[1:]
 if name=='uname': print(os.environ['MOCK_PLATFORM']);sys.exit()
 with open(os.environ['MOCK_LOG'],'a') as f:f.write(name+' '+repr(args)+'\\n')
 if name in ('clipboard-undo','clipboard-undo-linux.py'):
+    if args==['status']:
+        print('{"version":1,"undo_available":false,"pending_valid":false}');sys.exit(2 if os.environ.get('MOCK_STATUS_FAIL') else 0)
     if args!=['diagnose']:sys.exit(91)
     if os.environ.get('MOCK_DIAG_FAIL'):print('PRIVATE-ERROR',file=sys.stderr);sys.exit(2)
     print(os.environ.get('MOCK_DIAG','ok'));sys.exit()
@@ -62,7 +64,7 @@ print('PRIVATE-CLIPBOARD-CONTENT');sys.exit(91)
             if name in ('pbpaste', 'pbcopy', 'xclip', 'wl-paste', 'wl-copy'):
                 assert '--version' in call or '-version' in call, call
             if name in ('clipboard-undo', 'clipboard-undo-linux.py'):
-                assert call.endswith("['diagnose']"), call
+                assert call.endswith("['diagnose']") or call.endswith("['status']"), call
             assert name not in ('clipboard-html', 'clipboard-rtf'), call
         return json.loads(p.stdout) if json_mode else p.stdout.decode()
 
@@ -71,6 +73,7 @@ print('PRIVATE-CLIPBOARD-CONTENT');sys.exit(91)
     for platform, wayland, backend in platforms:
         env.update(MOCK_PLATFORM=platform, WAYLAND_DISPLAY=wayland)
         doc = run()
+        assert doc['native_preview'] is False
         assert doc['backend'] == backend and doc['diagnostics_version'] == 1
         assert doc['session'] == {'status': 'ready', 'code': 'ok'}
         assert doc['capabilities'] == {'plain_input': True, 'html_conversion': True, 'rtf_conversion': True,
@@ -108,6 +111,19 @@ print('PRIVATE-CLIPBOARD-CONTENT');sys.exit(91)
 
     if os.uname().sysname == 'Darwin':
         env.update(MOCK_PLATFORM='Darwin', WAYLAND_DISPLAY='')
+        preview = base / 'helpers' / 'md-clip-preview'
+        preview.parent.mkdir()
+        preview.write_text('#!/bin/sh\nexit 91\n')
+        preview.chmod(0o755)
+        assert run()['native_preview'] is True
+        assert 'Fenstervorschau: verfügbar;' in run(False)
+        env['MOCK_STATUS_FAIL'] = '1'
+        doc = run()
+        assert doc['native_preview'] is False
+        assert 'Fenstervorschau: nicht verfügbar;' in run(False)
+        assert 'preview-status-unavailable' in [item['code'] for item in doc['diagnostics']]
+        env.pop('MOCK_STATUS_FAIL')
+        preview.unlink()
         for tool, issue in [('textutil', 'textutil-missing'), ('clipboard-html', 'html-helper-missing'),
                             ('clipboard-rtf', 'rtf-helper-missing')]:
             (runtime / tool).rename(base / 'hidden-tool')

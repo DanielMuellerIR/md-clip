@@ -24,12 +24,13 @@ source "$SCRIPT_DIR/lib/pipeline.sh"
 # Pfade im Projekt.
 MAIN_SCRIPT="bin/md-clip"
 
-# Beide Swift-Helper als (Source, Binary)-Paare. Die Schleife unten
+# Swift-Helper als (Source, Binary)-Paare. Die Schleife unten
 # kompiliert jedes Paar, falls die Source neuer ist als das Binary.
 HELPERS=(
   "helpers/clipboard-html.swift:helpers/clipboard-html"
   "helpers/clipboard-rtf.swift:helpers/clipboard-rtf"
   "helpers/clipboard-undo.swift:helpers/clipboard-undo"
+  "helpers/md-clip-preview.swift:helpers/md-clip-preview"
 )
 
 # --- Plattform erkennen (spiegelt bin/md-clip) ---

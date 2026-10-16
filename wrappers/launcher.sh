@@ -8,7 +8,7 @@
 #      Wunsch einen Symlink ins App-Bundle anlegen.
 #
 #   2. Die gewählte Aktion starten: standardmäßig konvertieren, mit --undo
-#      zurücknehmen oder mit --help die Aktionen erklären.
+#      zurücknehmen, mit --preview prüfen oder mit --help die Aktionen erklären.
 #
 # Ein Fehler beim optionalen CLI-Setup darf die eigentliche Aktion
 # nicht verhindern. Wenn der Symlink-Schritt aus irgendeinem Grund scheitert,
@@ -127,6 +127,7 @@ show_action_help() {
   show_message_dialog "md-clip: Aktionen
 
 Ohne Argument oder mit --convert: Clipboard nach Markdown konvertieren.
+--preview: Markdown vor dem Ersetzen in einem Fenster prüfen.
 --undo: Letzte Ersetzung einmalig zurücknehmen.
 --help: Diese Hilfe anzeigen.
 
@@ -230,16 +231,17 @@ launcher_main() {
   # Vor Setup-Dialogen und Clipboard-Zugriff entscheiden. LaunchServices kann
   # beim Finder-Start noch eine alte Prozessseriennummer übergeben.
   if [ "$#" -gt 1 ]; then
-    show_error_dialog "Nur eine App-Aktion erlaubt: --convert, --undo oder --help."
+    show_error_dialog "Nur eine App-Aktion erlaubt: --convert, --preview, --undo oder --help."
     return 2
   fi
   case "${1:-}" in
     ""|--convert) ;;
     --undo) mode=undo ;;
+    --preview) mode=preview ;;
     --help|-h) show_action_help; return 0 ;;
     *)
       if ! [[ "$1" =~ ^-psn_[0-9]+_[0-9]+$ ]]; then
-        show_error_dialog "Unbekannte App-Aktion. Erlaubt sind --convert, --undo und --help."
+        show_error_dialog "Unbekannte App-Aktion. Erlaubt sind --convert, --preview, --undo und --help."
         return 2
       fi ;;
   esac
@@ -263,6 +265,17 @@ $diagnostic"
 
 $diagnostic"
       fi
+      return "$cli_status"
+    fi
+  fi
+  if [ "$mode" = preview ]; then
+    if diagnostic=$("$BUNDLE_CLI" --replace --preview-window --notify 2>&1 >/dev/null); then
+      return 0
+    else
+      cli_status=$?
+      if [ "$cli_status" -ne 4 ]; then show_error_dialog "Die Vorschau konnte nicht abgeschlossen werden.
+
+$diagnostic"; fi
       return "$cli_status"
     fi
   fi

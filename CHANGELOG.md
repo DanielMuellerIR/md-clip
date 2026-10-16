@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.10.0 — 2026-10-16
+
+- Native macOS-Vorschau über App-Aktion `--preview` oder CLI
+  `--preview-window --replace`: Markdown, Quelle/Ziel und Vereinfachungen prüfen,
+  übernehmen, abbrechen oder eine vorherige Ersetzung zurücknehmen.
+- Vorschau und Schreiben verwenden dasselbe Ergebnis und dieselbe vorbereitete
+  Clipboard-Generation. Statuswechsel deaktivieren ungültige Aktionen; Signale
+  und unerwartetes Elternende schließen das Fenster und stornieren die Vorbereitung.
+- Interne Statusabfragen verbrauchen kein Undo und starten keinen Dienst.
+  Ältere laufende Dienste werden vor einer neuen Vorschauvorbereitung erkannt,
+  damit vorhandene Sicherungen erhalten bleiben. Doctor nennt Vorschaufähigkeit.
+- Vorschau-Helfer vollständig in CLI-Installation, Bundle-Prüfung und Signaturfolge
+  integriert; native Hintergrund- und IPC-Prüfungen ergänzen die CI.
+
 ## 1.9.0 — 2026-10-16
 
 - Die macOS-App bietet `--undo` als eigene Aktion für einen zweiten Hotkey.

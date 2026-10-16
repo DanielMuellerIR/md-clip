@@ -73,6 +73,11 @@ sys.exit(91)
             assert kind == 'error' and 'native failure detail' in message
             assert ('zehn Minuten' in message) == (status == 1)
         else: assert not (base/'dialog').exists()
+    for status in (0,4,3):
+        run(['--preview'],status=status,cli_status=status)
+        assert json.loads((base/'cli').read_text()) == ['--replace','--preview-window','--notify']
+        assert not (base/'defaults').exists() and not (base/'updater').exists()
+        assert (base/'dialog').exists() == (status == 3)
     for args in (['--help'], ['-h']):
         run(args)
         kind, message = json.loads((base/'dialog').read_text())

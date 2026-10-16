@@ -56,7 +56,8 @@ private func fail(_ status: Int, _ message: String) -> Failure { Failure(status:
 private struct Format: Codable { let type: String; let bytes: Data }
 private struct Snapshot: Codable { let count: Int; let items: [[Format]] }
 private struct Request: Codable { let command: String; var token: String?; var bytes: Data?; var snapshot: Snapshot?; var count: Int? }
-private struct Reply: Codable { var status: Int; var message: String?; var token: String?; var snapshot: Snapshot?; var count: Int? }
+private struct Reply: Codable { var status: Int; var message: String?; var token: String?; var snapshot: Snapshot?; var count: Int?; var undoAvailable: Bool?; var pendingValid: Bool? }
+private struct UndoStatus: Encodable { var version = 1; var undo_available: Bool; var pending_valid: Bool }
 private func checkDirectory(create: Bool) throws {
     if create && mkdir(serviceDirectory, 0o700) != 0 && errno != EEXIST {
         throw fail(2, "Der private Undo-Dienstordner konnte nicht angelegt werden.")
@@ -342,12 +343,20 @@ private func serve() throws {
         _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
         let deadline = now() + requestSeconds
         var reply: Reply
+        var isStatus = false
         do {
             var peerUID: uid_t = 0
             var peerGID: gid_t = 0
             guard getpeereid(fd, &peerUID, &peerGID) == 0, peerUID == getuid() else { throw fail(2, "Der Undo-Client gehört einem anderen Benutzer.") }
             let request: Request = try receive(fd, deadline: deadline)
+            isStatus = request.command == "status"
             switch request.command {
+            case "status":
+                let count = pasteboard.changeCount
+                if let entry = pending, now() >= entry.expires || count != entry.snapshot.count { pending = nil }
+                if let entry = committed, now() >= entry.expires || count != entry.count { committed = nil }
+                reply = Reply(status: 0, undoAvailable: committed != nil,
+                              pendingValid: pending != nil && pending?.token == request.token)
             case "prepare":
                 guard pending == nil else { throw fail(1, "Eine Clipboard-Sicherung ist bereits in Vorbereitung.") }
                 let result = try runWorker(Request(command: "capture"))
@@ -384,7 +393,7 @@ private func serve() throws {
         catch { reply = Reply(status: 2, message: "Der Undo-Dienst konnte die Anfrage nicht verarbeiten.") }
         try? transmit(fd, reply, deadline: deadline)
         close(fd)
-        idleSince = now()
+        if !isStatus { idleSince = now() }
     }
 }
 private func connectService() throws -> Int32 {
@@ -425,8 +434,8 @@ private func stdinBytes(deadline: Double) throws -> Data {
 }
 private func client() throws -> Reply {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    guard let command = arguments.first, ["prepare", "replace", "cancel", "undo", "available", "diagnose", "stop"].contains(command),
-          arguments.count == ((command == "replace" || command == "cancel") ? 2 : 1) else { throw fail(2, "Aufruf: clipboard-undo prepare | replace TOKEN | cancel TOKEN | undo | available | diagnose | stop") }
+    guard let command = arguments.first, ["prepare", "replace", "cancel", "undo", "available", "diagnose", "status", "stop"].contains(command),
+          (command == "status" ? [1, 2].contains(arguments.count) : arguments.count == ((command == "replace" || command == "cancel") ? 2 : 1)) else { throw fail(2, "Aufruf: clipboard-undo prepare | replace TOKEN | cancel TOKEN | undo | available | diagnose | status [TOKEN] | stop") }
     if command == "diagnose" {
         if serviceExists() { try checkDirectory(create: false) }
         _ = try socketAddress()
@@ -449,6 +458,9 @@ private func client() throws -> Reply {
     var fd: Int32
     do { fd = try connectService() }
     catch {
+        if command == "status", let failure = error as? Failure, failure.status == 1 {
+            return Reply(status: 0, undoAvailable: false, pendingValid: false)
+        }
         guard command == "prepare" else { throw error }
         try checkDirectory(create: true)
         // Ein vorhandener unsicherer Socket wird niemals durch einen Neustart ersetzt.
@@ -481,7 +493,10 @@ if CommandLine.arguments.dropFirst().first == "--worker" { worker(); exit(0) }
 do {
     if CommandLine.arguments.dropFirst().first == "--serve" { try serve(); exit(0) }
     let reply = try client()
-    if let token = reply.token { print(token) }
+    if CommandLine.arguments.dropFirst().first == "status" {
+        let state = UndoStatus(undo_available: reply.undoAvailable ?? false, pending_valid: reply.pendingValid ?? false)
+        FileHandle.standardOutput.write(try encode(state) + Data([10]))
+    } else if let token = reply.token { print(token) }
     if let message = reply.message { FileHandle.standardError.write(Data((message + "\n").utf8)) }
     exit(Int32(reply.status))
 } catch let error as Failure {

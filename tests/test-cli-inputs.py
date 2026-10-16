@@ -36,6 +36,7 @@ if name=='uname': print(os.environ['MOCK_PLATFORM']);sys.exit()
 undo=name in ('clipboard-undo','clipboard-undo-linux.py')
 if undo and args==['available']:sys.exit()
 if undo and args==['diagnose']:print('ok');sys.exit()
+if undo and args==['status']:sys.exit(1 if os.environ.get('UNDO_FAIL_STATUS') else 0)
 if '--version' in args or '-version' in args:print('mock 1.0');sys.exit()
 with (b/'calls').open('a') as f:f.write(name+'\\n')
 if os.environ.get('NO_CLIP')=='1':sys.exit(90)
@@ -81,6 +82,9 @@ sys.stdout.buffer.write(f.read_bytes())
     for args in (['--stdin'],['--stdin','--input','x'],['--json'],['--preview'],['--plain','--from','html'],['--input','missing.html']):
         run(args,b'x',2)
     run(['--doctor','--strict'],rc=2)
+    for args in (['--preview-window'], ['--undo','--preview-window'],
+                 ['--doctor','--preview-window'], ['--replace','--preview-window','--preview']):
+        run(args,rc=2)
     for args in (['--images'], ['--images','invalid'], ['--doctor','--images','alt'],
                  ['--tables'], ['--tables','invalid'], ['--doctor','--tables','text']):
         run(args,rc=2)
@@ -186,6 +190,18 @@ sys.stdout.buffer.write(f.read_bytes())
     assert not broken['sandbox'] and not broken['table_filter']
     (runtime/'pandoc').unlink();(runtime/'pandoc').symlink_to(real_pandoc)
     env.pop('NO_CLIP')
+    gui_dir=base/'helpers';gui_dir.mkdir()
+    gui=gui_dir/'md-clip-preview'
+    gui.write_text('#!' + os.path.realpath(sys.executable) + '\n' + '''import os,sys,pathlib,json,time
+b=pathlib.Path(os.environ['MOCK_ROOT'])
+(b/'preview-data').write_bytes(pathlib.Path(sys.argv[1]).read_bytes())
+(b/'preview-notes').write_bytes(pathlib.Path(sys.argv[2]).read_bytes())
+(b/'preview-process').write_text(str(os.getpid()))
+assert pathlib.Path(sys.argv[3]).name=='clipboard-undo' and sys.argv[4]=='mock-token'
+if os.environ.get('MOCK_PREVIEW_PAUSE'):time.sleep(30)
+sys.exit(int(os.environ.get('MOCK_PREVIEW_STATUS','0')))
+''')
+    gui.chmod(0o755)
     platforms=[('Linux',''),('Linux','mock-wayland')]
     if os.uname().sysname=='Darwin': platforms.append(('Darwin',''))
     for platform,wayland in platforms:
@@ -305,6 +321,77 @@ sys.stdout.buffer.write(f.read_bytes())
         (base/'written').write_bytes(b'protected')
         run(['--preview','--replace'],rc=2)
         assert (base/'written').read_bytes()==b'protected'
+        undo_calls()
+        if platform=='Darwin':
+            env['UNDO_FAIL_STATUS']='1'
+            (base/'preview-data').unlink(missing_ok=True)
+            p=run(['--replace','--preview-window'],rc=2)
+            assert b'Undo-Status' in p.stderr and not undo_calls() and not (base/'preview-data').exists()
+            env.pop('UNDO_FAIL_STATUS')
+            (base/'html').write_bytes(b'<p>Text <img src="x" alt="BILD"></p>')
+            (runtime/'pandoc').unlink()
+            (runtime/'pandoc').write_text('#!' + os.path.realpath(sys.executable) + '\n' +
+                'import sys,os,pathlib\n' +
+                "if '--wrap=none' in sys.argv:\n with (pathlib.Path(os.environ['MOCK_ROOT'])/'conversions').open('a') as f:f.write('1\\n')\n" +
+                'os.execv(' + repr(real_pandoc) + ', [' + repr(real_pandoc) + ',*sys.argv[1:]])\n')
+            (runtime/'pandoc').chmod(0o755)
+            for decision, code in ((0,0),(4,4),(64,3)):
+                undo_calls()
+                (base/'conversions').unlink(missing_ok=True)
+                (base/'written').write_bytes(b'protected')
+                env['MOCK_PREVIEW_STATUS']=str(decision)
+                p=run(['--from','html','--replace','--preview-window','--images','alt','--quiet'],rc=code)
+                assert (base/'conversions').read_text().splitlines()==['1']
+                assert b'1 Bild' in (base/'preview-notes').read_bytes() and b'Quelle: HTML' in (base/'preview-notes').read_bytes()
+                assert undo_calls()==(['prepare','replace'] if decision==0 else ['prepare','cancel'])
+                assert (base/'written').read_bytes()==((base/'preview-data').read_bytes() if decision==0 else b'protected')
+                assert not p.stdout
+            env['MOCK_PREVIEW_STATUS']='5';env['UNDO_SUCCESS']='1'
+            undo_calls()
+            run(['--from','html','--replace','--preview-window'])
+            assert undo_calls()==['prepare','cancel','undo']
+            env.pop('UNDO_SUCCESS');env.pop('MOCK_PREVIEW_STATUS')
+            (base/'html').write_bytes(NESTED)
+            (base/'rtf').write_bytes(b'{\\rtf1\\ansi RTF rescue}')
+            undo_calls()
+            run(['--replace','--preview-window'])
+            assert b'RTF rescue' in (base/'preview-data').read_bytes()
+            notes=(base/'preview-notes').read_bytes()
+            assert b'HTML' in notes and b'RTF verwendet' in notes
+            undo_calls()
+            (base/'preview-data').unlink()
+            run(['--from','html','--replace','--preview-window','--strict'],rc=3)
+            assert not (base/'preview-data').exists() and undo_calls()==['prepare','cancel']
+            (base/'rtf').unlink()
+            (base/'html').write_bytes(b'<p>valid</p>')
+            for interruption, code in ((signal.SIGINT,130),(signal.SIGTERM,143)):
+                env['MOCK_PREVIEW_PAUSE']='1'
+                (base/'preview-process').unlink(missing_ok=True)
+                undo_calls()
+                proc=subprocess.Popen([str(runtime/'md-clip'),'--from','html','--replace','--preview-window'],
+                                      stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True)
+                try:
+                    deadline=time.monotonic()+10
+                    while not (base/'preview-process').exists() and time.monotonic()<deadline:time.sleep(.01)
+                    assert (base/'preview-process').exists()
+                    child=int((base/'preview-process').read_text())
+                    proc.send_signal(interruption)
+                    out,error=proc.communicate(timeout=5)
+                    assert proc.returncode==code,(code,proc.returncode,error)
+                    assert not out and undo_calls()==['prepare','cancel']
+                    try:os.kill(child,0)
+                    except ProcessLookupError:pass
+                    else:raise AssertionError('Vorschau-Kindprozess blieb aktiv')
+                finally:
+                    if proc.poll() is None:os.killpg(proc.pid,signal.SIGKILL)
+                    proc.wait()
+                env.pop('MOCK_PREVIEW_PAUSE')
+            (runtime/'pandoc').unlink();(runtime/'pandoc').symlink_to(real_pandoc)
+            print('OK: native Vorschau übernimmt einmaliges Ergebnis, Hinweise/Quiet, Cancel, Undo und Signale')
+        else:
+            (base/'preview-data').unlink(missing_ok=True)
+            run(['--replace','--preview-window'],rc=2)
+            assert not (base/'preview-data').exists() and not undo_calls()
         print('OK:',platform,wayland or 'default','Tabellen/Fallback/Strict/Schreibschutz')
     # Echte Terminalabfrage, aber ausschließlich auf den Clipboard-Attrappen.
     for answer, expected_rc in ((b'nein\n',4),(b'ja\n',0),(b'\x04',4)):

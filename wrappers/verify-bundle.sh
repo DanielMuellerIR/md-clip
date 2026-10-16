@@ -61,6 +61,10 @@ SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
   echo "HUD-Helfer fehlt im Bundle." >&2
   exit 66
 }
+[ -x "$APP/Contents/MacOS/md-clip-preview" ] || {
+  echo "Vorschau-Helfer fehlt im Bundle." >&2
+  exit 66
+}
 ICON="$APP/Contents/Resources/md-clip.icns"
 [ -f "$ICON" ] && [ -s "$ICON" ] && [ -r "$ICON" ] || {
   echo "App-Icon fehlt, ist leer oder nicht lesbar: $ICON" >&2
@@ -191,6 +195,7 @@ verify_all_macos_compatibility() {
   local labels=(
     "Updater-Helfer"
     "HUD-Helfer"
+    "Vorschau-Helfer"
     "HTML-Helper"
     "RTF-Helper"
     "Undo-Helper"
@@ -202,6 +207,7 @@ verify_all_macos_compatibility() {
   local binaries=(
     "$UPDATER"
     "$APP/Contents/MacOS/md-clip-hud"
+    "$APP/Contents/MacOS/md-clip-preview"
     "$APP/Contents/Resources/bin/clipboard-html"
     "$APP/Contents/Resources/bin/clipboard-rtf"
     "$APP/Contents/Resources/bin/clipboard-undo"
@@ -274,6 +280,7 @@ if [ "$SIGNED" -eq 1 ]; then
   verify_distribution_signature "$APP" "App"
   verify_distribution_signature "$UPDATER" "Updater-Helfer"
   verify_distribution_signature "$APP/Contents/MacOS/md-clip-hud" "HUD-Helfer"
+  verify_distribution_signature "$APP/Contents/MacOS/md-clip-preview" "Vorschau-Helfer"
   verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-html" "HTML-Helfer"
   verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-rtf" "RTF-Helfer"
   verify_distribution_signature "$APP/Contents/Resources/bin/clipboard-undo" "Undo-Helfer"

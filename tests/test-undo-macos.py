@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Native Undo-Tests mit ausschließlich privater macOS-Zwischenablage."""
 import os
+import json
 from pathlib import Path
 import platform
 import subprocess
@@ -28,6 +29,11 @@ with tempfile.TemporaryDirectory(prefix="md-clip-undo-tests-", dir="/private/tmp
     assert diagnosis.returncode == 0 and diagnosis.stdout.strip() in (b"ok", b"macos-session-missing"), diagnosis.stderr
     assert not diagnosis_directory.exists(), "Diagnose erzeugt keinen Dienstordner"
     print("OK: native macOS-Diagnose ohne Dienststart")
+    status = subprocess.run([str(helper), "status", "unused"], capture_output=True, timeout=10,
+                            env=dict(os.environ, MD_CLIP_TEST_DIRECTORY=str(diagnosis_directory)))
+    assert status.returncode == 0 and json.loads(status.stdout) == {"version": 1, "undo_available": False, "pending_valid": False}, status.stderr
+    assert not diagnosis_directory.exists()
+    print("OK: frischer macOS-Status ohne Dienstordner")
     try:
         subprocess.run([str(driver), str(helper), str(work)], check=True, timeout=180)
     finally:

@@ -35,6 +35,9 @@ Größenlimits oder die spätere Stabilität eines Clipboard-Eigentümers.
   Data-Control blockiert Undo, beweist jedoch nicht, dass ein anderes Lesewerkzeug
   ebenfalls scheitern muss. `clipboard_replace` benötigt ein Schreibwerkzeug und
   einen bereiten Undo-Helfer.
+- `native_preview`: nativer Vorschau-Helfer vorhanden und Statusabfrage
+  ausführbar. Die grafische Sitzungsbereitschaft steht weiterhin getrennt in
+  `session`; die Angabe startet kein Fenster.
 - `diagnostics`: Liste aus `code`, `severity` (`error`/`warning`), `message` und
   `next_step`. Nur `code` ist die stabile Maschinenkennung; Meldungstexte dürfen
   sich verbessern. Unbekannte Helferausgaben werden als `undo-helper-failed`
@@ -54,6 +57,7 @@ keine Dokumenttitel, URLs, Clipboard-Texte oder Sitzungsinhalte ausgegeben.
 | `perl-missing`, `textutil-missing` | Werkzeug des Rich-Text-Wegs fehlt |
 | `html-helper-missing`, `rtf-helper-missing` | macOS-Lesehelfer fehlt; install.sh oder vollständige App verwenden |
 | `clipboard-read-tool-missing`, `clipboard-write-tool-missing` | Werkzeug des gewählten Backends fehlt; xclip bzw. wl-clipboard installieren |
+| `preview-status-unavailable` | Vorschau-Helfer vorhanden, aber Undo-Status nicht prüfbar; Helfer aktualisieren oder ältere laufende Sicherung zuerst zurücknehmen/ablaufen lassen |
 | `undo-helper-missing`, `undo-helper-failed` | Helfer fehlt, startet nicht oder liefert eine ungültige Diagnose |
 | `python-missing`, `python-unsupported` | Linux-Helfer benötigt Python 3.8 oder neuer |
 | `local-security-unsupported` | Sichere lokale Linux-Verbindungen werden nicht unterstützt |

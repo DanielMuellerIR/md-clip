@@ -147,14 +147,23 @@
   `io.github.danielmuellerir.md-clip.notifier` ist auf dem Entwicklungs-Mac genau so
   verbrannt. Deshalb: kein UserNotifications-Anlauf ohne neues Konzept;
   der osascript-Weg in `notify()` bleibt nur Fallback der git-Installation.
+- **Native Vorschau:** `helpers/md-clip-preview.swift` zeigt das einmal von der
+  CLI vorbereitete Ergebnis; nur die CLI übernimmt es mit demselben Undo-Token.
+  Die interne Abfrage `status [TOKEN]` darf keine Formate anfordern, Sicherung
+  verbrauchen, Frist verlängern oder einen Dienst starten. Ungültiger Status
+  deaktiviert die Aktionen. Vorschau-Helfer, CLI-Installation, Bundle-Prüfer und
+  Signaturfolge gehören zusammen. Hintergrundtests sind keine Abnahme von
+  Vordergrund-Fokus oder einer notarisiert installierten App; Details in
+  [docs/PREVIEW.md](docs/PREVIEW.md).
 - **Sparkle-Updates:** Die App aktualisiert sich über Sparkle (exakt gepinnt in
   `wrappers/build-app-bundled.sh`, Prüfsumme gegen den Homebrew-Cask
   gegenverifiziert). Weil die App nur ein Shell-Launcher ist, treibt der
   kompilierte Helfer `helpers/md-clip-updater.swift` (im Bundle:
   `Contents/MacOS/md-clip-updater`) Sparkle an — er ist die Sparkle-Laufzeit
   der App. Cocoa-basiert ist er damit nicht allein: `helpers/md-clip-hud.swift`
-  importiert ebenfalls AppKit und startet eine `NSApplication`. Wer Signatur,
-  Laufzeit oder Kompatibilität prüft, muss beide Helfer ansehen. Nach einem
+  und `helpers/md-clip-preview.swift` importieren ebenfalls AppKit und starten
+  eine `NSApplication`. Wer Signatur, Laufzeit oder Kompatibilität prüft, muss
+  alle drei Helfer ansehen. Nach einem
   Update startet Sparkle die App bewusst NICHT neu (Delegate-Methode
   `updaterShouldRelaunchApplication` im Updater): Jeder Start der App führt
   sofort `md-clip --replace` aus und ersetzte damit ungefragt das Clipboard.
@@ -172,6 +181,7 @@
 - [todo.md](todo.md) — offene Punkte, die eine Person von Hand erledigen muss.
 - [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) — Projektdokumentation.
 - [docs/ENCODING.md](docs/ENCODING.md) — Projektdokumentation.
+- [docs/PREVIEW.md](docs/PREVIEW.md) — native Vorschau, Generation und Lebenszyklus.
 - [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md) — Ergebnisbewertung und strenger Modus.
 - [docs/SPARKLE-RELEASE.md](docs/SPARKLE-RELEASE.md) — Sparkle-Updates bauen, signieren und veröffentlichen.
 - [docs/archive/BLUEPRINT.md](docs/archive/BLUEPRINT.md) — Projektdokumentation.

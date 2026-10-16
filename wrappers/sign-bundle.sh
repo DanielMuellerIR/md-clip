@@ -12,7 +12,7 @@
 #      clipboard-rtf, clipboard-undo). Die Shell-Skripte daneben (md-clip, pipeline.sh)
 #      brauchen keine eigene Signatur; sie werden als Ressourcen vom
 #      Bundle-Siegel erfasst.
-#   2. Der Updater-Helfer in Contents/MacOS/. codesign signiert beim
+#   2. Updater-, HUD- und Vorschau-Helfer in Contents/MacOS/. codesign signiert beim
 #      Bundle-Aufruf nur das Haupt-Executable (den Launcher) — ein zweites
 #      Programm im selben Verzeichnis muss ausdrücklich selbst signiert werden.
 #   3. Sparkles Helfer im Framework: erst das Autoupdate-Programm, dann die
@@ -48,6 +48,7 @@ SIGN_TARGETS=(
   "$APP/Contents/Resources/bin/clipboard-undo"
   "$APP/Contents/MacOS/md-clip-updater"
   "$APP/Contents/MacOS/md-clip-hud"
+  "$APP/Contents/MacOS/md-clip-preview"
   "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
   "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
   "$SPARKLE_FRAMEWORK"

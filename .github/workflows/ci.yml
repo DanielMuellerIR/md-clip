@@ -171,3 +171,4 @@ jobs:
           "$TEST_PYTHON" tests/test-pandoc-pin.py
           "$TEST_PYTHON" tests/test-app-actions.py
           "$TEST_PYTHON" tests/test-undo-macos.py
+          "$TEST_PYTHON" tests/test-preview-macos.py

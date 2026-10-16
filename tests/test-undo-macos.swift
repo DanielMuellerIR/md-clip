@@ -46,6 +46,14 @@ func call(_ arguments: [String], _ input: Data? = nil) -> Result { finish(launch
 func expect(_ result: Result, _ status: Int32, _ reason: String) {
     precondition(result.status == status, "\(reason): expected \(status), got \(result.status), \(result.error)")
 }
+struct UndoStatus: Decodable { let version: Int; let undo_available: Bool; let pending_valid: Bool }
+func status(_ token: String? = nil) -> UndoStatus {
+    let result = call(token.map { ["status", $0] } ?? ["status"])
+    expect(result, 0, "status")
+    let value = try! JSONDecoder().decode(UndoStatus.self, from: Data(result.output.utf8))
+    precondition(value.version == 1)
+    return value
+}
 func prepare() -> String {
     let result = call(["prepare"])
     expect(result, 0, "prepare")
@@ -105,11 +113,13 @@ let raw = readRaw()
 precondition(raw.count == 2)
 for (index, item) in original.enumerated() { for (type, bytes) in item { precondition(raw[index][type] == bytes) } }
 let token = prepare()
+precondition(status(token).pending_valid && !status(token).undo_available)
 let before = board.changeCount
 expect(call(["cancel", UUID().uuidString]), 1, "wrong cancel token")
 expect(call(["replace", UUID().uuidString], Data("wrong".utf8)), 1, "wrong replace token")
 unchanged(before, raw)
 replace(token)
+precondition(status().undo_available && !status(token).pending_valid)
 precondition(board.string(forType: .string) == "**Markdown**\n")
 expect(call(["undo"]), 0, "undo")
 precondition(readRaw() == raw, "Full-format undo differs from original")
@@ -148,6 +158,7 @@ precondition([a.status, b.status].sorted() == [0, 1], "Concurrent prepare must h
 expect(call(["cancel", a.status == 0 ? a.output : b.output]), 0, "cancel winner")
 replace(prepare())
 let next = prepare()
+precondition(status(next).pending_valid && status(next).undo_available)
 expect(call(["prepare"]), 1, "busy prepare")
 expect(call(["cancel", next]), 0, "cancel leaves previous undo")
 expect(call(["undo"]), 0, "failed subsequent prepare preserves undo")
@@ -283,11 +294,13 @@ stop()
 environment["MD_CLIP_TEST_PENDING_TTL"] = "1"
 write(original)
 let expiringPending = prepare()
+precondition(status(expiringPending).pending_valid)
 let pendingCount = board.changeCount
 pause(1.4)
 expect(call(["replace", expiringPending], Data("expired".utf8)), 1, "expired pending snapshot")
 unchanged(pendingCount, raw)
-print("PASS: abgelaufenes prepare schreibt nichts")
+precondition(!status(expiringPending).pending_valid)
+print("PASS: abgelaufenes prepare schreibt nichts; Status bleibt rein lesend")
 stop()
 environment.removeValue(forKey: "MD_CLIP_TEST_PENDING_TTL")
 environment["MD_CLIP_TEST_TTL"] = "1"

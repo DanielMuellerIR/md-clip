@@ -163,7 +163,7 @@ echo "✓ pandoc bereit ($(du -h "$BUILD_DIR/pandoc" | cut -f1))"
 
 # ---------- 2. Swift-Helper kompilieren ----------
 
-for helper in clipboard-html clipboard-rtf clipboard-undo md-clip-hud; do
+for helper in clipboard-html clipboard-rtf clipboard-undo md-clip-hud md-clip-preview; do
   src="$PROJECT_ROOT/helpers/${helper}.swift"
   out="$BUILD_DIR/${helper}"
   echo "==> Kompiliere ${helper}"
@@ -191,8 +191,8 @@ test -s "$SPARKLE_STAGE/LICENSE"
 
 echo "==> Kompiliere md-clip-updater"
 # Der Updater-Helfer ist die Sparkle-Laufzeit der App: Er treibt Sparkle an
-# (siehe helpers/md-clip-updater.swift). Der zweite Cocoa-Helfer im Bundle ist
-# md-clip-hud, der die Erfolgsmeldung zeigt — beide gehören in Signatur- und
+# (siehe helpers/md-clip-updater.swift). md-clip-hud und md-clip-preview nutzen
+# ebenfalls AppKit; alle gehören in Signatur- und
 # Kompatibilitätsprüfungen. Gelinkt wird gegen das frisch entpackte Framework;
 # zur Laufzeit findet der Updater es über den rpath im Bundle unter
 # Contents/Frameworks.
@@ -241,6 +241,8 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/md-clip-updater"
 # macOS-Erlaubnis (Begründung und Vorgeschichte in helpers/md-clip-hud.swift).
 cp "$BUILD_DIR/md-clip-hud" "$APP_BUNDLE/Contents/MacOS/md-clip-hud"
 chmod +x "$APP_BUNDLE/Contents/MacOS/md-clip-hud"
+cp "$BUILD_DIR/md-clip-preview" "$APP_BUNDLE/Contents/MacOS/md-clip-preview"
+chmod +x "$APP_BUNDLE/Contents/MacOS/md-clip-preview"
 
 # Icon-Datei mitliefern. .icns muss in Contents/Resources/ liegen und im
 # Info.plist als CFBundleIconFile referenziert werden, damit macOS es im

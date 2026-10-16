@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.9.0"
+VERSION="1.10.0"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -173,6 +173,9 @@ fi
 INPUT_MODE=clipboard
 INPUT_PATH=""
 PREVIEW=0
+NATIVE_PREVIEW=0
+NATIVE_PREVIEW_PID=""
+PREVIEW_NOTES_FILE=""
 STRICT=0
 IMAGES=keep
 TABLES=reject
@@ -197,6 +200,11 @@ log() {
   if [ "$QUIET" -eq 0 ]; then
     printf '%s\n' "$*" >&2
   fi
+}
+
+conversion_note() {
+  log "$1"
+  if [ -n "${PREVIEW_NOTES_FILE:-}" ]; then printf '%s\n' "$1" >> "$PREVIEW_NOTES_FILE"; fi
 }
 
 # vlog: Verbose-Log. Nur sichtbar mit --verbose.
@@ -282,6 +290,8 @@ OPTIONS
       --json           JSON-Ausgabe für --doctor.
       --preview        Vor --replace Ergebnis auf stderr zeigen und am Terminal
                        bestätigen; Abbruch liefert Exit 4.
+      --preview-window Native macOS-Vorschau vor --replace; benötigt den
+                       Vorschau-Helfer, Abbruch liefert Exit 4.
       --strict         Bekannte Strukturvereinfachungen und den Rückfall von
                        Rich Text auf Klartext ablehnen (Exit 3).
       --images MODUS   Bilder erhalten, durch Alternativtext ersetzen oder
@@ -480,6 +490,40 @@ doctor_platform_issues() {
   fi
 }
 
+native_preview_helper_path() {
+  [ "$PLATFORM" = macos ] || return 2
+  local bundle
+  bundle=$(cd "$SCRIPT_DIR/../../MacOS" 2>/dev/null && pwd || true)
+  if [ -n "$bundle" ] && [ -x "$bundle/md-clip-preview" ]; then
+    printf '%s\n' "$bundle/md-clip-preview"
+  else printf '%s\n' "$PROJECT_ROOT/helpers/md-clip-preview"; fi
+}
+
+native_preview_available() {
+  local helper
+  helper=$(native_preview_helper_path) || return 1
+  [ -x "$helper" ]
+}
+
+check_native_preview() {
+  [ "$PLATFORM" = macos ] || { err "Die native Fenstervorschau ist nur unter macOS verfügbar."; return 2; }
+  native_preview_available || { err "Vorschau-Helfer fehlt (install.sh ausführen oder vollständige App verwenden)."; return 2; }
+  clip_undo_command status >/dev/null 2>&1 || {
+    err "Undo-Status nicht prüfbar. Helfer/Installation prüfen; eine ältere laufende Sicherung zuerst zurücknehmen oder ablaufen lassen."
+    return 2
+  }
+}
+
+show_native_preview() {
+  local helper status
+  helper=$(native_preview_helper_path) || return 2
+  "$helper" "$OUTPUT_FILE" "$PREVIEW_NOTES_FILE" "$(undo_helper_path)" "$UNDO_TOKEN" &
+  NATIVE_PREVIEW_PID=$!
+  if wait "$NATIVE_PREVIEW_PID"; then status=0; else status=$?; fi
+  NATIVE_PREVIEW_PID=""
+  return "$status"
+}
+
 clip_read_tools_ready() {
   case "$PLATFORM:$CLIP_BACKEND" in
     macos:*) command -v pbpaste ;;
@@ -563,6 +607,7 @@ while [ "$#" -gt 0 ]; do
     --doctor) DOCTOR=1 ;;
     --json) JSON=1 ;;
     --preview) PREVIEW=1 ;;
+    --preview-window) NATIVE_PREVIEW=1; CONVERSION_OPTIONS=1 ;;
     --strict) STRICT=1; CONVERSION_OPTIONS=1 ;;
     --images)
       CONVERSION_OPTIONS=1
@@ -733,7 +778,13 @@ doctor_issue() {
 doctor() {
   local tool available version path sep="" sandbox=false rtf=false lua=false undo=false
   local diagnosis session read_tools=false write_tools=false read_ready=null replace_ready=false
+  local native_preview=false native_resource=false native_label="nicht verfügbar"
   local html=false rtf_conversion=false pandoc_runs=false issues="" issue_sep=""
+  if native_preview_available; then
+    native_resource=true
+    clip_undo_command status >/dev/null 2>&1 && native_preview=true
+  fi
+  if [ "$native_preview" = true ]; then native_label="verfügbar"; fi
   diagnosis=$(clip_diagnose)
   case "$diagnosis" in
     ok) session=ready; undo=true ;;
@@ -753,10 +804,10 @@ doctor() {
   elif [ "$session" = unavailable ]; then read_ready=false; fi
   if [ "$undo" = true ] && [ "$write_tools" = true ]; then replace_ready=true; fi
   if [ "$JSON" -eq 1 ]; then
-    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"strict":true,"image_modes":["keep","alt","omit"],"table_modes":["reject","text"],"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$undo"
+    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"native_preview":%s,"strict":true,"image_modes":["keep","alt","omit"],"table_modes":["reject","text"],"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$native_preview" "$undo"
   else
     printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
-    printf 'stdin/Datei: ja; Vorschau: Terminal; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$undo" "$sandbox" "$rtf" "$lua"
+    printf 'stdin/Datei: ja; Vorschau: Terminal; Fenstervorschau: %s; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$native_label" "$undo" "$sandbox" "$rtf" "$lua"
   fi
   for tool in pandoc perl textutil pbpaste pbcopy xclip wl-paste wl-copy iconv clipboard-html clipboard-rtf python3; do
     available=false; version=""
@@ -800,6 +851,9 @@ doctor() {
   fi
   command -v perl >/dev/null 2>&1 || doctor_issue perl-missing error 'Perl fehlt; Rich-Text-Konvertierung ist nicht verfügbar.' 'Perl beziehungsweise perl-base installieren.'
   doctor_platform_issues "$rtf" "$pandoc_runs"
+  if [ "$native_resource" = true ] && [ "$native_preview" = false ]; then
+    doctor_issue preview-status-unavailable warning 'Die Fenstervorschau kann den Undo-Status nicht prüfen.' 'Helfer/Installation prüfen; eine ältere laufende Sicherung zuerst zurücknehmen oder ablaufen lassen.'
+  fi
   [ "$read_tools" = true ] || doctor_issue clipboard-read-tool-missing warning 'Das Lesewerkzeug dieses Clipboard-Backends fehlt.' 'Unter X11 xclip, unter Wayland wl-clipboard installieren; unter macOS pbpaste/PATH prüfen.'
   [ "$write_tools" = true ] || doctor_issue clipboard-write-tool-missing warning 'Das Schreibwerkzeug dieses Clipboard-Backends fehlt.' 'Unter X11 xclip, unter Wayland wl-clipboard installieren; unter macOS pbcopy/PATH prüfen.'
   case "$diagnosis" in
@@ -882,7 +936,7 @@ export MD_CLIP_IMAGES="$IMAGES"
 export MD_CLIP_TABLES="$TABLES"
 [ "$JSON" -eq 0 ] || [ "$DOCTOR" -eq 1 ] || die 2 "--json benötigt --doctor."
 if [ "$UNDO" -eq 1 ]; then
-  [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$DOCTOR" -eq 0 ] || die 2 "--undo ist nicht mit Konvertierung, Vorschau oder --doctor kombinierbar."
+  [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$NATIVE_PREVIEW" -eq 0 ] && [ "$DOCTOR" -eq 0 ] || die 2 "--undo ist nicht mit Konvertierung, Vorschau oder --doctor kombinierbar."
   check_dependencies write || exit 2
   clip_restore || exit $?
   log "md-clip: Ursprüngliche Clipboard-Formate wiederhergestellt."
@@ -890,11 +944,15 @@ if [ "$UNDO" -eq 1 ]; then
   exit 0
 fi
 if [ "$DOCTOR" -eq 1 ]; then
-  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] && [ "$IMAGES" = keep ] && [ "$TABLES" = reject ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen, --strict oder Inhaltsvereinfachung kombinierbar."
+  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$NATIVE_PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] && [ "$IMAGES" = keep ] && [ "$TABLES" = reject ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen, --strict oder Inhaltsvereinfachung kombinierbar."
   doctor
   exit 0
 fi
 [ "$PREVIEW" -eq 0 ] || [ "$REPLACE" -eq 1 ] || die 2 "--preview benötigt --replace."
+if [ "$NATIVE_PREVIEW" -eq 1 ]; then
+  [ "$REPLACE" -eq 1 ] && [ "$PREVIEW" -eq 0 ] || die 2 "--preview-window benötigt --replace und ist nicht mit --preview kombinierbar."
+  check_native_preview || exit 2
+fi
 if [ "$PLAIN" -eq 1 ]; then
   case "$FROM" in auto|plain) FROM=plain ;; *) die 2 "--plain widerspricht --from $FROM." ;; esac
 fi
@@ -915,7 +973,15 @@ if [ "$REPLACE" -eq 1 ]; then check_dependencies write || exit 2; fi
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/md-clip.XXXXXX")
 OUTPUT_FILE="$WORK_DIR/output"
 export MD_CLIP_RESULT_FILE="$WORK_DIR/result"
+if [ "$NATIVE_PREVIEW" -eq 1 ]; then
+  PREVIEW_NOTES_FILE="$WORK_DIR/preview-notes"
+  : > "$PREVIEW_NOTES_FILE"
+fi
 cleanup_output() {
+  if [ -n "$NATIVE_PREVIEW_PID" ]; then
+    kill -TERM "$NATIVE_PREVIEW_PID" >/dev/null 2>&1 || true
+    wait "$NATIVE_PREVIEW_PID" 2>/dev/null || true
+  fi
   if [ -n "$UNDO_TOKEN" ]; then clip_cancel_replace "$UNDO_TOKEN" >/dev/null 2>&1 || true; fi
   rm -rf "$WORK_DIR"
 }
@@ -1039,27 +1105,27 @@ report_simplifications() {
   if [ "$TABLE_CELLS_FLATTENED" -gt 0 ]; then
     label=Tabellenzellen
     if [ "$TABLE_CELLS_FLATTENED" -eq 1 ]; then label=Tabellenzelle; fi
-    log "md-clip: Vereinfachung: $TABLE_CELLS_FLATTENED $label; Blockgrenzen und Umbrüche zusammengeführt."
+    conversion_note "md-clip: Vereinfachung: $TABLE_CELLS_FLATTENED $label; Blockgrenzen und Umbrüche zusammengeführt."
   fi
   if [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; then
     label=RTF-Layouttabellen
     if [ "$LAYOUT_TABLES_FLATTENED" -eq 1 ]; then label=RTF-Layouttabelle; fi
-    log "md-clip: Vereinfachung: $LAYOUT_TABLES_FLATTENED $label in Absätze umgewandelt."
+    conversion_note "md-clip: Vereinfachung: $LAYOUT_TABLES_FLATTENED $label in Absätze umgewandelt."
   fi
   if [ "$TABLES_TEXT" -gt 0 ]; then
     label=Tabellen
     if [ "$TABLES_TEXT" -eq 1 ]; then label=Tabelle; fi
-    log "md-clip: Vereinfachung: $TABLES_TEXT $label als beschrifteten Text dargestellt."
+    conversion_note "md-clip: Vereinfachung: $TABLES_TEXT $label als beschrifteten Text dargestellt."
   fi
   if [ "$IMAGES_ALT" -gt 0 ]; then
     label=Bilder
     if [ "$IMAGES_ALT" -eq 1 ]; then label=Bild; fi
-    log "md-clip: Vereinfachung: $IMAGES_ALT $label auf Alternativtext reduziert."
+    conversion_note "md-clip: Vereinfachung: $IMAGES_ALT $label auf Alternativtext reduziert."
   fi
   if [ "$IMAGES_OMITTED" -gt 0 ]; then
     label=Bilder
     if [ "$IMAGES_OMITTED" -eq 1 ]; then label=Bild; fi
-    log "md-clip: Vereinfachung: $IMAGES_OMITTED $label entfernt."
+    conversion_note "md-clip: Vereinfachung: $IMAGES_OMITTED $label entfernt."
   fi
 }
 
@@ -1106,7 +1172,7 @@ for source_kind in $ORDER; do
   if convert_source "$source_kind" 2> "$WORK_DIR/diagnostic"; then
     if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
     vlog "Quelle: $source_kind"
-    if [ "$FAILED_RICH" -eq 1 ]; then log "md-clip: Rückfall: $(source_label "$source_kind") verwendet."; fi
+    if [ "$FAILED_RICH" -eq 1 ]; then conversion_note "md-clip: Rückfall: $(source_label "$source_kind") verwendet."; fi
     report_simplifications
     break
   else
@@ -1120,7 +1186,7 @@ for source_kind in $ORDER; do
       die "$status" "Konvertierung von $source_kind fehlgeschlagen."
     fi
     FAILED_RICH=1
-    log "md-clip: $(source_label "$source_kind") übersprungen: $(source_failure_reason "$status")."
+    conversion_note "md-clip: $(source_label "$source_kind") übersprungen: $(source_failure_reason "$status")."
     vlog "Quelle $source_kind nicht konvertierbar (Exit $status); nächste Quelle"
     if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
   fi
@@ -1163,6 +1229,27 @@ if [ "$REPLACE" -eq 1 ]; then
     answer=""
     IFS= read -r answer < /dev/tty || exit 4
     [ "$answer" = ja ] || exit 4
+  fi
+  if [ "$NATIVE_PREVIEW" -eq 1 ]; then
+    summary="$WORK_DIR/preview-summary"
+    preview_target="$TO"
+    if [ "$CONVERTED" -eq 0 ]; then preview_target="Klartext (unverändert)"; fi
+    printf 'Quelle: %s\nZielformat: %s\n\n' "$(source_label "$source_kind")" "$preview_target" > "$summary"
+    cat "$PREVIEW_NOTES_FILE" >> "$summary"
+    PREVIEW_NOTES_FILE="$summary"
+    if show_native_preview; then preview_status=0; else preview_status=$?; fi
+    case "$preview_status" in
+      0) ;;
+      4) exit 4 ;;
+      5)
+        clip_cancel_replace "$UNDO_TOKEN" >/dev/null 2>&1 || true
+        UNDO_TOKEN=""
+        clip_restore || exit $?
+        log "md-clip: Ursprüngliche Clipboard-Formate wiederhergestellt."
+        notify "Ursprüngliche Clipboard-Formate wiederhergestellt."
+        exit 0 ;;
+      *) die 3 "Native Vorschau konnte nicht abgeschlossen werden; Clipboard bleibt unverändert." ;;
+    esac
   fi
   clip_write_text < "$OUTPUT_FILE" || exit $?
   UNDO_TOKEN=""

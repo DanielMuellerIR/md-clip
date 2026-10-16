@@ -114,6 +114,30 @@ class StateTests(unittest.TestCase):
         token = self.state.command("prepare")
         self.state.command("replace", token, b"**Markdown**")
 
+    def test_status_preserves_pending_and_saved_without_materializing(self):
+        token = self.state.command("prepare")
+        self.clip.failure = True
+        status = json.loads(self.state.command("status", token))
+        self.assertEqual({"version": 1, "undo_available": False, "pending_valid": True}, status)
+        self.assertFalse(json.loads(self.state.command("status", "wrong"))["pending_valid"])
+        self.state.command("replace", token, b"Markdown")
+        self.assertEqual({"version": 1, "undo_available": True, "pending_valid": False},
+                         json.loads(self.state.command("status")))
+        self.state.command("undo")
+        self.assertFalse(json.loads(self.state.command("status"))["undo_available"])
+
+    def test_status_rejects_changed_and_expired_generations(self):
+        self.replace()
+        token = self.state.command("prepare")
+        self.clip.epoch += 1
+        self.assertEqual({"version": 1, "undo_available": False, "pending_valid": False},
+                         json.loads(self.state.command("status", token)))
+        self.replace()
+        token = self.state.command("prepare")
+        self.now += 600
+        self.assertFalse(json.loads(self.state.command("status", token))["pending_valid"])
+        self.assertFalse(json.loads(self.state.command("status"))["undo_available"])
+
     def test_all_formats_once(self):
         original = self.clip.data.copy()
         self.replace()
@@ -211,6 +235,15 @@ class StateTests(unittest.TestCase):
 
 
 class SecurityTests(unittest.TestCase):
+    def test_fresh_status_creates_no_service_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            environment = dict(os.environ, XDG_RUNTIME_DIR=root, DISPLAY=":fresh-status", WAYLAND_DISPLAY="")
+            result = subprocess.run([sys.executable, str(HELPER), "status", "unused"],
+                                    env=environment, capture_output=True, timeout=10)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual({"version": 1, "undo_available": False, "pending_valid": False}, json.loads(result.stdout))
+            self.assertEqual([], os.listdir(root))
+
     def test_private_directory_rejects_symlink_and_permissions(self):
         old = os.environ.get("XDG_RUNTIME_DIR")
         try:
@@ -647,6 +680,18 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(doc['capabilities']['clipboard_replace'])
         self.assertLess(time.monotonic() - start, 3)
         self.source_command("republish")
+
+    def test_status_preserves_real_pending_and_undo(self):
+        token = self.run_helper("prepare")
+        self.assertTrue(json.loads(self.run_helper("status", token))["pending_valid"])
+        self.run_helper("replace", token, b"new")
+        self.assertTrue(json.loads(self.run_helper("status"))["undo_available"])
+        pending = self.run_helper("prepare")
+        status = json.loads(self.run_helper("status", pending))
+        self.assertTrue(status["undo_available"] and status["pending_valid"])
+        self.run_helper("cancel", pending)
+        self.run_helper("undo")
+        self.assertFalse(json.loads(self.run_helper("status"))["undo_available"])
 
     def test_diagnose_reads_no_formats(self):
         self.source_command("delay")

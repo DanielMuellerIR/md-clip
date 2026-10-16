@@ -142,6 +142,7 @@ Alle Optionen im Überblick:
 | `--input DATEI` | | Datei lesen, ohne Clipboard-Zugriff |
 | `--doctor [--json]` | | Backend, Werkzeuge, Versionen und Fähigkeiten; keine Inhalte |
 | `--preview` | | Ergebnis vor `--replace` am Terminal bestätigen |
+| `--preview-window` | | Native macOS-Vorschau mit Übernehmen/Abbrechen/Undo; benötigt `--replace` und den Vorschau-Helfer |
 | `--strict` | | Erkannte Strukturvereinfachungen und Rich-Text-Rückfall auf Klartext ablehnen |
 | `--tables MODUS` | | Komplexe Tabellen: `reject` ablehnen (Standard), `text` beschriftet als Text darstellen |
 | `--images MODUS` | | Bilder: `keep` erhalten (Standard), `alt` auf Alternativtext reduzieren, `omit` entfernen |
@@ -370,7 +371,31 @@ Ab jetzt: Text irgendwo markieren, `⌘C`, `⌃⌥⌘M`, `⌘V` — das Eingefü
 
 **Hinweis für macOS Tahoe (und vermutlich neuere Versionen):** Beim ersten Auslösen erscheint die Meldung *„Diese Aktion kann nicht ausgeführt werden, da Skriptaktionen deaktiviert sind"*. Aus Sicherheitsgründen sind Skript-Ausführungen in Kurzbefehlen standardmäßig blockiert. Über den Hinweis-Dialog oder in den Einstellungen von Kurzbefehle.app **Skriptaktionen erlauben** aktivieren, dann läuft es.
 
+### Native Vorschau
+
+Ab App-Version **1.10.0** lässt sich das Ergebnis vor dem Ersetzen in einem
+nativen Fenster prüfen:
+
+```bash
+open -n -a "md-clip" --args --preview
+```
+
+Das Fenster zeigt das tatsächliche Markdown, Quelle/Ziel und Hinweise zu
+Vereinfachungen oder Quellenrückfällen. Übernehmen schreibt genau dieses bereits
+konvertierte Ergebnis. Abbrechen und Schließen ändern das Clipboard nicht.
+Eine gültige vorherige Ersetzung lässt sich direkt zurücknehmen.
+
+Ein neuer Kopiervorgang oder eine abgelaufene Vorbereitung deaktiviert Übernehmen.
+Die letzte Prüfung beim Schreiben schützt das Clipboard zusätzlich. Die
+bestehende Terminal-Vorschau bleibt unter `--preview` verfügbar; für das native
+Fenster verwendet die CLI `--preview-window --replace`. Details und Grenzen:
+[docs/PREVIEW.md](docs/PREVIEW.md).
+
 ### Eigener Hotkey für Undo
+
+**App-Aktionen benötigen Version 1.9.0 oder neuer.** Ältere Launcher ignorieren
+Aktionsargumente und konvertieren weiterhin; neue App-Aufrufe deshalb erst nach
+dem Aktualisieren verwenden. Die CLI-Undo-Aktion ist davon unabhängig.
 
 Die App akzeptiert genau eine Aktion. Ein normaler Dock-/Finder-Start oder
 `--convert` konvertiert das Clipboard. `--undo` nimmt die letzte erfolgreiche
@@ -452,6 +477,7 @@ python3 tests/test-tables-text.py
 python3 tests/test-doctor.py
 python3 tests/test-pandoc-pin.py
 python3 tests/test-app-actions.py
+python3 tests/test-preview-macos.py
 python3 tests/test-undo-linux.py
 python3 tests/test-undo-macos.py
 ```
@@ -481,6 +507,12 @@ env -u WAYLAND_DISPLAY ./tests/run-wayland.sh
 Wayland-Prüfungen benötigen einen unprivilegierten Benutzer und lehnen eine
 bereits gesetzte WAYLAND_DISPLAY ab. Der eigene Compositor wird danach beendet.
 Native macOS-Undo-Tests verwenden ausschließlich ein privates Pasteboard.
+`test-preview-macos.py` prüft standardmäßig nur Kompilierung, Eingaben und Status-IPC
+ohne Fenster. Mit `--ui` prüft es auf einem entsperrten grafischen Testbenutzer
+selbstbeendende Hintergrundansichten, Statuswechsel und Lebenszyklus. Der Test
+kontrolliert, dass er den bestehenden Fensterfokus nicht übernimmt. Optionale
+PNG-Belege lassen sich mit `MD_CLIP_PREVIEW_ARTIFACTS` in ein eigenes Verzeichnis
+übernehmen.
 Ein ungeschützter Aufruf von `tests/run-tests.sh` kann dagegen das echte Clipboard
 verwenden und restauriert nur dessen Klartext. Für normale macOS-Prüfungen daher
 immer `MD_CLIP_SKIP_CLIPBOARD=1` setzen.

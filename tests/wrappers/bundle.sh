@@ -140,6 +140,7 @@ for executable in \
   "$XPC_TEST_APP/Contents/MacOS/md-clip" \
   "$XPC_TEST_APP/Contents/MacOS/md-clip-updater" \
   "$XPC_TEST_APP/Contents/MacOS/md-clip-hud" \
+  "$XPC_TEST_APP/Contents/MacOS/md-clip-preview" \
   "$XPC_TEST_APP/Contents/Resources/bin/md-clip" \
   "$XPC_TEST_APP/Contents/Resources/bin/pipeline.sh" \
   "$XPC_TEST_APP/Contents/Resources/bin/tidy-markdown.pl" \
@@ -169,6 +170,14 @@ for resource in tidy-markdown.pl tables.lua preprocess-html.pl; do
   printf 'resource\n' > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
 done
 echo "✓ Bundle-Prüfer lehnt leere Pipeline-Ressourcen ab"
+mv "$XPC_TEST_APP/Contents/MacOS/md-clip-preview" "$TEST_ROOT/hidden-preview"
+if bash "$VERIFY_BUNDLE" "$XPC_TEST_APP" > "$TEST_ROOT/preview.out" 2> "$TEST_ROOT/preview.err"; then
+  echo "✗ Bundle-Prüfer akzeptiert einen fehlenden Vorschau-Helfer" >&2; exit 1
+fi
+grep -Fq 'Vorschau-Helfer fehlt im Bundle.' "$TEST_ROOT/preview.err"
+mv "$TEST_ROOT/hidden-preview" "$XPC_TEST_APP/Contents/MacOS/md-clip-preview"
+grep -Fq 'verify_distribution_signature "$APP/Contents/MacOS/md-clip-preview" "Vorschau-Helfer"' "$VERIFY_BUNDLE"
+echo "✓ Vorschau-Helfer ist Pflichtressource und Signaturziel"
 ln -s "$TEST_ROOT/nicht-vorhanden" \
   "$XPC_TEST_APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
 if bash "$VERIFY_BUNDLE" "$XPC_TEST_APP" \
@@ -224,6 +233,7 @@ EXPECTED_VTOOL_TARGETS="$TRUST_TEST_ROOT/expected-vtool-targets"
 printf '%s\n' \
   "$UPDATER" \
   "$APP/Contents/MacOS/md-clip-hud" \
+  "$APP/Contents/MacOS/md-clip-preview" \
   "$APP/Contents/Resources/bin/clipboard-html" \
   "$APP/Contents/Resources/bin/clipboard-rtf" \
   "$APP/Contents/Resources/bin/clipboard-undo" \

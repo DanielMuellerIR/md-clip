@@ -809,6 +809,9 @@ class State:
 
     def command(self, name, token="", data=b""):
         self.expire()
+        if name == "status":
+            return json.dumps({"version": 1, "undo_available": self.saved is not None,
+                               "pending_valid": bool(self.pending and secrets.compare_digest(token, self.pending[0]))})
         if name == "prepare":
             if self.pending:
                 raise UndoError("Eine Clipboard-Konvertierung ist bereits vorbereitet.")
@@ -846,7 +849,7 @@ class State:
         raise UndoError("Unbekannter Clipboard-Undo-Aufruf.", 2)
 
 
-def private_directory():
+def private_directory(create=True):
     runtime = os.environ.get("XDG_RUNTIME_DIR", "")
     base = runtime if runtime else "/tmp"
     if runtime:
@@ -857,10 +860,11 @@ def private_directory():
                              os.environ.get("XDG_SESSION_ID", ""), runtime))
     key = hashlib.sha256(identity.encode()).hexdigest()[:20]
     path = os.path.join(base, "md-clip-undo-{}-{}".format(os.getuid(), key))
-    try:
-        os.mkdir(path, 0o700)
-    except FileExistsError:
-        pass
+    if create:
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            pass
     st = os.lstat(path)
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o700:
         raise UndoError("Clipboard-Undo-Verzeichnis ist nicht sicher.", 2)
@@ -934,7 +938,6 @@ def serve(path, directory_fd):
             if not select.select([server, clipboard.fileno()], writers, [], .05)[0] or not select.select([server], [], [], 0)[0]:
                 continue
             connection, _ = server.accept()
-            last_client = time.monotonic()
             with connection:
                 connection.settimeout(READ_TIMEOUT)
                 try:
@@ -953,6 +956,7 @@ def serve(path, directory_fd):
                     name, token = request.get("command", ""), request.get("token", "")
                     if not isinstance(name, str) or not isinstance(token, str) or len(token) > 128:
                         raise UndoError("Ungültige Clipboard-Undo-Anfrage.", 2)
+                    if name != "status": last_client = time.monotonic()
                     if name == "stop":
                         running, result = False, ""
                     else:
@@ -1002,7 +1006,12 @@ def client(command, token=""):
         clipboard = backend(probe=True)
         clipboard.close()
         return ""
-    path, directory_fd = private_directory()
+    try:
+        path, directory_fd = private_directory(create=command != "status")
+    except FileNotFoundError:
+        if command == "status":
+            return json.dumps({"version": 1, "undo_available": False, "pending_valid": False})
+        raise
     socket_path = os.path.join(path, "control.sock")
     if command == "__daemon":
         serve(path, directory_fd)
@@ -1012,6 +1021,8 @@ def client(command, token=""):
         connection = connect(socket_path)
     except (FileNotFoundError, ConnectionRefusedError):
         if command != "prepare":
+            if command == "status":
+                return json.dumps({"version": 1, "undo_available": False, "pending_valid": False})
             if command in ("cancel", "stop"):
                 return ""
             raise UndoError("Kein gültiges Clipboard-Undo verfügbar.")
@@ -1050,10 +1061,11 @@ def client(command, token=""):
 
 def main():
     try:
-        if len(sys.argv) < 2 or sys.argv[1] not in ("dependencies", "available", "diagnose", "prepare", "replace", "cancel", "undo", "stop", "__daemon"):
-            raise UndoError("Aufruf: clipboard-undo-linux.py dependencies|available|diagnose|prepare|replace TOKEN|cancel TOKEN|undo", 2)
+        if len(sys.argv) < 2 or sys.argv[1] not in ("dependencies", "available", "diagnose", "status", "prepare", "replace", "cancel", "undo", "stop", "__daemon"):
+            raise UndoError("Aufruf: clipboard-undo-linux.py dependencies|available|diagnose|status [TOKEN]|prepare|replace TOKEN|cancel TOKEN|undo", 2)
         command = sys.argv[1]
-        if len(sys.argv) != (3 if command in ("replace", "cancel") else 2):
+        valid_counts = (2, 3) if command == "status" else (3,) if command in ("replace", "cancel") else (2,)
+        if len(sys.argv) not in valid_counts:
             raise UndoError("Ungültiger Clipboard-Undo-Aufruf.", 2)
         result = client(command, sys.argv[2] if len(sys.argv) == 3 else "")
         if result:

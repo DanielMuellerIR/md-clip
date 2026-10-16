@@ -2,6 +2,7 @@
 helpers/clipboard-html
 helpers/clipboard-rtf
 helpers/clipboard-undo
+helpers/md-clip-preview
 
 # Manuell gesammelte Clipboard-Aufnahmen — Test-Daten, keine Source.
 tests/captures/
