@@ -93,6 +93,10 @@ cases.extend([
     ('heading-real-and-literal-attribute', '<h2 id="real">Heading {#literal}</h2>',
      '<h2 id="real">Heading {#literal}</h2>'),
 ])
+for tag in ('ol', 'ul'):
+    for code in ('command', '  command'):
+        source = '<' + tag + '><li>before</li><li><pre><code>' + code + '</code></pre></li></' + tag + '>'
+        cases.append(('list-unlabelled-code-' + tag + code, source, source))
 for attrs in ('title="a > b" href="https://example.test/a_(b)?x=1&amp;y=2"',
               "href='https://example.test/a_(b)?x=1&amp;y=2' title='a > b'",
               'TITLE="a > b" HREF="https://example.test/a_(b)?x=1&amp;y=2"'):

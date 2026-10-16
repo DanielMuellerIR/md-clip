@@ -54,13 +54,13 @@ function Div(div)
   return div.content
 end
 
-local function preserve_quoted_code(quote)
+local function preserve_container_code(container)
   if PANDOC_VERSION ~= pandoc.types.Version('3.9.0.2') then return nil end
-  return quote:walk {
+  return container:walk {
     CodeBlock = function(code)
-      -- pandoc 3.9.0.2 verliert bei zitiertem Code die erste Einrückung. Eine
-      -- leere Klasse erzwingt sprachlose Zäune ohne erfundene Sprache oder
-      -- zusätzliche Attribute im erzeugten Markdown.
+      -- pandoc 3.9.0.2 verliert bei Code in Zitaten oder Listen Einrückung
+      -- und damit teils den Codeblock selbst. Die leere Klasse erzwingt
+      -- sprachlose Zäune ohne erfundene Sprache oder zusätzliche Attribute.
       if #code.classes == 0 and code.identifier == '' and #code.attributes == 0 then
         code.classes = { '' }
       end
@@ -357,6 +357,7 @@ return { { Pandoc = function(doc)
     }
   end
   doc = doc:walk { Span = Span, Div = Div, Image = Image, Link = Link, Table = Table,
-                   BlockQuote = preserve_quoted_code }
+                   BlockQuote = preserve_container_code,
+                   BulletList = preserve_container_code, OrderedList = preserve_container_code }
   return finalize_document(doc):walk { Header = preserve_heading_braces }
 end } }

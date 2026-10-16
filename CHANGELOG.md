@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.14 — 2026-10-16
+
+- Das gebündelte pandoc erhält sprachlose Codeblöcke auch innerhalb von Listen.
+  Explizite Codezäune verhindern, dass daraus normaler Listentext wird.
+
 ## 1.10.13 — 2026-10-16
 
 - Getippte Attributsyntax wie `{#beispiel}` bleibt in HTML-Überschriften auch
