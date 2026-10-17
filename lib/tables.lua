@@ -340,6 +340,38 @@ local function preserve_heading_braces(heading)
   end }
 end
 
+local function preserve_backslash_hash(str)
+  if PANDOC_VERSION > pandoc.types.Version('3.9.0.2')
+      or (FORMAT ~= 'gfm' and FORMAT ~= 'commonmark') then return nil end
+  -- Die älteren Writer verschlucken die Raute hinter einem wörtlichen
+  -- Backslash. Bereits maskierter Markdown-Text umgeht diesen Writerfehler;
+  -- Code und Link-/Bildziele sind keine Str-Knoten und bleiben unverändert.
+  local out = pandoc.List()
+  local start = 1
+  while true do
+    local opening = str.text:find('\\#', start, true)
+    if not opening then
+      if start == 1 then return nil end
+      if start <= #str.text then out:insert(pandoc.Str(str.text:sub(start))) end
+      return out
+    end
+    if opening > start then out:insert(pandoc.Str(str.text:sub(start, opening - 1))) end
+    out:insert(pandoc.RawInline('markdown', '\\\\#'))
+    start = opening + 2
+  end
+end
+
+local function preserve_target_backslash_hash(node)
+  if FORMAT ~= 'gfm' and FORMAT ~= 'commonmark' and FORMAT ~= 'markdown' then return nil end
+  -- In Zielen und Titeln verdoppeln auch aktuelle Writer diese Backslashes
+  -- nicht. Der Markdown-Reader würde sie deshalb als Maskierung verbrauchen.
+  local function escape(backslashes) return backslashes .. backslashes .. '#' end
+  if node.t == 'Image' then node.src = node.src:gsub('(\\+)#', escape)
+  else node.target = node.target:gsub('(\\+)#', escape) end
+  node.title = node.title:gsub('(\\+)#', escape)
+  return node
+end
+
 -- Komplexe Außentabellen vor dem üblichen Bottom-up-Lauf umwandeln. Sonst
 -- verschwände die verschachtelte Tabelle, bevor ihr Container sie erkennen kann.
 return { { Pandoc = function(doc)
@@ -360,4 +392,6 @@ return { { Pandoc = function(doc)
                    BlockQuote = preserve_container_code,
                    BulletList = preserve_container_code, OrderedList = preserve_container_code }
   return finalize_document(doc):walk { Header = preserve_heading_braces }
+    :walk { Str = preserve_backslash_hash,
+            Link = preserve_target_backslash_hash, Image = preserve_target_backslash_hash }
 end } }

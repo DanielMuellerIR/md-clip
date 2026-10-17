@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.15 — 2026-10-17
+
+- Wörtliches `\#` bleibt mit älteren GFM-/CommonMark-Writern vollständig
+  erhalten. Die Raute verschwindet auch in Listen, Tabellen und Bildtexten
+  nicht mehr; Inline-Code und Codeblöcke bleiben unverändert.
+- Backslashes vor Rauten bleiben in Link-/Bildzielen und Titeln nach dem
+  Markdown-Roundtrip erhalten, auch wenn mehrere Backslashes aufeinanderfolgen.
+
 ## 1.10.14 — 2026-10-16
 
 - Das gebündelte pandoc und ältere unterstützte Versionen erhalten sprachlose

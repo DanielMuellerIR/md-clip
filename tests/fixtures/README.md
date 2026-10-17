@@ -21,6 +21,9 @@ mehrzeilige Attribute, Kommentare sowie Code und prüft den geparsten Roundtrip.
 Die Bild- und Tabellenmodusprüfungen ergänzen synthetische Grenzfälle mit eigenen
 Inhaltsinvarianten. Reale komplexe Word-Bild-/Tabellenoriginale fehlen weiterhin;
 dies ist eine Abnahmelücke, kein durch synthetische Tests ersetzter Originalbeleg.
+Wörtliches `\#` wird in Prosa, Überschriften, Listen, Zitaten, Tabellen und
+Bildtexten geprüft. Link-/Bildziele und Titel behalten auch mehrere Backslashes
+vor einer Raute; Inline-Code und Codeblöcke dienen als unveränderte Gegenproben.
 
 Zusätzliche private Prüfungen verwenden bereinigte Ableitungen vorhandener
 Browser-HTML- und Textverarbeitungs-/RTF-Aufnahmen. Text und Linkziele werden

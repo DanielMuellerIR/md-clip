@@ -97,6 +97,26 @@ for tag in ('ol', 'ul'):
     for code in ('command', '  command'):
         source = '<' + tag + '><li>before</li><li><pre><code>' + code + '</code></pre></li></' + tag + '>'
         cases.append(('list-unlabelled-code-' + tag + code, source, source))
+for name, source in (
+    ('literal-backslash-hash', '<p>Text \\# behalten</p>'),
+    ('leading-backslash-hash', '<p>\\# behalten</p>'),
+    ('nbsp-backslash-hash', '<p>&nbsp; \\# behalten</p>'),
+    ('double-backslash-hash', '<p>Text \\\\# behalten</p>'),
+    ('adjacent-backslash-hashes', '<p>Text \\## behalten</p>'),
+    ('heading-backslash-hash', '<h2>Text \\# behalten</h2>'),
+    ('list-backslash-hash', '<ul><li>\\# behalten</li></ul>'),
+    ('quote-backslash-hash', '<blockquote><p>\\# behalten</p></blockquote>'),
+    ('table-backslash-hash', '<table><tr><th>A</th><th>B</th></tr><tr><td>\\# behalten</td><td>Nachbar</td></tr></table>'),
+    ('link-backslash-hash', '<p><a href="https://example.test/\\#ziel" title="\\# Titel">\\# behalten</a></p>'),
+    ('image-backslash-hash', '<p><img src="image.png" alt="\\# behalten" title="\\# Titel"></p>'),
+    ('code-backslash-hash', '<p><code>\\# behalten</code></p><pre><code>  \\# behalten\n</code></pre>'),
+):
+    cases.append((name, source, source))
+for count in (2, 3):
+    literal = '\\' * count + '#'
+    source = ('<p><a href="https://example.test/' + literal + 'ziel" title="' + literal
+              + ' Titel">Link</a><img src="image.png" alt="Bild" title="' + literal + ' Titel"></p>')
+    cases.append(('target-backslash-run-' + str(count), source, source))
 for attrs in ('title="a > b" href="https://example.test/a_(b)?x=1&amp;y=2"',
               "href='https://example.test/a_(b)?x=1&amp;y=2' title='a > b'",
               'TITLE="a > b" HREF="https://example.test/a_(b)?x=1&amp;y=2"'):
