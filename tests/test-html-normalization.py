@@ -51,6 +51,9 @@ def signature(document):
 
 
 cases = []
+for suffix in ('\x00', '\x00\x00'):
+    for source in ('<p>Hallo ä😀</p>', '<pre><code>  command\\\n</code></pre>'):
+        cases.append(('terminal-nul-' + repr(suffix) + source, source + suffix, source))
 for attrs in ('title="a > b"', "title='a > b'", 'title="a &gt; b"',
               'class="x" title="a > b" data-note="kept"',
               'title="data-line=\'7\' > style=\'x\'"',
@@ -173,7 +176,9 @@ for failure in failed:
     print("FAIL:", *failure, sep="\n")
 assert not failed, f"{len(failed)} HTML-Roundtrips fehlgeschlagen"
 raw_cases = ['<!-- <div data-line="1" style="x">hidden</div><div></div> -->',
-             '<script>const sample = \'<div data-line="1" style="x">literal</div>\';</script>']
+             '<script>const sample = \'<div data-line="1" style="x">literal</div>\';</script>',
+             '<pre><code>before\x00after</code></pre>',
+             '<svg><text>before\x00after</text></svg>']
 for tag in ('textarea','title','script','style'):
     content = '<td rowspan="0"><div data-line="1" style="x">☀</div><div></div><li data-md-clip-classroom="1">literal</li>'
     raw_cases.extend(['<'+tag+'>'+content+'</'+tag+'>', '<'+tag.upper()+'>'+content+'</'+tag.upper()+' >', '<'+tag+'>'+content])
@@ -185,4 +190,19 @@ unfinished = ('<svg>' * 30000 + 'end').encode()
 for mode in ('claude_desktop','google_classroom'):
     assert run(['bash','-c','source "$1"; "preprocess_$2"',
                 'html-test',str(ROOT/'lib/pipeline.sh'),mode],unfinished) == unfinished
-print(f"OK: {len(cases) * 3} HTML-Roundtrips, {len(raw_cases)*2} Rohtextprüfungen und unvollständige SVG-Eingaben; Text, Code, Links, Auszeichnung, Listen und Tabellen erhalten")
+tidy_cases = []
+for depth in (1, 2, 3):
+    prefix = '> ' * depth
+    for decoration in ('', '****'):
+        source = prefix + decoration + '\\\n' + prefix + r'Text \# bleiben' + '\n'
+        expected = prefix.rstrip() + '\n' + prefix + 'Text # bleiben\n'
+        tidy_cases.append((source, expected))
+    source = prefix + '```\n' + prefix + '\\\n' + prefix + '```\n'
+    tidy_cases.append((source, source))
+for source, expected in tidy_cases:
+    for target in ('gfm', 'markdown', 'commonmark'):
+        result = subprocess.run(['perl', str(ROOT/'lib/tidy-markdown.pl'), target],
+                                input=source.encode(), capture_output=True, timeout=20)
+        assert result.returncode == 0 and not result.stderr, result.stderr
+        assert result.stdout == expected.encode(), (target, source, result.stdout)
+print(f"OK: {len(cases) * 3} HTML-Roundtrips, {len(raw_cases)*2} Rohtextprüfungen, {len(tidy_cases)*3} Markdown-Prüfungen und unvollständige SVG-Eingaben; Text, Code, Links, Auszeichnung, Listen und Tabellen erhalten")

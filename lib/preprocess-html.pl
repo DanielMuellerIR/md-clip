@@ -6,6 +6,9 @@ my $mode = shift // '';
 die "HTML-Vorverarbeitung: claude|classroom|tables erwartet\n"
     unless $mode eq 'claude' || $mode eq 'classroom' || $mode eq 'tables';
 my $html = do { local $/; <STDIN> } // '';
+# Manche Clipboard-HTML-Angebote enden mit einem C-String-Terminator.
+# Nur diesen Abschluss entfernen; NUL im Inhalt und Klartext bleiben unverändert.
+$html =~ s/\x00+\z//;
 my $tag_body = qr/(?:[^"'<>]|"[^"]*"|'[^']*')*/;
 my $markup = qr/<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>|<![^>]*>|<\/?[A-Za-z][A-Za-z0-9:_-]*$tag_body>/s;
 my @tokens;

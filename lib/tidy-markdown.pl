@@ -400,6 +400,8 @@ for my $i (0 .. $#lines) {
     next unless $content eq q{} || $content =~ /^[*_]+$/;
     $prefix =~ s/[ \t]+$//;
     $lines[$i] = $prefix;
+    # Der zwischengespeicherte Präfix darf jetzt nicht länger als die Zeile sein.
+    $quote_prefixes[$i] = $prefix;
 }
 
 };

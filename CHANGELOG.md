@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.17 — 2026-10-18
+
+- Abschließende NUL-Zeichen in HTML-Kopierangeboten gelangen nicht mehr ins
+  Markdown. NUL im HTML-Inhalt und ausdrücklich gewählter Klartext bleiben
+  unverändert.
+- Leere Absätze in verschachtelten Zitaten werden ohne Perl-Warnungen
+  bereinigt; nachfolgender Text und Code behalten ihren Inhalt.
+
 ## 1.10.16 — 2026-10-18
 
 - Codeblöcke direkt hinter einem Listenmarker behalten Backslashes und
