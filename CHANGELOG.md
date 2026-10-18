@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.10.18 — 2026-10-18
+
+- Wörtliche Backslashes bleiben auch vor weiteren Satzzeichen und am Ende
+  von Link-/Bildzielen und Titeln erhalten. Klammern und Anführungszeichen
+  beenden die Markdown-Verknüpfung dabei nicht vorzeitig.
+- Link- und Bildadressen mit ungleichen Klammern bleiben vollständig erhalten,
+  statt am ersten schließenden Zeichen abgeschnitten zu werden.
+- Getippte Pipe-Zeilen und Tabellentrennlinien bleiben gewöhnlicher Text,
+  auch in Listen und Zitaten. Die Nachbearbeitung erzeugt daraus weder
+  eine Tabelle noch einen pandoc-Zeilenblock.
+- HTML-Textbereiche erkennen auch schließende Tags mit überzähligen Attributen
+  oder einem Slash. Nachfolgende vorformatierte Blöcke werden wieder als Code
+  erhalten, statt versehentlich zum geschützten Textbereich zu gehören.
+- HTML-Angebote mit NUL-Abschluss erzeugen auch bei automatischer Quellenwahl
+  unter Linux keine Bash-Warnung mehr. Die Word-Erkennung verändert weiterhin
+  keine Quellbytes und wählt RTF wie bisher bevorzugt.
+- Konvertierungsleitfaden und Distributionsdokumentation berücksichtigen die
+  zusätzlichen Praxisproben sowie den aktuellen manuellen Release-Weg.
+
 ## 1.10.17 — 2026-10-18
 
 - Abschließende NUL-Zeichen in HTML-Kopierangeboten gelangen nicht mehr ins

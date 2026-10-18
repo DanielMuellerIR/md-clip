@@ -58,10 +58,15 @@ Inhaltsvergleich aber nicht.
 | Bilder | Referenzen, data-URLs und Inline-SVG werden mit `--images keep` erhalten. | Ein vor dem Writer fehlendes RTF-Bild bleibt fehlend. `keep` extrahiert keine Word-Bilder und kopiert keine externen Bilddateien. |
 | Tabellen | Einfache Tabellen bleiben Tabellen; komplexe Tabellen benötigen den ausdrücklich gewählten Textmodus. | Der Standard kann RTF-Layouttabellen in Absätze umwandeln. Der Textmodus erhält nur die vom Reader gelieferte Matrix. |
 
-Die Praxisproben mit Version 1.10.15 stammen aus selbst verfassten neutralen
-Dokumenten, tatsächlich aus Safari und TextEdit kopiert. Safari-HTML belegte
+Die Praxisproben seit Version 1.10.15 stammen aus selbst verfassten neutralen
+Dokumenten, tatsächlich aus Safari, TextEdit und seit 1.10.17 auch LibreOffice
+und Firefox kopiert. Safari-HTML belegte
 Code, Listenstart, Linktitel, Bildreferenz und einfache Tabellen. TextEdit-RTF
-belegte auch verschachtelte Tabellen. Das sind keine Word-Originale und keine
+belegte auch verschachtelte Tabellen. Firefox-HTML enthielt außerdem eingebettete
+PNG-Daten und Code mit vollständiger Einrückung; LibreOffice-HTML lieferte
+verschachtelte Tabellen und verbundene Zellen, das Bild jedoch nur als lokale
+Dateireferenz. Bereits beim Kopieren fehlende Titel oder Code-Semantik werden
+nicht ergänzt. Das sind keine Word-Originale und keine
 Zusage für jedes Dokument oder jede Programmversion. Öffentliche kleine
 Strukturbeispiele und ihre Herkunftsgrenzen stehen im
 [Quellenkorpus](../tests/fixtures/README.md).
@@ -103,6 +108,12 @@ nicht; sie muss im Zielkontext erreichbar sein. `--images alt` lässt stattdesse
 Vereinfachungen und würden hier mit `--strict` abgelehnt. Fehlt ein Alternativtext,
 kann `alt` das Bild ganz entfallen lassen. Ein Ergebnis ohne sichtbaren Inhalt
 wird abgelehnt.
+
+Wörtliche Backslashes in Link-/Bildzielen und Titeln bleiben erhalten, auch vor
+Satzzeichen oder am Ende. Dazu notwendige Markdown-Escapes sind Teil der
+Auszeichnung. Dasselbe gilt für getippte Pipe-Zeilen: Eine Zeichenfolge wie
+`| --- | --- |` bleibt Text und eröffnet keine Tabelle. Echte HTML-Tabellen
+werden weiterhin als Tabellen verarbeitet.
 
 ### Verschachtelte Tabelle
 

@@ -43,7 +43,7 @@ while ($html =~ /$markup/g) {
     if ($token->{name} && !$token->{close} && $token->{name} =~ /^(script|style|textarea|title)$/) {
         my $name = $token->{name};
         pos($html) = $cursor;
-        if ($html =~ m{</\Q$name\E\s*>}ig) {
+        if ($html =~ m{</\Q$name\E(?=[\s/>])$tag_body>}ig) {
             push @tokens, { raw => substr($html, $cursor, $-[0] - $cursor), opaque => 1 };
             push @tokens, { raw => $&, name => $name, close => 1, attrs => {} };
             $cursor = $+[0];

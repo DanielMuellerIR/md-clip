@@ -25,7 +25,7 @@
   über das ganze Dokument.
 - **Überzählige Escapes nimmt `tidy_markdown` zurück, Tabellenzeilen nicht.**
   `\-` am Zeilenanfang, `\_\_\_`, sowie `\|` und `\#` im Fließtext werden
-  entescapt. Escaped bleiben drei Stellen: die Raute am Anfang eines Blocks —
+  entescapt. Escaped bleiben die Raute am Anfang eines Blocks —
   also am Zeilenanfang **und** direkt hinter einem Listenmarker, denn `- # Text`
   wäre eine Überschrift im Listenpunkt —, **alles in einer Tabellenzeile** (die
   beginnt mit `|`) und **alles in Inline-Code** zwischen Backticks. In der
@@ -33,6 +33,8 @@
   verschiebt die Ausrichtung. Ein `\#` in einer Zelle bleibt deshalb bewusst
   stehen; wer das ändern will, muss die Tabelle neu ausrichten. In Inline-Code
   ist der Backslash echter Inhalt: `` `\#` `` bedeutet dort Backslash-Raute.
+  Auch getippte Pipe-Zeilen am Blockanfang und Pipe-Trennlinien bleiben
+  maskiert; sonst entstehen daraus Tabellen oder pandoc-Zeilenblöcke.
   **„Listenmarker" heißt dabei: beliebig viele hintereinander** — pandoc
   schreibt verschachtelte Listen als `- - \# tief` —, und beim Ziel `markdown`
   zählen auch alphabetische (`a.`, `b)`) sowie Definitionslisten-Marker (`:`,

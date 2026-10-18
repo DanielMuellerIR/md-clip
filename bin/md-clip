@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.10.17"
+VERSION="1.10.18"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -915,10 +915,13 @@ source "$PIPELINE_LIB"
 #   1. Office-Namespace im <html>-Tag (sehr zuverlässig), ODER
 #   2. mindestens 10 `mso-`-Marker im Body (Fallback für variantenreiche
 #      Office-Versionen).
-# Argument: $1 = HTML-Inhalt.
+# Argument: $1 = erfasste HTML-Datei.
 # Rückgabe: 0 wenn MSO, 1 wenn normales HTML.
 is_mso_html() {
-  local html="$1"
+  local html
+  # Nur die Heuristik ignoriert NUL. Die lineare Byte-Filterung vermeidet die
+  # Bash-Warnung von $(cat); die ursprüngliche Datei bleibt unverändert.
+  html=$(LC_ALL=C tr -d '\000' < "$1") || return 1
 
   # Schneller, exakter Check: Office-XML-Namespace im <html>-Tag.
   # Das dritte Pattern (*'Microsoft Word'*'Generator'*) wurde entfernt: Im echten
@@ -1034,7 +1037,7 @@ if [ "$REPLACE" -eq 1 ]; then
 fi
 
 # Dateien erhalten auch NUL-Bytes und abschließende Newlines. Kein Nutzdaten-
-# Transport über Shell-Variablen; nur die Word-Heuristik liest einen HTML-String.
+# Transport über Shell-Variablen; nur die Word-Heuristik sammelt einen HTML-String.
 read_source() {
   local kind="$1" dest="$2"
   if [ "$INPUT_MODE" = stdin ]; then run_io_command cat > "$dest"
@@ -1056,7 +1059,7 @@ if [ "$FROM" = auto ]; then
   read_source rtf "$WORK_DIR/rtf" 2>/dev/null || rm -f "$WORK_DIR/rtf"
   read_source plain "$WORK_DIR/plain" 2>/dev/null || rm -f "$WORK_DIR/plain"
   ORDER="html rtf plain"
-  if [ -s "$WORK_DIR/html" ] && is_mso_html "$(cat "$WORK_DIR/html")"; then
+  if [ -s "$WORK_DIR/html" ] && is_mso_html "$WORK_DIR/html"; then
     ORDER="rtf html plain"
     vlog "Microsoft Word: Reihenfolge RTF → HTML → Klartext"
   fi

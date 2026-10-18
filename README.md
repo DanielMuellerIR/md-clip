@@ -198,7 +198,9 @@ Bytes und ersetzt keine vollständige Syntaxprüfung. `--plain` bleibt bytegenau
 
 HTML-Layoutcontainer und leere Links werden nach dem HTML-Parsing normalisiert.
 Anführungszeichen, `>` und Zeilenumbrüche in Attributen sind dabei kein Text;
-Linkziele und Linktitel aus dem gelesenen HTML bleiben erhalten. Ein RTF-Angebot
+Linkziele und Linktitel aus dem gelesenen HTML bleiben einschließlich wörtlicher
+Backslashes erhalten. Getippte Pipe-Zeilen werden nicht zu Tabellen oder
+Zeilenblöcken umgedeutet. Ein RTF-Angebot
 kann den Titel bereits nicht mehr enthalten. Quellenreparaturen für Claude-Codezeilen
 und Classroom-Anhänge berücksichtigen auch einfache Anführungszeichen und
 großgeschriebene Attributnamen. Maskiertes HTML in Code bleibt unverändert.
@@ -424,6 +426,10 @@ Das Fenster zeigt das tatsächliche Markdown, Quelle/Ziel und Hinweise zu
 Vereinfachungen oder Quellenrückfällen. Übernehmen schreibt genau dieses bereits
 konvertierte Ergebnis. Abbrechen und Schließen ändern das Clipboard nicht.
 Eine gültige vorherige Ersetzung lässt sich direkt zurücknehmen.
+Bei aktivierter macOS-Tastaturnavigation erreichen Tab und Shift-Tab
+Hinweise, Markdown und verfügbare Aktionen.
+Return übernimmt eine gültige Vorschau auch aus den Textansichten;
+Escape bricht sie ab.
 
 Ein neuer Kopiervorgang oder eine abgelaufene Vorbereitung deaktiviert Übernehmen.
 Die letzte Prüfung beim Schreiben schützt das Clipboard zusätzlich. Die

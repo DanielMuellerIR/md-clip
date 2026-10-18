@@ -494,7 +494,15 @@ for my $i (0 .. $#lines) {
     # sie beginnt immer mit `|` (die Trennzeile eingeschlossen), und ihre
     # Escapes gehören dort zur Spaltenbreite. Ein Zeichen daraus zu
     # entfernen würde die Ausrichtung der Tabelle verschieben.
-    unless ($rest =~ /^\|/) {
+    # Eine getippte Trennzeile darf durch das Entescapen keine Pipe-Tabelle
+    # eröffnen. Das gilt auch ohne äußere Pipes sowie in Listen und Zitaten.
+    my $separator = $rest;
+    $separator =~ s/\\([|:-])/$1/g;
+    my $literal_table_separator = $separator =~ /\|/
+        && $separator =~ /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+    # Am Blockanfang eröffnet | außerdem pandoc-Markdowns LineBlock-Syntax.
+    my $pipe_block_start = $rest =~ /^(?:$list_marker[ \t]+)*(?:\\)?\|/;
+    unless ($pipe_block_start || $literal_table_separator) {
         # Eine Überschrift beginnt am Anfang ihres Blocks — das ist der
         # Zeilenanfang ODER die Stelle direkt hinter einem Listenmarker.
         # `- \# Text` ohne Backslash wäre eine Überschrift IM Listenpunkt,

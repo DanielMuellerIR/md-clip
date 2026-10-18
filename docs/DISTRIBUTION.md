@@ -1,10 +1,10 @@
-# Self-Contained .app Distribution — Status und nächste Schritte
+# macOS-App bauen und veröffentlichen
 
-Dieses Dokument beschreibt den Plan, **md-clip** als signierte, notarisierte
-macOS-App zu veröffentlichen, sodass auch Nutzer ohne Terminal-Erfahrung sie
-einfach per Doppelklick installieren können. Es ist in drei Stufen gegliedert.
+Dieses Dokument beschreibt den bestehenden Build- und Release-Weg für die
+signierte, notarisierte macOS-App. Die App enthält ihre Laufzeitabhängigkeiten;
+Nutzer benötigen weder Homebrew noch eine eigene pandoc-Installation.
 
-## Status (Stand: 2026-10-16)
+## Status (Stand: 2026-10-18)
 
 - Verbindlich für die Version sind zwei Quellen, nicht dieses Dokument:
   `bin/md-clip --version` nennt die Produktversion im Quellcode,
@@ -292,145 +292,37 @@ Dauer: Build ~30 s, Notarization typisch 2–3 min. Insgesamt ~4 min.
 
 ---
 
-## Stufe C — GitHub Action für Tag-Releases (⏳ geplant)
+## Stufe C — automatisierter DMG-Build (geplant)
 
-Sobald jemand einen neuen stabilen Tag veröffentlicht, soll automatisch
-ein signiertes + notarisiertes DMG gebaut und als Release-Asset hochgeladen
-werden. Damit ist „Release rausgeben" ein einziger Tag-Push, keine lokale
-Maschine mehr nötig.
+Ein signiertes und notarisiertes DMG wird derzeit lokal mit `./release.sh`
+gebaut. Ein automatischer DMG-Build aus einem Release-Tag ist noch nicht
+implementiert. Dafür wären eigene, passend abgesicherte Signing- und
+Notarisierungszugänge für den Build-Runner nötig.
 
-### Workflow-Skizze
+Die vorhandenen GitHub-Workflows bauen kein DMG: `request-appcast.yml` und
+`publish-appcast.yml` veröffentlichen den Sparkle-Feed zu einem bereits
+hochgeladenen Release. Ihr Ablauf und die erforderlichen Prüfungen stehen in
+[SPARKLE-RELEASE.md](SPARKLE-RELEASE.md).
 
-`.github/workflows/release.yml`:
+## Aktueller Release-Ablauf
 
-```yaml
-name: Release
-
-on:
-  push:
-    tags:
-      - 'v*'
-
-jobs:
-  build-and-release:
-    runs-on: macos-15  # Apple Silicon, neueste verfügbare Version
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Import Developer ID certificate
-        env:
-          P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_P12_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
-        run: |
-          echo "$P12_BASE64" | base64 --decode > /tmp/cert.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security import /tmp/cert.p12 -k build.keychain \
-            -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: \
-            -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          rm /tmp/cert.p12
-
-      - name: Setup notarytool credentials
-        env:
-          APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
-          TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
-        run: |
-          # Ohne Passwortschalter: Das Shell-Builtin schreibt das Secret über
-          # stdin; es erscheint weder in argv noch in der Prozessliste.
-          printf '%s\n' "$NOTARY_PASSWORD" | \
-            xcrun notarytool store-credentials "ci-notarytool" \
-            --apple-id "$APPLE_ID" \
-            --team-id  "$TEAM_ID"
-
-      # Der Profilname muss beim Release-Skript ankommen, sonst bricht es
-      # vor dem Bauen ab.
-      - name: Build, sign, notarize
-        env:
-          NOTARY_PROFILE: ci-notarytool
-        run: bash wrappers/sign-and-release.sh
-
-      - name: Upload DMG as release asset
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          gh release upload "v${VERSION}" \
-            "build/md-clip-${VERSION}.dmg" \
-            --clobber
-```
-
-### Repo-Secrets, die einmalig zu setzen sind
-
-In den GitHub-Settings unter Settings → Secrets and variables → Actions:
-
-| Secret-Name | Inhalt |
-|---|---|
-| `MACOS_CERTIFICATE_P12_BASE64` | `.p12`-Export des Developer-ID-Application-Zertifikats, base64-encoded |
-| `MACOS_CERTIFICATE_P12_PASSWORD` | Passwort, mit dem das `.p12` beim Export gesichert wurde |
-| `MACOS_NOTARIZATION_APPLE_ID` | deine Apple-ID (E-Mail-Adresse des Developer-Accounts) |
-| `MACOS_NOTARIZATION_TEAM_ID` | `9QSWKSR4NQ` |
-| `MACOS_NOTARIZATION_PASSWORD` | App-spezifisches Passwort für `notarytool` (dasselbe, das lokal im gewählten notarytool-Schlüsselbund-Profil liegt) |
-| `MACOS_KEYCHAIN_PASSWORD` | Beliebig wählbares starkes Passwort, schützt nur die temporäre Runner-Keychain während des Build-Laufs |
-
-### Wie der `.p12`-Export geht
-
-Schlüsselbundverwaltung öffnen (`open /Applications/Utilities/Keychain\ Access.app` oder via Spotlight):
-
-1. Anmeldung-Keychain auswählen
-2. Im Filter „Eigene Zertifikate" wählen
-3. Eintrag **„Developer ID Application: Daniel Mueller"** rechts-klicken → **„Exportieren …"**
-4. Dateiformat: **Personal Information Exchange (.p12)**
-5. Speicherort frei wählen (NICHT ins Repo!), z.B. `~/Desktop/md-clip-cert.p12`
-6. **Passwort vergeben** — das wird das `MACOS_CERTIFICATE_P12_PASSWORD`
-7. Dann in der Shell base64-encoden für `MACOS_CERTIFICATE_P12_BASE64`:
-   ```bash
-   base64 -i ~/Desktop/md-clip-cert.p12 | pbcopy
-   # → Inhalt liegt im Clipboard, im GitHub-Secret-Formular einfügen
-   # ACHTUNG: pbcopy hier braucht eine korrekte UTF-8-Locale, sonst Mojibake.
-   # Im laufenden Terminal sollte LANG bereits gesetzt sein. Falls Zweifel:
-   # LANG=en_US.UTF-8 base64 -i ~/Desktop/md-clip-cert.p12 | LANG=en_US.UTF-8 pbcopy
-   ```
-8. `.p12`-Datei lokal **sicher löschen** (z.B. `rm -P` für mehrfaches Überschreiben).
-
-### Stolpersteine, die wahrscheinlich auftreten
-
-- **`security set-key-partition-list`** ist nötig, sonst fragt jeder
-  codesign-Aufruf nach dem Schlüsselbund-Passwort interaktiv — im
-  Headless-CI ein tödlicher Hang.
-- **`security unlock-keychain`** muss innerhalb derselben Job-Step laufen
-  wie codesign — anderer Step = anderes Shell-Environment.
-- **Cache pandoc-Downloads** wäre nice, ist aber Stufe-D. Erstmal einfach
-  bei jedem Run neu herunterladen — sind ~60 MB pro Lauf.
-- **`gh` CLI ist auf macos-15-Runner vorinstalliert**, `GH_TOKEN` aus
-  `secrets.GITHUB_TOKEN` reicht für Release-Asset-Upload.
-- **macos-latest auf GitHub Actions** war historisch mal Intel, ist
-  inzwischen arm64 (seit 2024). Trotzdem in der workflow.yml explizit
-  `macos-15` o.ä. pinnen, damit es bei Major-Image-Updates nicht plötzlich
-  bricht.
-
-### Schritt-für-Schritt für die nächste Session
-
-1. **Cert als `.p12` exportieren** (siehe oben), base64-encoden, im Clipboard.
-2. **GitHub Repo-Secrets anlegen** (6 Stück, siehe Tabelle).
-3. **`.github/workflows/release.yml` schreiben** nach Skizze oben.
-4. **Lokal trockenlaufen lassen**, soweit möglich: jeden einzelnen Step
-   manuell durchgehen, prüfen, dass keine Surprises kommen.
-5. **Test-Tag pushen** — die Nummer aus der Produktversion ableiten, damit
-   hier nie ein längst vergebener Tag steht:
-
-   ```bash
-   VERSION=$(bin/md-clip --version | awk 'NR==1 {print $2}')
-   git tag "v${VERSION}-rc1" && git push --tags
-   ```
-
-   Workflow-Run beobachten, Logs debuggen.
-6. **Funktionierenden Workflow als regulär markieren**, Test-Release
-   löschen, echte Version taggen.
-7. **`docs/DISTRIBUTION.md` aktualisieren** und den belegten Ablauf festhalten.
+1. Produktversion, Changelog und Benutzerdokumentation abgleichen. Konvertierung
+   mit System- und Bundle-pandoc sowie unter Linux prüfen; das tatsächlich
+   gebaute Bundle zusätzlich mit `tests/test-bundle-conversion.py` testen.
+2. `./release.sh` baut und signiert die App, notarisiert sie und erstellt danach
+   das ebenfalls signierte, notarisierte DMG. `--no-finder-layout` ermöglicht
+   einen Lauf ohne Finder-Fokus; das Image enthält dann kein eingerichtetes
+   Finder-Fensterlayout.
+3. Den ausgehenden Quellstand einschließlich Historie und Release-Text prüfen.
+   Branch und genau den zugehörigen Tag veröffentlichen, keine pauschale
+   Übertragung aller lokalen Tags. Tag, App, DMG-Dateiname und Produktversion
+   müssen übereinstimmen.
+4. Ein stabiles GitHub-Release mit genau einem DMG anlegen. Download und
+   Prüfsumme anschließend verifizieren. Der Appcast-Workflow erzeugt den
+   signierten Feed; Version, Download-URL und Archivsignatur im Feed prüfen.
+5. Das Update aus einer älteren notarisierten App prüfen. Sparkle darf die App
+   nach dem Austausch nicht automatisch starten, weil das eine ungefragte
+   Clipboard-Konvertierung auslösen würde.
 
 ---
 

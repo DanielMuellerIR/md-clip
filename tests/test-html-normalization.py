@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """HTML-Varianten müssen nach dem Markdown-Roundtrip denselben Inhalt behalten."""
 import json
+import html
+import string
 from pathlib import Path
 import subprocess
 
@@ -51,6 +53,35 @@ def signature(document):
 
 
 cases = []
+for tag in ('title', 'style', 'script', 'textarea'):
+    for closing in (' data-extra="a > b"', '/'):
+        raw = '<' + tag + '>ignored</' + tag + closing + '>'
+        source = raw + '<pre>  first\n    second</pre>'
+        expected = raw + '<pre><code>  first\n    second</code></pre>'
+        cases.append(('raw-text-end-' + tag + closing, source, expected))
+for char in string.punctuation:
+    for count in ((1, 2, 3) if char in '#!\\"|' else (1,)):
+        literal = '\\' * count + char
+        target = html.escape('https://example.test/' + literal + 'path', quote=True)
+        title = html.escape('before ' + literal + ' after', quote=True)
+        source = ('<p><a href="' + target + '" title="' + title + '">Link</a>'
+                  '<img src="' + target + '" alt="Bild" title="' + title + '"></p>')
+        cases.append(('target-punctuation-' + repr(literal), source, source))
+for literal in ('\\path', 'path\\', '\\\\path', 'path\\\\'):
+    source = '<p><a href="' + literal + '" title="' + literal + '">Link</a></p>'
+    cases.append(('target-backslash-boundary-' + repr(literal), source, source))
+for path in ('foo(bar', 'foo)bar', ')foo(', 'foo\\(bar)', 'foo(bar\\)', 'foo(bar)'):
+    target = 'https://example.test/' + path
+    source = '<p><a href="' + target + '">Link</a><img src="' + target + '" alt="Bild"></p>'
+    cases.append(('target-parentheses-' + path, source, source))
+for text in ('| a | b |<br>| --- | --- |<br>| x | y |',
+             'a | b<br>--- | ---<br>x | y',
+             'a | b<br>:--- | ---:<br>x | y',
+             '| a |<br>| --- |<br>| x |'):
+    for wrapper in ('<p>{}</p>', '<blockquote><p>{}</p></blockquote>',
+                    '<ul><li>{}</li></ul>'):
+        source = wrapper.format(text)
+        cases.append(('literal-pipe-table-' + source, source, source))
 for suffix in ('\x00', '\x00\x00'):
     for source in ('<p>Hallo ä😀</p>', '<pre><code>  command\\\n</code></pre>'):
         cases.append(('terminal-nul-' + repr(suffix) + source, source + suffix, source))
@@ -182,6 +213,7 @@ raw_cases = ['<!-- <div data-line="1" style="x">hidden</div><div></div> -->',
 for tag in ('textarea','title','script','style'):
     content = '<td rowspan="0"><div data-line="1" style="x">☀</div><div></div><li data-md-clip-classroom="1">literal</li>'
     raw_cases.extend(['<'+tag+'>'+content+'</'+tag+'>', '<'+tag.upper()+'>'+content+'</'+tag.upper()+' >', '<'+tag+'>'+content])
+    raw_cases.extend('<'+tag+'>'+content+'</'+tag+ending+'>' for ending in (' data-extra="a > b"', '/'))
 for raw in raw_cases:
     for mode in ("claude_desktop", "google_classroom"):
         assert run(["bash", "-c", 'source "$1"; "preprocess_$2"',

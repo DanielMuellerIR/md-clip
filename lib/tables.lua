@@ -361,14 +361,31 @@ local function preserve_backslash_hash(str)
   end
 end
 
-local function preserve_target_backslash_hash(node)
+local function preserve_target_syntax(node)
   if FORMAT ~= 'gfm' and FORMAT ~= 'commonmark' and FORMAT ~= 'markdown' then return nil end
-  -- In Zielen und Titeln verdoppeln auch aktuelle Writer diese Backslashes
-  -- nicht. Der Markdown-Reader würde sie deshalb als Maskierung verbrauchen.
-  local function escape(backslashes) return backslashes .. backslashes .. '#' end
-  if node.t == 'Image' then node.src = node.src:gsub('(\\+)#', escape)
-  else node.target = node.target:gsub('(\\+)#', escape) end
-  node.title = node.title:gsub('(\\+)#', escape)
+  -- In Zielen und Titeln maskieren auch aktuelle Writer wörtliche Backslashes
+  -- nicht. Vor Satzzeichen oder weiteren Backslashes verbraucht der Reader sie.
+  -- Klammern und Titelquotes brauchen danach ihren eigenen Syntax-Escape;
+  -- sonst kann der verdoppelte Backslash das Linkende vorzeitig freigeben.
+  local function target(value)
+    local balance = 0
+    local escape_parentheses = value:find('\\[()]') ~= nil
+    for char in value:gmatch('[()]') do
+      balance = balance + (char == '(' and 1 or -1)
+      if balance < 0 then escape_parentheses = true end
+    end
+    if balance ~= 0 then escape_parentheses = true end
+    local escaped = value:gsub('\\', '\\\\')
+    if escape_parentheses then
+      escaped = escaped:gsub('[()]', function(char) return '\\' .. char end)
+    end
+    return escaped
+  end
+  if node.t == 'Image' then node.src = target(node.src)
+  else node.target = target(node.target) end
+  -- Ältere GFM-/CommonMark-Reader erkennen sonst Code-Spans zwischen Backticks
+  -- in zwei benachbarten Link-/Bildtiteln, obwohl sie dort Titeldaten sind.
+  node.title = node.title:gsub('\\', '\\\\'):gsub('["`]', function(char) return '\\' .. char end)
   return node
 end
 
@@ -393,5 +410,5 @@ return { { Pandoc = function(doc)
                    BulletList = preserve_container_code, OrderedList = preserve_container_code }
   return finalize_document(doc):walk { Header = preserve_heading_braces }
     :walk { Str = preserve_backslash_hash,
-            Link = preserve_target_backslash_hash, Image = preserve_target_backslash_hash }
+            Link = preserve_target_syntax, Image = preserve_target_syntax }
 end } }

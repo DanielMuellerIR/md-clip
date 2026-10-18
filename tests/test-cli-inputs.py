@@ -234,6 +234,17 @@ sys.exit(int(os.environ.get('MOCK_PREVIEW_STATUS','0')))
     if os.uname().sysname=='Darwin': platforms.append(('Darwin',''))
     for platform,wayland in platforms:
         env.update(MOCK_PLATFORM=platform, WAYLAND_DISPLAY=wayland)
+        (base/'rtf').write_bytes(b'{\\rtf1\\ansi RTF selected}')
+        for rich, expected in ((b'<p>HTML safe</p>\x00', b'HTML safe\n'),
+                               (b'<p>HTML safe</p>\x00\x00', b'HTML safe\n'),
+                               (b'<html xmlns:o="urn:schemas-microsoft-com:office:office">\x00<p>HTML</p></html>', b'RTF selected\n'),
+                               (b'<p>HTML</p>\x00<!-- '+b'mso-x '*10+b'-->', b'RTF selected\n')):
+            (base/'html').write_bytes(rich)
+            result=run(['--quiet'])
+            assert result.stdout==expected and not result.stderr, (platform,wayland,result.stdout,result.stderr)
+            assert (base/'html').read_bytes()==rich
+        (base/'html').unlink()
+        (base/'rtf').unlink()
         for args in (['--undo','--replace'], ['--undo','--plain'],
                      ['--undo','--stdin'], ['--undo','--from','auto'],
                      ['--undo','--doctor'], ['--undo','--preview'], ['--undo','--strict'], ['--undo','--images','keep'], ['--undo','--tables','reject']):
