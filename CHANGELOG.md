@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.19 — 2026-10-18
+
+- Wörtliches `\#` bleibt auch mit pandoc 3.11 in GFM und CommonMark erhalten.
+  Die Korrektur hängt nicht mehr von einer zu engen Versionsgrenze ab und
+  schützt Text, Überschriften, Listen, Tabellen und Bildtexte.
+
 ## 1.10.18 — 2026-10-18
 
 - Wörtliche Backslashes bleiben auch vor weiteren Satzzeichen und am Ende

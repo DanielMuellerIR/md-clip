@@ -341,10 +341,9 @@ local function preserve_heading_braces(heading)
 end
 
 local function preserve_backslash_hash(str)
-  if PANDOC_VERSION > pandoc.types.Version('3.9.0.2')
-      or (FORMAT ~= 'gfm' and FORMAT ~= 'commonmark') then return nil end
-  -- Die älteren Writer verschlucken die Raute hinter einem wörtlichen
-  -- Backslash. Bereits maskierter Markdown-Text umgeht diesen Writerfehler;
+  if FORMAT ~= 'gfm' and FORMAT ~= 'commonmark' then return nil end
+  -- Auch pandoc 3.11 verschluckt die Raute hinter einem wörtlichen Backslash.
+  -- Die Maskierung bleibt unabhängig von der Version gültig und umgeht den Writerfehler;
   -- Code und Link-/Bildziele sind keine Str-Knoten und bleiben unverändert.
   local out = pandoc.List()
   local start = 1
