@@ -199,6 +199,7 @@
 - [docs/ENCODING.md](docs/ENCODING.md) — Projektdokumentation.
 - [docs/PREVIEW.md](docs/PREVIEW.md) — native Vorschau, Generation und Lebenszyklus.
 - [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md) — Ergebnisbewertung und strenger Modus.
+- [docs/CONVERSION.md](docs/CONVERSION.md) — Quellenwahl, Inhaltsgrenzen und prüfbare Konvertierungsbeispiele.
 - [docs/SPARKLE-RELEASE.md](docs/SPARKLE-RELEASE.md) — Sparkle-Updates bauen, signieren und veröffentlichen.
 - [docs/archive/BLUEPRINT.md](docs/archive/BLUEPRINT.md) — Projektdokumentation.
 - `assets/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.

@@ -24,6 +24,9 @@ dies ist eine Abnahmelücke, kein durch synthetische Tests ersetzter Originalbel
 Wörtliches `\#` wird in Prosa, Überschriften, Listen, Zitaten, Tabellen und
 Bildtexten geprüft. Link-/Bildziele und Titel behalten auch mehrere Backslashes
 vor einer Raute; Inline-Code und Codeblöcke dienen als unveränderte Gegenproben.
+Mehrzeilige sprachlose Codeblöcke direkt hinter Listenmarkern werden auch in
+verschachtelten Listen und Zitaten geprüft. Shell-Fortsetzungen, wörtliches
+`\#`, `\-`, Einrückung und innere Leerzeilen gehören dabei zum Codeinhalt.
 
 Zusätzliche private Prüfungen verwenden bereinigte Ableitungen vorhandener
 Browser-HTML- und Textverarbeitungs-/RTF-Aufnahmen. Text und Linkziele werden

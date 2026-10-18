@@ -97,6 +97,10 @@ for tag in ('ol', 'ul'):
     for code in ('command', '  command'):
         source = '<' + tag + '><li>before</li><li><pre><code>' + code + '</code></pre></li></' + tag + '>'
         cases.append(('list-unlabelled-code-' + tag + code, source, source))
+    for wrapper in ('{}', '<blockquote>{}</blockquote>', '<ul><li>{}</li></ul>'):
+        code = "  printf '%s' \\\n    '\\# keep'\n\n  \\- keep"
+        source = wrapper.format('<' + tag + '><li>before</li><li><pre><code>' + code + '</code></pre></li><li>after</li></' + tag + '>')
+        cases.append(('list-multiline-code-' + tag + wrapper, source, source))
 for name, source in (
     ('literal-backslash-hash', '<p>Text \\# behalten</p>'),
     ('leading-backslash-hash', '<p>\\# behalten</p>'),

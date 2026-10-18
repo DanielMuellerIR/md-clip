@@ -112,7 +112,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.10.15"
+VERSION="1.10.16"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -322,6 +322,17 @@ OPTIONS
   -V, --verbose        Diagnose-Output (welche Flavors, welcher Pfad).
   -v, --version        Versionsnummer ausgeben.
   -h, --help           Diese Hilfe anzeigen.
+
+QUELLEN UND GRENZEN
+  Clipboard-auto versucht HTML, RTF, Klartext; bei erkanntem Word-HTML zuerst
+  RTF. Es verwendet den ersten Erfolg, ohne die Angebote inhaltlich zu vergleichen.
+  --from html|rtf|plain wählt genau dieses Format, ohne Quellenrückfall.
+  Datei-auto wählt nach Endung; stdin braucht ein ausdrücklich gewähltes Format.
+  HTML-Codeblöcke behalten Einrückung, auch ohne Sprache und in Listen.
+  RTF kann Code-Semantik, Listenstart, Linktitel oder Bilder bereits verlieren.
+  --images keep erhält gelesene Bildreferenzen, extrahiert keine Word-Bilder.
+  --strict prüft bekannte Vereinfachungen/Rückfälle, keine volle Verlustfreiheit.
+  --verbose nennt die gewählte Quelle; Status steht auf stderr, Nutzdaten auf stdout.
 
 EXIT-CODES
   0  Erfolg

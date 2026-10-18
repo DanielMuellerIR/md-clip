@@ -76,6 +76,15 @@ zulässig, sofern keine andere bekannte Vereinfachung erforderlich ist.
 Siehe [TABLES.md](TABLES.md) für den Darstellungsvertrag.
 Strict ist keine allgemeine Garantie verlustfreier Markdown-Darstellung.
 
+Der Bericht erfasst keine vollständige Differenz zur Ausgangsansicht oder zu
+anderen Clipboard-Angeboten. Bereits beim Kopieren oder im Reader fehlende
+Code-Semantik, Listenstarts, Linktitel und Bilder können deshalb auch bei einem
+erfolgreichen Strict-Lauf fehlen. Insbesondere garantiert `--images keep` nur
+den Erhalt gelesener Bildreferenzen, keine Extraktion von RTF-/Word-Bilddaten.
+Quellenreparaturen für bestimmte HTML-Strukturen sind ebenfalls keine dieser
+gezählten Vereinfachungen. Beispiele und die Trennung der Stufen stehen im
+[Konvertierungsleitfaden](CONVERSION.md).
+
 Abgelehnte Konvertierungen liefern Exit 3, geben keine Nutzdaten aus und schreiben
 nicht ins Clipboard. Eine vorbereitete Undo-Sicherung wird storniert; ein früheres
 gültiges Undo wird dadurch nicht verbraucht. Details erscheinen vor einer

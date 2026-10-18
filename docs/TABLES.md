@@ -64,6 +64,11 @@ Im Textmodus wird die historische RTF-Layouttabellenreparatur übersprungen.
 Dadurch bleibt die Matrix bis zur strukturellen Auswertung erhalten. Einfache
 RTF-Tabellen erscheinen dann als Tabellen; der Standardmodus behält das bisherige
 Layoutverhalten. Klartext wird in beiden Modi unverändert durchgereicht.
+Der Textmodus stellt keine Tabellen wieder her, die schon beim Kopieren oder
+beim RTF-Lesen verloren gingen. Ein fehlender Vereinfachungshinweis beweist
+daher keine vollständige Kopie der Ausgangstabelle. Der
+[Konvertierungsleitfaden](CONVERSION.md) zeigt ein kleines HTML-Beispiel und
+grenzt Quellen- und Readerverluste von der gemeldeten Textdarstellung ab.
 
 Eine tatsächliche Textdarstellung meldet `tables-text` samt Anzahl.
 Uneindeutige Zuordnungen melden `table-ambiguous`. Explizit gewählte HTML-/RTF-

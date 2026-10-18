@@ -121,7 +121,7 @@ md-clip --undo          # ursprüngliche Formate einmalig wiederherstellen
   md-clip --replace --notify
   ```
 - **Firefox und Chromium legen HTML unterschiedlich kodiert ab** (Firefox UTF-16, Chromium UTF-8). md-clip erkennt und behandelt beides — falls doch einmal Zeichensalat auftaucht, ist das ein Bug und ein Issue wert.
-- **RTF** wird von pandoc gelesen statt von Apples `textutil`. Für dieselbe Datei kommt auf beiden Plattformen dasselbe Markdown heraus (ein Test sichert das ab), pandocs RTF-Reader ist bei exotischen Dokumenten aber weniger erprobt.
+- **RTF** wird von pandoc gelesen statt von Apples `textutil`. Die gemeinsamen Testdateien werden auf beiden Plattformen gegen dieselben Erwartungen geprüft. Das garantiert keine identische Darstellung beliebiger RTF-Dokumente: Die Reader können unterschiedliche Strukturen und Bilder übernehmen.
 - **Wayland und X11 laufen in der CI isoliert.** sway stellt eine eigene headless Wayland-Sitzung bereit; X11 läuft unter Xvfb. Der echte Desktop wird dabei nicht berührt.
 
 ## Benutzung
@@ -198,7 +198,8 @@ Bytes und ersetzt keine vollständige Syntaxprüfung. `--plain` bleibt bytegenau
 
 HTML-Layoutcontainer und leere Links werden nach dem HTML-Parsing normalisiert.
 Anführungszeichen, `>` und Zeilenumbrüche in Attributen sind dabei kein Text;
-Linkziele und Linktitel bleiben erhalten. Quellenreparaturen für Claude-Codezeilen
+Linkziele und Linktitel aus dem gelesenen HTML bleiben erhalten. Ein RTF-Angebot
+kann den Titel bereits nicht mehr enthalten. Quellenreparaturen für Claude-Codezeilen
 und Classroom-Anhänge berücksichtigen auch einfache Anführungszeichen und
 großgeschriebene Attributnamen. Maskiertes HTML in Code bleibt unverändert.
 
@@ -208,12 +209,19 @@ Einrückungen und Backslashes bleiben im Code. Vorhandene Code-Kinder und
 Sprachangaben bleiben erhalten. Blöcke mit Links, Bildern oder anderem Rich-Inhalt
 sowie unvollständige oder verschachtelte Pre-Strukturen sind davon ausgenommen.
 Eine Programmiersprache wird nicht geraten.
+Das gilt auch für sprachlose Codeblöcke in Listen: Ihr Codeinhalt bleibt
+einschließlich Einrückung erhalten; die Schreibweise der Codezäune kann je nach
+Markdown-Ziel und pandoc-Version variieren. Eingerückter Text in RTF beweist
+dagegen noch keinen Codeblock.
 
 Bei Clipboard-`auto` liest md-clip die vorhandenen HTML-, RTF- und Klartext-
 Quellen einmal ein. Es versucht HTML → RTF → Klartext. Erkennt es Microsoft-
 Word-HTML, gilt RTF → HTML → Klartext. Eine leere, unsichtbare, nicht verfügbare
 oder fehlgeschlagene Rich-Text-Quelle führt zum nächsten Versuch. Ein explizites
 `--from` bleibt strikt und fällt auf keine andere Quelle zurück.
+Auto wählt den ersten erfolgreichen Versuch, ohne die Angebote auf gleichen
+Inhalt zu vergleichen. `--verbose` nennt die gewählte Quelle; mit `--from html`
+oder `--from rtf` lässt sich ein bestimmtes Angebot gezielt prüfen.
 
 Verschachtelte Tabellen und verbundene Zellen werden strukturell im pandoc-
 Dokument erkannt und im Standardmodus abgelehnt. Im Auto-Modus bleibt der Rückfall verfügbar;
@@ -235,6 +243,11 @@ Ein erfolgreicher Wechsel zwischen HTML und RTF bleibt zulässig. Ursprüngliche
 oder ausdrücklich gewählter Klartext bleibt bytegenau verwendbar. Strict prüft
 die bekannten Fälle und ist keine allgemeine Verlustfreiheitsgarantie.
 Der genaue Vertrag steht in [docs/CONVERSION-REPORT.md](docs/CONVERSION-REPORT.md).
+
+Fehlende Code-Semantik, Listenstarts, Linktitel oder Bilder können bereits beim
+Kopieren oder im RTF-Reader verloren gehen. Ein erfolgreicher Strict-Lauf stellt
+sie nicht wieder her. Der [Konvertierungsleitfaden](docs/CONVERSION.md) trennt
+diese Grenzen von gemeldeten Vereinfachungen und zeigt kleine prüfbare Beispiele.
 
 ### Diagnose ohne Clipboard-Inhalte
 
@@ -272,6 +285,9 @@ insbesondere `rowspan="0"`. Details und ein Beispiel stehen in
 
 HTML-Bildreferenzen und Inline-SVG bleiben mit `--images keep` erhalten. Dabei
 werden keine Bilder heruntergeladen oder aus Word-Dokumenten extrahiert.
+`keep` erhält die Bildreferenzen, die der Reader liefert; es ist keine Zusage,
+dass eingebettete RTF-Bilddaten oder lokal verlinkte Bilder mit übertragen werden.
+Eine relative Bildadresse braucht am Ziel weiterhin die zugehörige Datei.
 Vollständige SVG-Elemente behalten Styles und eingebetteten Inhalt vor dem Reader.
 `--images alt` ersetzt erkannte Bilder durch ihren Alternativtext; fehlt dieser,
 entfällt das Bild. `--images omit` entfernt die Bilder vollständig. Die Anzahl

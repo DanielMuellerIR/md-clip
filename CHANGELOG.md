@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.16 — 2026-10-18
+
+- Codeblöcke direkt hinter einem Listenmarker behalten Backslashes und
+  Leerzeilen. Die Nachbearbeitung erkennt dort sowohl Codezäune als auch
+  eingerückten Code, einschließlich verschachtelter Listen und Zitate.
+- README, CLI-Hilfe und Konvertierungsleitfaden unterscheiden Quellenwahl,
+  Verluste beim Kopieren/Lesen und bekannte Vereinfachungen. Kleine ausführbare
+  Beispiele erklären Code, Links, Bildreferenzen, Tabellen und Strict.
+
 ## 1.10.15 — 2026-10-17
 
 - Wörtliches `\#` bleibt mit älteren GFM-/CommonMark-Writern vollständig

@@ -195,6 +195,16 @@ my $detect_structure = sub {
 my $fence_char;                 # undef = kein offener Zaun
 my $fence_len    = 0;
 my $fence_indent = 0;
+my $open_fence = sub {
+    my ($content, $indent) = @_;
+    return 0 unless $content =~ /^[ \t]*(`{3,}|~{3,})(.*)$/;
+    my ($delim, $info) = ($1, $2);
+    return 0 if substr($delim, 0, 1) eq q{`} && $info =~ /`/;
+    $fence_char = substr($delim, 0, 1);
+    $fence_len = length($delim);
+    $fence_indent = $indent;
+    return 1;
+};
 # Listen innerhalb eines Zitats dürfen die Einrückung außerhalb nicht ändern.
 # Beim Rückweg bleibt die äußere Liste erhalten; verlassene Zitate verlieren
 # ihren Zustand, damit ein späteres neues Zitat keine alte Liste übernimmt.
@@ -273,20 +283,13 @@ for my $i (0 .. $#lines) {
         next;
     }
 
-    if ($body =~ /^[ \t]*(`{3,}|~{3,})(.*)$/) {
-        my ($delim, $info) = ($1, $2);
-        # Ein Backtick-Zaun darf im Info-String keinen Backtick haben.
-        unless (substr($delim, 0, 1) eq q{`} && $info =~ /`/) {
-            $fence_char   = substr($delim, 0, 1);
-            $fence_len    = length($delim);
-            $fence_indent = $indent;
-            $is_code[$i]  = 1;
-            next;
-        }
+    if ($open_fence->($body, $indent)) {
+        $is_code[$i] = 1;
+        next;
     }
 
-    if ($body =~ /^[ \t]*($list_marker)([ \t]+)/) {
-        my ($marker, $gap) = ($1, $2);
+    if ($body =~ /^[ \t]*($list_marker)([ \t]+)(.*)$/) {
+        my ($marker, $gap, $content) = ($1, $2, $3);
         my $proven_list_item = 1;
 
         # Dokumentanfang oder Leerzeile derselben Zitattiefe beginnen
@@ -334,9 +337,26 @@ for my $i (0 .. $#lines) {
         if ($proven_list_item) {
             $is_list_item[$i] = 1;
             $in_list_container[$i] = 1;
-            push @{$item_indents},
-                $indent + length($marker) + indent_width($gap);
-            push @{$item_markers}, $indent;
+            my $marker_indent = $indent;
+            while (1) {
+                my $padding = indent_width($gap);
+                # Ab fünf Spalten folgt eingerückter Code: Nur eine Spalte
+                # gehört zum Marker, der Rest zum Code. Sonst wird dessen
+                # Einrückung zum Container und die Bereinigung verändert ihn.
+                my $content_indent = $marker_indent + length($marker)
+                    + ($padding > 4 ? 1 : $padding);
+                push @{$item_indents}, $content_indent;
+                push @{$item_markers}, $marker_indent;
+                if ($padding > 4 || $open_fence->($content, $content_indent)) {
+                    $is_code[$i] = 1;
+                    last;
+                }
+                # pandoc schreibt innere Listen auch direkt hinter äußere
+                # Marker, etwa `- - ``` `. Der Zaun gehört zum inneren Punkt.
+                last unless $content =~ /^($list_marker)([ \t]+)(.*)$/;
+                ($marker, $gap, $content) = ($1, $2, $3);
+                $marker_indent = $content_indent;
+            }
         }
     }
 }
