@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.20 — 2026-10-18
+
+- Die Hintergrund-Updater-Attrappe veröffentlicht ihren Aufruf erst nach
+  vollständigem Schreiben. Die CI kann dadurch keine noch leere
+  Protokolldatei lesen.
+
 ## 1.10.19 — 2026-10-18
 
 - Wörtliches `\#` bleibt auch mit pandoc 3.11 in GFM und CommonMark erhalten.

@@ -31,7 +31,8 @@ if name=='md-clip':
     print('native failure detail',file=sys.stderr) if os.environ.get('MOCK_STATUS') else None
     sys.exit(int(os.environ.get('MOCK_STATUS') or '0'))
 if name=='md-clip-updater':
-    (base/'updater').write_text(json.dumps(sys.argv[1:]));sys.exit()
+    record=base/'updater-pending'
+    record.write_text(json.dumps(sys.argv[1:]));record.replace(base/'updater');sys.exit()
 if name=='osascript':
     source=sys.stdin.read()
     (base/'dialog-source').write_text(source)
