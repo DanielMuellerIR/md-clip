@@ -43,11 +43,14 @@ def client(entry: str, command: str, token: str = "") -> str:
             if command in ("cancel", "stop"):
                 return ""
             raise UndoError("Kein gültiges Clipboard-Undo verfügbar.")
-        process = subprocess.Popen([sys.executable, os.path.realpath(entry), "__daemon"],
-                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   close_fds=True, start_new_session=True)
+        process = None
         deadline = time.monotonic() + READ_TIMEOUT
         while True:
+            if process is None or process.poll() == 0:
+                process = subprocess.Popen([sys.executable, os.path.realpath(entry), "__daemon"],
+                                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+            time.sleep(.05)
             try:
                 connection = connect(socket_path)
                 break
@@ -56,7 +59,6 @@ def client(entry: str, command: str, token: str = "") -> str:
                     if process.poll() is None:
                         process.terminate()
                     raise UndoError("Clipboard-Undo-Dienst konnte nicht gestartet werden.", 2)
-                time.sleep(.02)
     with connection:
         data = sys.stdin.buffer.read(MAX_BYTES + 1) if command == "replace" else b""
         if len(data) > MAX_BYTES:

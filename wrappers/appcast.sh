@@ -77,13 +77,13 @@ validate_appcast() {
   local short_version_xpath="${item_xpath}/*[local-name()=\"shortVersionString\"]"
   local item_count enclosure_count feed_version feed_short_version feed_url feed_signature
 
-  xmllint --noout "$appcast_file"
-  item_count="$(xmllint --xpath "count(${item_xpath})" "$appcast_file")"
-  enclosure_count="$(xmllint --xpath "count(${enclosure_xpath})" "$appcast_file")"
-  feed_version="$(xmllint --xpath "string(${version_xpath})" "$appcast_file")"
-  feed_short_version="$(xmllint --xpath "string(${short_version_xpath})" "$appcast_file")"
-  feed_url="$(xmllint --xpath "string(${enclosure_xpath}/@url)" "$appcast_file")"
-  feed_signature="$(xmllint --xpath "string(${enclosure_xpath}/@*[local-name()=\"edSignature\"])" "$appcast_file")"
+  xmllint --noout "$appcast_file" || return $?
+  item_count="$(xmllint --xpath "count(${item_xpath})" "$appcast_file")" || return $?
+  enclosure_count="$(xmllint --xpath "count(${enclosure_xpath})" "$appcast_file")" || return $?
+  feed_version="$(xmllint --xpath "string(${version_xpath})" "$appcast_file")" || return $?
+  feed_short_version="$(xmllint --xpath "string(${short_version_xpath})" "$appcast_file")" || return $?
+  feed_url="$(xmllint --xpath "string(${enclosure_xpath}/@url)" "$appcast_file")" || return $?
+  feed_signature="$(xmllint --xpath "string(${enclosure_xpath}/@*[local-name()=\"edSignature\"])" "$appcast_file")" || return $?
 
   if [[ "$item_count" != "1" || "$enclosure_count" != "1" ]]; then
     echo "FEHLER: Appcast braucht genau einen Eintrag mit genau einem Enclosure (gefunden: $item_count/$enclosure_count)." >&2

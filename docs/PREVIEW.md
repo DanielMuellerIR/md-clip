@@ -95,8 +95,11 @@ python3 tests/test-preview-foreground.py --background --output /tmp/md-clip-keyb
 
 Für eine Prüfung des Vordergrund-Fokus kann `--allow-focus` anstelle von
 `--background` verwendet werden. Beide Modi benötigen eine entsperrte eigene
-Konsolensitzung und einen neuen Ergebnisordner. Auch im Vordergrund bleiben
-die Tastaturereignisse im Fenster der Test-App.
+Konsolensitzung und einen neuen Ergebnisordner. Im Vordergrund müssen die
+Test-App aktiv und ihr Fenster das Schlüsselfenster sein. Return, Escape, Enter
+und die drei Menü-Kürzel werden dann über den macOS-Ereignispfad an ihre PID
+gesendet. Dafür sind Bedienungshilfen-Rechte nötig. Die übrigen Prüfungen
+speisen Ereignisse weiterhin direkt in das Testfenster ein.
 CLI, Vorschau und Undo verwenden ausschließlich ein privates Pasteboard.
 Das Testprogramm leitet auch Kopieren auf dieses Board um. Die
 Tab-Reihenfolge wird anhand der tatsächlichen macOS-Tastaturnavigation bewertet;

@@ -236,6 +236,9 @@ expect_appcast_rejected() {
   fi
 }
 
+MD_CLIP_XML_VALID=0
+expect_appcast_rejected "ungültiges XML"
+MD_CLIP_XML_VALID=1
 MD_CLIP_XML_ITEMS=2
 expect_appcast_rejected "mehrere Einträge"
 MD_CLIP_XML_ITEMS=1

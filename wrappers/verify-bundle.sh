@@ -11,6 +11,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/verify-bundle-trust.sh"
 # shellcheck source=version.sh
 source "$SCRIPT_DIR/version.sh"
+# shellcheck source=stage-runtime.sh
+source "$SCRIPT_DIR/stage-runtime.sh"
 
 if [ "$#" -lt 1 ]; then
   echo "Aufruf: verify-bundle.sh <App-Bundle> [--signed] [--team-id TEAM_ID]" >&2
@@ -76,7 +78,7 @@ for tool in md-clip pandoc clipboard-html clipboard-rtf clipboard-undo; do
     exit 66
   }
 done
-for resource in pipeline.sh platform.sh doctor.sh conversion-report.sh tidy-markdown.pl pandoc-filter.lua preprocess-html.pl conversion-support.pl; do
+for resource in "${MD_CLIP_RUNTIME_RESOURCES[@]}"; do
   path="$APP/Contents/Resources/bin/$resource"
   [ -f "$path" ] && [ -s "$path" ] && [ -r "$path" ] || {
     echo "Pipeline-Ressource fehlt oder ist leer: $resource" >&2

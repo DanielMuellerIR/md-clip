@@ -15,7 +15,6 @@ import time
 from typing import Callable, Optional, Union
 
 from .backends import backend
-from .wayland import Wayland
 from .common import (
     Clipboard, IO_CHUNK, MAX_BYTES, POLL_INTERVAL, READ_TIMEOUT, Snapshot, Stamp,
     TTL, UndoError,
@@ -134,19 +133,15 @@ def serve(path: str, directory_fd: int) -> None:
             pass
         else:
             os.unlink(socket_path)
-        clipboard = cleanup.enter_context(closing(backend()))
-        server = cleanup.enter_context(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM))
-        previous_umask = os.umask(0o177)
-        try:
-            server.bind(socket_path)
-        finally:
-            os.umask(previous_umask)
-        cleanup.callback(remove_socket, socket_path, os.lstat(socket_path).st_ino)
-        os.chmod(socket_path, 0o600)
-        server.listen(8)
-        if isinstance(clipboard, Wayland):
-            serve_requests(server, clipboard)
-        else:
+        with closing(backend()) as clipboard, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            previous_umask = os.umask(0o177)
+            try:
+                server.bind(socket_path)
+            finally:
+                os.umask(previous_umask)
+            cleanup.callback(remove_socket, socket_path, os.lstat(socket_path).st_ino)
+            os.chmod(socket_path, 0o600)
+            server.listen(8)
             serve_requests(server, clipboard)
 
 

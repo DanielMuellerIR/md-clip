@@ -300,6 +300,19 @@ class SecurityTests(unittest.TestCase):
 
 
 class ResourceLifetimeTests(unittest.TestCase):
+    def test_prepare_restarts_daemon_after_lock_collision(self):
+        connection = MagicMock()
+        connection.recv.return_value = b'{"code":0,"result":"new-token"}\n'
+        first = Mock()
+        first.poll.return_value = 0
+        with patch.object(cli, 'private_directory', return_value=('/synthetic', -1)), \
+             patch.object(cli.os, 'close'), patch.object(cli.time, 'sleep'), \
+             patch.object(cli.time, 'monotonic', side_effect=[0, 0.05]), \
+             patch.object(cli, 'connect', side_effect=[FileNotFoundError, ConnectionRefusedError, connection]), \
+             patch.object(cli.subprocess, 'Popen', side_effect=[first, Mock()]) as start:
+            self.assertEqual(cli.client('helper.py', 'prepare'), 'new-token')
+        self.assertEqual(start.call_count, 2)
+
     def test_wayland_initial_selection_failure_closes_socket_and_received_fds(self):
         with tempfile.TemporaryDirectory() as directory, \
              socket.socket(socket.AF_UNIX) as listener, socket.socket(socket.AF_UNIX) as client:

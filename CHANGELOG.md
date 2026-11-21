@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.22 — 2026-11-21
+
+- Unter Linux kann die erste Clipboard-Ersetzung direkt nach dem Ende des
+  Undo-Dienstes den Dienst innerhalb der bestehenden Wartezeit neu starten.
+- Der Vorschautest prüft Return, Escape und Menü-Kürzel im aktiven macOS-Fenster.
+- Bundle-Prüfung und Build verwenden dieselbe Liste nötiger Konvertierungsdateien.
+  Fehler beim Lesen oder Prüfen eines Appcasts führen zum Abbruch.
+
 ## 1.10.21 — 2026-11-21
 
 - Die Einrichtung des CLI-Links, der Verschiebehinweis und das Finder-Layout

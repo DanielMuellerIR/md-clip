@@ -126,6 +126,9 @@ if [ -z "$TRUST_CALL_LINE" ] || [ -z "$PRODUCT_EXEC_LINE" ] \
 fi
 echo "✓ Bundle wird vor Produktcode an Apple-Kette, Team-ID und Bundle-ID gebunden"
 
+# shellcheck source=../../wrappers/stage-runtime.sh
+source "$PROJECT_ROOT/wrappers/stage-runtime.sh"
+
 # Auch ein toter XPC-Symlink ist unerlaubter Bundle-Inhalt. `-e` allein folgt
 # dem Ziel und würde ihn übersehen; der minimale Bundle-Aufbau muss bereits an
 # der Strukturprüfung scheitern, bevor otool oder Produktcode laufen.
@@ -142,14 +145,6 @@ for executable in \
   "$XPC_TEST_APP/Contents/MacOS/md-clip-hud" \
   "$XPC_TEST_APP/Contents/MacOS/md-clip-preview" \
   "$XPC_TEST_APP/Contents/Resources/bin/md-clip" \
-  "$XPC_TEST_APP/Contents/Resources/bin/pipeline.sh" \
-  "$XPC_TEST_APP/Contents/Resources/bin/platform.sh" \
-  "$XPC_TEST_APP/Contents/Resources/bin/doctor.sh" \
-  "$XPC_TEST_APP/Contents/Resources/bin/conversion-report.sh" \
-  "$XPC_TEST_APP/Contents/Resources/bin/tidy-markdown.pl" \
-  "$XPC_TEST_APP/Contents/Resources/bin/pandoc-filter.lua" \
-  "$XPC_TEST_APP/Contents/Resources/bin/preprocess-html.pl" \
-  "$XPC_TEST_APP/Contents/Resources/bin/conversion-support.pl" \
   "$XPC_TEST_APP/Contents/Resources/bin/pandoc" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-html" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-rtf" \
@@ -159,13 +154,13 @@ for executable in \
   chmod +x "$executable"
 done
 printf 'icon\n' > "$XPC_TEST_APP/Contents/Resources/md-clip.icns"
-for resource in pipeline.sh platform.sh doctor.sh conversion-report.sh tidy-markdown.pl pandoc-filter.lua preprocess-html.pl conversion-support.pl; do
+for resource in "${MD_CLIP_RUNTIME_RESOURCES[@]}"; do
   printf 'resource\n' > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
 done
 for license in pandoc-COPYRIGHT.txt Sparkle-LICENSE.txt README.txt; do
   printf 'Lizenz\n' > "$XPC_TEST_APP/Contents/Resources/Licenses/$license"
 done
-for resource in pipeline.sh platform.sh doctor.sh conversion-report.sh tidy-markdown.pl pandoc-filter.lua preprocess-html.pl conversion-support.pl; do
+for resource in "${MD_CLIP_RUNTIME_RESOURCES[@]}"; do
   : > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
   if bash "$VERIFY_BUNDLE" "$XPC_TEST_APP" > "$TEST_ROOT/resource.out" 2> "$TEST_ROOT/resource.err"; then
     echo "Leere Pipeline-Ressource akzeptiert: $resource" >&2; exit 1

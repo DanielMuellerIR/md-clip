@@ -182,6 +182,7 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
             pid = value['preview_pid']
             if args.allow_focus:
                 activate(pid)
+                observation(process, lambda value: value.get('key_window') and value.get('front_pid') == pid)
             return process, pid
         except Exception:
             terminate(process)
@@ -227,7 +228,14 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
             try:
                 process, pid = start()
                 before = focus(process, pid, location) if location else observation(process)
-                send_key(*key)
+                if args.allow_focus:
+                    code, characters, *modifiers = key
+                    key_arg = characters if characters.isalpha() else str(code)
+                    subprocess.run([str(accessibility), str(pid), 'post-key', key_arg,
+                                    'command' if any(modifiers) else 'none'],
+                                   check=True, capture_output=True, timeout=6)
+                else:
+                    send_key(*key)
                 passed, actual, error = finished(process, expected)
                 snapshot = board('snapshot')
                 if passed and name.startswith('command-z'):
@@ -321,4 +329,5 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
 
 if not results or not all(item['passed'] for item in results):
     raise SystemExit(1)
-print('OK: Vorschau mit fensterlokalen AppKit-Ereignissen und privater CLI-/Undo-Integration')
+event_path = 'macOS-Tastaturereignisse' if args.allow_focus else 'fensterlokale AppKit-Ereignisse'
+print(f'OK: Vorschau mit {event_path} und privater CLI-/Undo-Integration')

@@ -84,7 +84,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.10.21"
+VERSION="1.10.22"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
