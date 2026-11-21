@@ -29,17 +29,8 @@ APP_NAME="md-clip"
 # von PROJECT_ROOT) aus bin/md-clip abgeleitet — dieselbe Single-Source-of-
 # Truth wie in wrappers/sign-and-release.sh.
 
-# Mindest-macOS für das Bundle. Das gepinnte pandoc 3.9.0.2 trägt selbst
-# LC_BUILD_VERSION minos 14.0; ein niedrigerer Wert in Info.plist ließe die App
-# auf älteren Systemen starten, obwohl jede Konvertierung am Binary scheitert.
-# verify-bundle.sh prüft diese Grenze für alle ausführbaren Bundle-Bestandteile.
-MIN_MACOS="14.0"
-
-# Sparkle-Version (Update-Framework). Exakt gepinnt, weil der Updater die
-# installierte App austauscht: Ein Versionssprung wird bewusst geprüft, nie
-# still aufgelöst — dieselbe Regel wie in poormans_text. Die Prüfsumme wurde
-# am 2026-08-06 gegen den unabhängig gepflegten Wert im Homebrew-Cask
-# `sparkle` gegenverifiziert (Cask-Commit ae0cb300).
+# Sparkle ersetzt die installierte App. Version und SHA-256 werden gemeinsam
+# aktualisiert und gegen eine unabhängige Quelle geprüft.
 SPARKLE_VERSION="2.9.4"
 SPARKLE_TAR_SHA256="ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9"
 
@@ -53,6 +44,8 @@ source "$SCRIPT_DIR/verified-cache.sh"
 source "$SCRIPT_DIR/version.sh"
 # shellcheck source=pandoc-pin.sh
 source "$SCRIPT_DIR/pandoc-pin.sh"
+# shellcheck source=macos-helpers.sh
+source "$SCRIPT_DIR/macos-helpers.sh"
 
 # Versions-String aus dem md-clip-Skript ziehen — Single Source of Truth,
 # identisch zu wrappers/sign-and-release.sh. Landet unten im Info.plist als
@@ -164,12 +157,8 @@ echo "✓ pandoc bereit ($(du -h "$BUILD_DIR/pandoc" | cut -f1))"
 # ---------- 2. Swift-Helper kompilieren ----------
 
 for helper in clipboard-html clipboard-rtf clipboard-undo md-clip-hud md-clip-preview; do
-  src="helpers/${helper}.swift"
-  out="$BUILD_DIR/${helper}"
   echo "==> Kompiliere ${helper}"
-  # -target setzt sowohl Architektur als auch Mindest-OS-Version in einem.
-  # Relative Quellen verhindern private Pfade in impliziten Swift-Diagnosen.
-  (cd "$PROJECT_ROOT" && swiftc -target "arm64-apple-macos${MIN_MACOS}" "$src" -o "$out")
+  (cd "$PROJECT_ROOT" && compile_macos_helper "$helper" "$BUILD_DIR/$helper" arm64)
 done
 
 # ---------- 3. Sparkle laden und Updater-Helfer kompilieren ----------
@@ -197,11 +186,8 @@ echo "==> Kompiliere md-clip-updater"
 # Kompatibilitätsprüfungen. Gelinkt wird gegen das frisch entpackte Framework;
 # zur Laufzeit findet der Updater es über den rpath im Bundle unter
 # Contents/Frameworks.
-(cd "$PROJECT_ROOT" && swiftc -target "arm64-apple-macos${MIN_MACOS}" \
-  -F "$SPARKLE_STAGE" \
-  helpers/md-clip-updater.swift \
-  -o "$BUILD_DIR/md-clip-updater" \
-  -Xlinker -rpath -Xlinker "@loader_path/../Frameworks")
+(cd "$PROJECT_ROOT" && compile_macos_helper md-clip-updater "$BUILD_DIR/md-clip-updater" arm64 \
+  -F "$SPARKLE_STAGE" -Xlinker -rpath -Xlinker "@loader_path/../Frameworks")
 
 # ---------- 4. .app-Bundle-Struktur ----------
 
@@ -212,15 +198,11 @@ mkdir -p "$APP_BUNDLE/Contents/Resources/bin"
 mkdir -p "$APP_BUNDLE/Contents/Resources/Licenses"
 
 # md-clip-Skript und Helper kopieren
-cp "$PROJECT_ROOT/bin/md-clip"     "$APP_BUNDLE/Contents/Resources/bin/md-clip"
-cp "$PROJECT_ROOT/lib/pipeline.sh" "$APP_BUNDLE/Contents/Resources/bin/pipeline.sh"
-cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$APP_BUNDLE/Contents/Resources/bin/tidy-markdown.pl"
-cp "$PROJECT_ROOT/lib/tables.lua" "$APP_BUNDLE/Contents/Resources/bin/tables.lua"
-cp "$PROJECT_ROOT/lib/preprocess-html.pl" "$APP_BUNDLE/Contents/Resources/bin/preprocess-html.pl"
-cp "$BUILD_DIR/clipboard-html"     "$APP_BUNDLE/Contents/Resources/bin/clipboard-html"
-cp "$BUILD_DIR/clipboard-rtf"      "$APP_BUNDLE/Contents/Resources/bin/clipboard-rtf"
-cp "$BUILD_DIR/clipboard-undo"     "$APP_BUNDLE/Contents/Resources/bin/clipboard-undo"
-cp "$BUILD_DIR/pandoc"             "$APP_BUNDLE/Contents/Resources/bin/pandoc"
+# shellcheck source=stage-runtime.sh
+source "$SCRIPT_DIR/stage-runtime.sh"
+stage_runtime "$PROJECT_ROOT" "$APP_BUNDLE/Contents/Resources/bin"
+cp "$BUILD_DIR/clipboard-html" "$BUILD_DIR/clipboard-rtf" \
+  "$BUILD_DIR/clipboard-undo" "$BUILD_DIR/pandoc" "$APP_BUNDLE/Contents/Resources/bin/"
 
 # Sparkle-Framework ins Bundle. `ditto` statt `cp -R`, weil Frameworks aus
 # Symlinks bestehen (Sparkle -> Versions/Current/Sparkle) und dyld genau
@@ -248,10 +230,9 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/md-clip-preview"
 # Icon-Datei mitliefern. .icns muss in Contents/Resources/ liegen und im
 # Info.plist als CFBundleIconFile referenziert werden, damit macOS es im
 # Dock, Finder und Launchpad anzeigt.
-# BEGIN APP_ICON_COPY
-cp "$ICNS_SOURCE" "$APP_BUNDLE/Contents/Resources/md-clip.icns"
-echo "✓ Icon mitgeliefert"
-# END APP_ICON_COPY
+# shellcheck source=app-icon.sh
+source "$SCRIPT_DIR/app-icon.sh"
+copy_app_icon "$ICNS_SOURCE" "$APP_BUNDLE"
 
 chmod +x "$APP_BUNDLE/Contents/Resources/bin/"*
 
@@ -290,20 +271,13 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>LSMinimumSystemVersion</key>
-    <string>${MIN_MACOS}</string>
+    <string>${MACOS_MINIMUM}</string>
     <key>LSUIElement</key>
     <true/>
     <key>CFBundleIconFile</key>
     <string>md-clip</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Daniel Müller. MIT License.</string>
-    <!-- Sparkle. Die App sucht beim Start selbsttätig nach Updates (höchstens
-         einmal je 24 Stunden, siehe helpers/md-clip-updater.swift), lädt und
-         installiert aber ausschließlich nach Zustimmung. Anonyme Hardware-
-         und Systemprofildaten werden nicht übertragen. Feed und Archiv müssen
-         mit dem hier hinterlegten öffentlichen Ed25519-Schlüssel signiert
-         sein; es ist dasselbe Schlüsselpaar wie bei Poor Man's Text und
-         Fastra (siehe docs/SPARKLE-RELEASE.md). -->
     <key>SUAllowsAutomaticUpdates</key>
     <false/>
     <key>SUAutomaticallyUpdate</key>

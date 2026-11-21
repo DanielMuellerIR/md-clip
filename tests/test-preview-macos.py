@@ -23,8 +23,10 @@ ROOT = Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='md-clip-preview-tests-', dir='/private/tmp') as tmp:
     work = Path(tmp)
     binary = work / 'preview-tests'
-    subprocess.run(['swiftc', '-D', 'TEST', '-target', platform.machine() + '-apple-macos14.0',
-                    str(ROOT / 'helpers/md-clip-preview.swift'), '-o', str(binary)], check=True)
+    swift = ['swiftc', '-target', platform.machine() + '-apple-macos14.0']
+    strict_swift = swift + ['-swift-version', '6', '-strict-concurrency=complete', '-warnings-as-errors']
+    subprocess.run([*strict_swift, str(ROOT / 'helpers/md-clip-preview.swift'),
+                    str(ROOT / 'tests/md-clip-preview-test-main.swift'), '-o', str(binary)], check=True)
     invalid = subprocess.run([str(binary)],capture_output=True,timeout=5)
     assert invalid.returncode == 64 and b'UTF-8' in invalid.stderr
     helper = work / 'helper with space'
@@ -54,7 +56,18 @@ sys.exit(2 if (root/'fail').exists() else 0)
         if expected == 0: assert json.loads(result.stdout) == payload
     data.write_bytes(b'not JSON')
     assert subprocess.run([str(binary),'--test-status',str(helper),'fixed'],env=env,capture_output=True,timeout=5).returncode == 2
-    data.write_text(json.dumps({'version':1,'undo_available':True,'pending_valid':True}))
+    # Auch syntaktisch gültige Antworten dürfen die Pipe nicht vor dem\n    # Prozessende blockieren oder das Größenlimit umgehen.
+    valid = json.dumps({'version': 1, 'undo_available': True, 'pending_valid': True}).encode()
+    data.write_bytes(valid + b' ' * (4096 - len(valid)))
+    result = subprocess.run([str(binary), '--test-status', str(helper), 'fixed'],
+                            env=env, capture_output=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    data.write_bytes(valid + b' ' * (1024 * 1024))
+    started = time.monotonic()
+    result = subprocess.run([str(binary), '--test-status', str(helper), 'fixed'],
+                            env=env, capture_output=True, timeout=5)
+    assert result.returncode == 2 and time.monotonic() - started < 2, result.stderr
+    data.write_bytes(valid)
     (work/'delay').touch()
     started = time.monotonic()
     assert subprocess.run([str(binary),'--test-status',str(helper),'fixed'],env=env,capture_output=True,timeout=5).returncode == 2
@@ -79,9 +92,10 @@ sys.exit(2 if (root/'fail').exists() else 0)
     print('OK: native Status-IPC, Schema, Fehler, Zeitlimit, UTF-8 und Größenprüfung ohne GUI')
     native_undo = work / 'native-undo'
     integration = work / 'preview-integration'
-    for source, target, flags in ((ROOT/'helpers/clipboard-undo.swift',native_undo,['-O','-D','TEST']),
-                                  (ROOT/'tests/test-preview-integration.swift',integration,[])):
-        subprocess.run(['swiftc','-target',platform.machine()+'-apple-macos14.0',*flags,str(source),'-o',str(target)],check=True)
+    subprocess.run([*strict_swift, '-O', str(ROOT / 'helpers/clipboard-undo.swift'),
+                    str(ROOT / 'tests/clipboard-undo-test-main.swift'), '-o', str(native_undo)], check=True)
+    subprocess.run([*swift, str(ROOT / 'tests/test-preview-integration.swift'),
+                    '-o', str(integration)], check=True)
     runtime = work / 'runtime'
     (runtime/'bin').mkdir(parents=True);(runtime/'helpers').mkdir()
     shutil.copy2(ROOT/'bin/md-clip',runtime/'bin/md-clip')

@@ -12,6 +12,8 @@ import tempfile
 import time
 import unittest
 
+from lib.runtime import stage_runtime
+
 PROJECT = Path(__file__).resolve().parents[1]
 
 
@@ -26,14 +28,14 @@ class CompareTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.repo = self.root / "project"
-        for folder in ("tests", "helpers", "bin", "lib"):
+        for folder in ("tests", "helpers", "bin", "lib", "wrappers"):
             (self.repo / folder).mkdir(parents=True)
         for name in ("compare.sh", "compare-file.sh", "load-clipboard.swift"):
             shutil.copy2(PROJECT / "tests" / name, self.repo / "tests" / name)
         for name in ("clipboard-html.swift", "clipboard-rtf.swift"):
             shutil.copy2(PROJECT / "helpers" / name, self.repo / "helpers" / name)
-        for name in ("pipeline.sh", "tidy-markdown.pl", "tables.lua", "preprocess-html.pl"):
-            shutil.copy2(PROJECT / "lib" / name, self.repo / "lib" / name)
+        stage_runtime(self.repo / "bin", self.repo / "lib")
+        shutil.copy2(PROJECT / "wrappers/stage-runtime.sh", self.repo / "wrappers")
         self.fake = self.root / "tools"
         self.fake.mkdir()
         self.clipboard = self.root / "clipboard"
@@ -74,7 +76,7 @@ if [ "${TEST_REQUIRE_READERS:-0}" = 1 ]; then
     [ -x "$runtime/$reader" ] || exit 2
     "$runtime/$reader" >/dev/null || exit 2
   done
-  for resource in pipeline.sh tidy-markdown.pl tables.lua preprocess-html.pl; do
+  for resource in pipeline.sh tidy-markdown.pl pandoc-filter.lua preprocess-html.pl conversion-support.pl; do
     [ -f "$runtime/$resource" ] || exit 2
   done
 fi

@@ -138,19 +138,18 @@ Ohne Argument oder mit --convert: Clipboard nach Markdown konvertieren.
 Undo gilt zehn Minuten und nur bis zum nächsten Kopieren. App-Hotkeys mit open -n starten, damit jeder Aufruf eine eigene Aktion ausführt." info
 }
 
-# Erstellt /usr/local/bin/md-clip als Symlink ins Bundle. Die Pfade werden
-# als Umgebungsvariablen an AppleScript übergeben und dort mit `quoted form
-# of` für die Shell maskiert. Dadurch bleibt auch ein App-Pfad mit Apostroph
-# reiner Dateninhalt und kann keinen Shell-Befehl einschleusen.
+# AppleScript erhält UTF-8-Pfade als Argumente. `quoted form of` schützt
+# die Pfade beim Einsetzen in den privilegierten Shell-Befehl.
 #
 # Der Zustand des Ziels wird im privilegierten Schritt NOCH EINMAL geprüft.
 # decide_cli_action hat ihn zwar schon geprüft, aber danach liegt der
 # Passwort-Dialog: In diesem Zeitfenster kann dort eine reguläre Datei oder ein
 # lebender fremder Symlink entstehen, und dieser Schritt läuft als root.
 install_cli() {
-  if BUNDLE_CLI="$BUNDLE_CLI" SYSTEM_CLI="$SYSTEM_CLI" osascript <<'APPLESCRIPT' >/dev/null 2>&1; then
-set bundleCli to system attribute "BUNDLE_CLI"
-set systemCli to system attribute "SYSTEM_CLI"
+  if osascript - "$BUNDLE_CLI" "$SYSTEM_CLI" <<'APPLESCRIPT' >/dev/null 2>&1; then
+on run arguments
+set bundleCli to item 1 of arguments
+set systemCli to item 2 of arguments
 set target to quoted form of systemCli
 -- Der Shell-Befehl in Worten:
 --   1. Zielverzeichnis anlegen, falls es fehlt.
@@ -166,6 +165,7 @@ set commandText to "/bin/mkdir -p \"$(/usr/bin/dirname " & target & ")\"" & ¬
   " && { [ ! -L " & target & " ] || /bin/rm " & target & "; }" & ¬
   " && /bin/ln -s " & quoted form of bundleCli & " " & target
 do shell script commandText with administrator privileges
+end run
 APPLESCRIPT
     return 0
   fi
@@ -196,12 +196,11 @@ APPLESCRIPT
 # aktuellen Bundle-Ort im Finder öffnet — von dort kann der Nutzer
 # es per Drag-and-drop in /Programme bewegen.
 ask_move_first() {
-  # BUNDLE_DIR wird per Umgebungsvariable an osascript übergeben, weil
-  # AppleScript-Strings keine einfache Bash-Variableninterpolation haben.
-  BUNDLE_DIR="$BUNDLE_DIR" osascript <<'APPLESCRIPT' 2>/dev/null || true
+  osascript - "$BUNDLE_DIR" <<'APPLESCRIPT' 2>/dev/null || true
+on run arguments
+set bundlePath to item 1 of arguments
 tell application "System Events"
   activate
-  set bundlePath to (system attribute "BUNDLE_DIR")
   set msg to "md-clip läuft gerade nicht aus dem Ordner Programme." & linefeed & linefeed & "Aktueller Ort:" & linefeed & bundlePath & linefeed & linefeed & "Bitte ziehe md-clip in den Ordner Programme und starte es von dort. So bleibt die App auch nach dem Auswerfen des Installations-Fensters erreichbar, und der optionale Kommandozeilen-Befehl kann eingerichtet werden."
   try
     set theResult to display dialog msg buttons {"OK", "Im Finder zeigen"} default button "OK" with title "md-clip" with icon note
@@ -210,6 +209,7 @@ tell application "System Events"
     return ""
   end try
 end tell
+end run
 APPLESCRIPT
 }
 
@@ -316,8 +316,8 @@ $diagnostic"; fi
 
   # Jetzt der eigentliche md-clip-Lauf. --replace ersetzt das Clipboard,
   # --notify zeigt bei Erfolg das HUD.
-  "$BUNDLE_CLI" --replace --notify
-  local cli_status=$?
+  cli_status=0
+  "$BUNDLE_CLI" --replace --notify || cli_status=$?
 
   # Update-Suche NACH der Konvertierung: Sie ist Nebensache und läuft im
   # Hintergrund weiter, wenn dieser Launcher sich gleich beendet.

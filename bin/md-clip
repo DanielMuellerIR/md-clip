@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # md-clip — Konvertiert Clipboard-Inhalt nach Markdown.
 #
-# Architektur (siehe docs/archive/BLUEPRINT.md für die Begründungen):
+# Konvertierungswege (siehe docs/CONVERSION.md):
 #   1. HTML direkt aus dem Clipboard (häufigster Fall: Browser, Claude
 #      Desktop, Notion).
 #   2. RTF zu HTML konvertieren, dann selber Weg wie 1.
@@ -14,7 +14,7 @@
 #   Aufgabe            macOS                Linux X11    Linux Wayland
 #   ------------------ -------------------- ------------ -------------
 #   Clipboard lesen    Swift-Helper/pbpaste xclip        wl-paste
-#   Clipboard schreiben pbcopy              xclip         wl-copy
+#   Clipboard schreiben Undo-Helfer         Undo-Helfer   Undo-Helfer
 #   RTF → HTML         textutil             pandoc        pandoc
 #   Notification       osascript            notify-send   notify-send
 #
@@ -25,18 +25,9 @@
 # Default: schreibt das Ergebnis nach stdout. Mit --replace landet es
 # stattdessen zurück im Clipboard (alle Rich-Flavors werden überschrieben).
 
-# Strict-Mode für Bash:
-#   -e: Bei Fehler sofort abbrechen.
-#   -u: Zugriff auf undefinierte Variablen ist ein Fehler.
-#   -o pipefail: Wenn ein Glied einer Pipe fehlschlägt, gilt die ganze Pipe als Fehler.
-# Das macht das Skript deutlich vorhersagbarer als Default-Bash.
 set -euo pipefail
 
-# ---------- Plattform-Erkennung ----------
-
-# Ganz früh, weil PATH, Locale und die Dependency-Checks weiter unten
-# schon davon abhängen. `uname -s` ist der klassische, überall verfügbare
-# Weg: "Darwin" = macOS, "Linux" = Linux.
+# Plattform vor der Wahl von PATH und Locale bestimmen.
 case "$(uname -s)" in
   Darwin) PLATFORM="macos" ;;
   Linux)  PLATFORM="linux" ;;
@@ -47,15 +38,7 @@ case "$(uname -s)" in
     ;;
 esac
 
-# Auf Linux gibt es zwei konkurrierende Display-Server mit je eigenem
-# Clipboard-Werkzeug. Die Sitzung selbst sagt uns, welcher läuft:
-# WAYLAND_DISPLAY ist nur in einer Wayland-Sitzung gesetzt.
-#
-# Achtung, häufige Verwechslung: unter Wayland ist DISPLAY oft TROTZDEM
-# gesetzt (XWayland-Kompatibilitätsschicht für alte X11-Programme). Auf
-# DISPLAY zu prüfen würde Wayland-Sitzungen also fälschlich als X11
-# erkennen. Darum ist WAYLAND_DISPLAY das entscheidende Signal und wird
-# zuerst geprüft.
+# Unter Wayland kann DISPLAY zusätzlich durch XWayland gesetzt sein.
 CLIP_BACKEND=""
 if [ "$PLATFORM" = "linux" ]; then
   if [ -n "${WAYLAND_DISPLAY:-}" ]; then
@@ -65,19 +48,8 @@ if [ "$PLATFORM" = "linux" ]; then
   fi
 fi
 
-# Wenn md-clip aus einer GUI-App gestartet wird (Dock-Icon, Kurzbefehle.app,
-# Automator), erbt der Prozess NICHT dein Shell-PATH. Er sieht nur den
-# System-PATH (/usr/bin:/bin:/...). Damit fehlen Brew-Binaries wie pandoc,
-# weil die unter /usr/local/bin (Intel-Mac) bzw. /opt/homebrew/bin
-# (Apple Silicon) liegen. Auf macOS hängen wir beide Pfade vorne dran. Wenn sie
-# nicht existieren, schadet das nicht — PATH darf nicht-existente Pfade
-# enthalten.
-# /opt/homebrew/bin zuerst, damit auf Apple Silicon die aktuellen
-# brew-Binaries gewinnen. Bei manchen Usern liegt unter /usr/local/bin
-# ein uraltes pandoc-Binary aus einem .pkg-Installer von vor Jahren,
-# das brew nicht kennt und entsprechend nie aktualisiert hat. Erst die
-# falsche Reihenfolge ließ md-clip dieses uralte pandoc verwenden statt
-# das frisch installierte.
+# GUI-Aufrufe erben den Shell-PATH nicht. Homebrew-Pfade in der
+# Reihenfolge Apple Silicon, Intel ergänzen.
 if [ "$PLATFORM" = "macos" ]; then
   export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 fi
@@ -112,7 +84,7 @@ fi
 
 # ---------- Konstanten ----------
 
-VERSION="1.10.20"
+VERSION="1.10.21"
 
 # Pfade berechnen, damit das Skript egal von wo aus aufgerufen werden kann.
 # BASH_SOURCE[0] ist der Pfad zu DIESEM Skript (auch via Symlink).
@@ -139,6 +111,10 @@ resolve_script_path() {
 SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+BUNDLE_MACOS_DIR=""
+if [ "$PLATFORM" = macos ]; then
+  BUNDLE_MACOS_DIR=$(cd -P "$SCRIPT_DIR/../../MacOS" 2>/dev/null && pwd || true)
+fi
 
 # Helper-Suche: zwei Layouts werden unterstützt.
 #   Projekt-Layout: bin/md-clip ruft helpers/clipboard-* (Schwester-Ordner).
@@ -182,10 +158,9 @@ PREVIEW_NOTES_FILE=""
 STRICT=0
 IMAGES=keep
 TABLES=reject
-DOCTOR=0
+ACTION=convert
 JSON=0
 REPLACE=0       # --replace: Ergebnis ins Clipboard schreiben statt stdout
-UNDO=0
 UNDO_TOKEN=""
 CONVERSION_OPTIONS=0
 PLAIN=0         # --plain: Plain-Text-Modus, kein Convert
@@ -210,63 +185,14 @@ conversion_note() {
   if [ -n "${PREVIEW_NOTES_FILE:-}" ]; then printf '%s\n' "$1" >> "$PREVIEW_NOTES_FILE"; fi
 }
 
-# vlog: Verbose-Log. Nur sichtbar mit --verbose.
-# Für Diagnose-Details (welcher Flavor, welcher Pfad).
 vlog() {
   if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then
     printf '[md-clip] %s\n' "$*" >&2
   fi
 }
 
-# err: Fehler-Output auf stderr. Immer sichtbar (auch mit --quiet),
-# weil Fehler nie unterdrückt werden sollen.
 err() {
   printf 'md-clip: %s\n' "$*" >&2
-}
-
-# notify: Desktop-Notification anzeigen, wenn --notify gesetzt ist.
-# Auf macOS via osascript (Bordmittel), auf Linux via notify-send (libnotify).
-notify() {
-  if [ "$NOTIFY" -eq 0 ] || [ "$QUIET" -eq 1 ]; then
-    return 0
-  fi
-
-  if [ "$PLATFORM" = "macos" ]; then
-    # Bundle-Layout: Die Erfolgsmeldung zeigt der HUD-Helfer als kurzes
-    # Einblend-Fenster der App — ohne Erlaubnis-Mechanik des Notification
-    # Centers, die für md-clips Aufrufwege (Dock, Hotkey, Skript) nicht
-    # tragfähig ist (Begründung in helpers/md-clip-hud.swift). Entkoppelt
-    # gestartet: Das Ein-/Ausblenden dauert gut zwei Sekunden, und darauf
-    # soll weder die CLI noch der Launcher warten. Der osascript-Weg unten
-    # bleibt der Fallback der git-Installation ohne App-Bundle.
-    local hud
-    hud="$(cd -P "$SCRIPT_DIR/../../MacOS" 2>/dev/null && pwd || true)/md-clip-hud"
-    if [ -x "$hud" ]; then
-      "$hud" "$1" >/dev/null 2>&1 &
-      return 0
-    fi
-    # Anführungszeichen und Backslashes im Meldungstext würden den AppleScript-
-    # Parser durcheinander bringen, wenn wir sie roh in den String interpolieren.
-    # Lösung: osascript als argv-Aufruf (-e mit getrennten Argumenten) — dann
-    # wird der Text als AppleScript-Literal übergeben, nicht als String-Konkatenation.
-    # Das umgeht die Injection vollständig, weil kein String-Building mehr nötig ist.
-    osascript \
-      -e 'on run argv' \
-      -e 'display notification (item 1 of argv) with title "md-clip"' \
-      -e 'end run' \
-      -- "$1" || true
-  else
-    # notify-send nimmt Titel und Text als zwei normale Argumente — kein
-    # String-Building, also auch hier keine Injection möglich. Das `--`
-    # trennt Optionen von Argumenten, damit eine Meldung, die mit „-"
-    # beginnt, nicht als Flag missverstanden wird.
-    #
-    # `|| true`, weil notify-send einen laufenden Notification-Daemon über
-    # D-Bus braucht: Über SSH, in einem Container oder in einer reinen
-    # Terminal-Sitzung gibt es keinen — die fehlende Notification darf den
-    # eigentlichen Job (Markdown konvertieren) niemals scheitern lassen.
-    notify-send -- "md-clip" "$1" || true
-  fi
 }
 
 # die: Fehler ausgeben, ggf. Notification, dann mit Exit-Code beenden.
@@ -278,7 +204,6 @@ die() {
   exit "$code"
 }
 
-# usage: Hilfetext ausgeben.
 usage() {
   cat <<'EOF'
 md-clip — Clipboard-Inhalt nach Markdown konvertieren.
@@ -349,176 +274,6 @@ BEISPIELE
 EOF
 }
 
-# ---------- Plattform-Weiche ----------
-#
-# Alles, was sich zwischen macOS und Linux unterscheidet, steckt in diesem
-# Abschnitt. Der Rest des Skripts ruft nur die neutralen Funktionen auf.
-
-# to_utf8: Gibt den Inhalt der Datei $1 als garantiert BOM-freies UTF-8 aus.
-#
-# Warum das nötig ist: Auf Linux legt Firefox seinen text/html-Flavor als
-# UTF-16 aufs Clipboard (Altlast der GTK-Clipboard-Anbindung), Chromium
-# dagegen als UTF-8. Wer das nicht behandelt, bekommt aus Firefox-Kopien
-# Text, in dem zwischen jedem Buchstaben ein NUL-Byte steht — pandoc sieht
-# darin kein HTML und liefert Müll. Weil man dem Clipboard nicht ansieht,
-# welcher Browser geschrieben hat, entscheiden wir anhand der BOM
-# (Byte Order Mark), der Signatur in den ersten zwei bis drei Bytes.
-#
-# Bewusst eine DATEI und kein stdin/Variable: Bash verwirft in `$(...)`
-# NUL-Bytes — genau die Bytes, die UTF-16 ausmachen. Über eine Variable
-# wäre der Text also schon kaputt, bevor wir ihn ansehen könnten.
-to_utf8() {
-  local file="$1"
-  local bom
-
-  # Erste 3 Bytes als Hex lesen. `od -An -tx1` gibt sie durch Leerzeichen
-  # getrennt aus, `tr -d` macht daraus eine durchgehende Hex-Kette.
-  bom="$(head -c 3 "$file" | od -An -tx1 | tr -d ' \n')"
-
-  case "$bom" in
-    fffe*|feff*)
-      # UTF-16, Little- oder Big-Endian. Wir übergeben iconv bewusst
-      # „UTF-16" OHNE LE/BE-Suffix: In dieser Form wertet iconv die BOM
-      # selbst aus, erkennt die Byte-Reihenfolge daran und entfernt sie
-      # aus der Ausgabe. Mit „UTF-16LE" müssten wir die Reihenfolge selbst
-      # bestimmen und die BOM bliebe als unsichtbares Zeichen im Text stehen.
-      iconv -f UTF-16 -t UTF-8 < "$file"
-      ;;
-    efbbbf*)
-      # UTF-8 mit BOM. Der Inhalt stimmt schon, nur die drei BOM-Bytes
-      # müssen weg — sonst landen sie als unsichtbarer Fleck am Anfang des
-      # Markdowns. `tail -c +4` gibt alles ab dem 4. Byte aus.
-      tail -c +4 "$file"
-      ;;
-    *)
-      # Kein BOM → schon reines UTF-8, unverändert durchreichen.
-      cat "$file"
-      ;;
-  esac
-}
-
-# linux_clip_read: Liest den ersten verfügbaren der übergebenen MIME-Typen
-# vom Clipboard und gibt ihn als UTF-8 auf stdout aus.
-# Exit 0 = etwas gefunden, Exit 1 = keiner der Typen liegt an.
-#
-# Mehrere Typen, weil sich die Programme nicht einig sind: RTF liegt je nach
-# Quelle als text/rtf oder als application/rtf an.
-linux_clip_read() {
-  local mime tmp
-  tmp="$(mktemp)"
-
-  for mime in "$@"; do
-    # `|| continue`: Fehlt der Typ auf dem Clipboard, melden xclip und
-    # wl-paste einen Fehler — das ist hier kein Problem, sondern die
-    # normale Antwort „hab ich nicht", also nächsten Typ probieren.
-    if [ "$CLIP_BACKEND" = "wayland" ]; then
-      wl-paste --no-newline --type "$mime" > "$tmp" 2>/dev/null || continue
-    else
-      xclip -selection clipboard -target "$mime" -out > "$tmp" 2>/dev/null || continue
-    fi
-
-    # `-s` = Datei existiert UND ist nicht leer. Der Test ist nötig, weil
-    # manche xclip-Versionen bei fehlendem Typ trotzdem Exit 0 melden und
-    # einfach nichts ausgeben.
-    if [ -s "$tmp" ]; then
-      # Das `|| { … }` ist die Aufräum-Garantie: Ohne den Zweig würde ein
-      # Fehler in to_utf8 (z.B. kaputtes UTF-16) die Temp-Datei liegen lassen.
-      to_utf8 "$tmp" || { rm -f "$tmp"; return 1; }
-      rm -f "$tmp"
-      return 0
-    fi
-  done
-
-  rm -f "$tmp"
-  return 1
-}
-
-# clip_read_html: HTML-Flavor vom Clipboard holen.
-# Exit 0 + HTML auf stdout, wenn vorhanden; sonst Exit 1 ohne Ausgabe.
-clip_read_html() {
-  if [ "$PLATFORM" = "macos" ]; then
-    "$HTML_HELPER" 2>/dev/null
-  else
-    linux_clip_read text/html
-  fi
-}
-
-# clip_read_rtf: RTF-Flavor vom Clipboard holen.
-#
-# Auf macOS nutzen wir den Swift-Helper statt `pbpaste -Prefer rtf`, weil
-# pbpaste auf Plain Text ausweicht, sobald zusätzlich zum RTF auch RTFD auf
-# dem Clipboard liegt (typisch für TextEdit-Inhalte mit Bildern). Der Helper
-# greift direkt auf den .rtf-Flavor in NSPasteboard zu — zuverlässig.
-clip_read_rtf() {
-  if [ "$PLATFORM" = "macos" ]; then
-    "$RTF_HELPER" 2>/dev/null
-  else
-    linux_clip_read text/rtf application/rtf
-  fi
-}
-
-# clip_read_text: Plain-Text vom Clipboard holen.
-clip_read_text() {
-  if [ "$PLATFORM" = "macos" ]; then
-    pbpaste
-  elif [ "$CLIP_BACKEND" = "wayland" ]; then
-    # --no-newline: wl-paste hängt sonst ein Newline an, das im Original
-    # nicht stand. pbpaste tut das nicht — so verhalten sich beide gleich.
-    wl-paste --no-newline 2>/dev/null
-  else
-    xclip -selection clipboard -out 2>/dev/null
-  fi
-}
-
-# Die Helfer halten die vollständige Formatsicherung nur im Arbeitsspeicher.
-# Die Ersetzung bleibt an dieselbe Clipboard-Generation wie die Sicherung gebunden.
-undo_helper_path() {
-  local name
-  if [ "$PLATFORM" = macos ]; then name=clipboard-undo; else name=clipboard-undo-linux.py; fi
-  if [ -x "$SCRIPT_DIR/$name" ]; then
-    printf '%s\n' "$SCRIPT_DIR/$name"
-  else
-    printf '%s\n' "$PROJECT_ROOT/helpers/$name"
-  fi
-}
-
-clip_undo_command() {
-  local helper
-  helper=$(undo_helper_path)
-  [ -x "$helper" ] || { err "Undo-Helfer fehlt (install.sh ausführen)."; return 2; }
-  "$helper" "$@"
-}
-
-rtf_tools_ready() {
-  if [ "$PLATFORM" = macos ]; then command -v textutil >/dev/null 2>&1
-  else [ "$1" = true ]; fi
-}
-
-doctor_platform_issues() {
-  if [ "$PLATFORM" = macos ]; then
-    command -v textutil >/dev/null 2>&1 || doctor_issue textutil-missing warning 'textutil fehlt; der macOS-RTF-Weg ist nicht verfügbar.' 'Die macOS-Systemwerkzeuge und den PATH prüfen.'
-    [ -x "$HTML_HELPER" ] || doctor_issue html-helper-missing warning 'Der macOS-HTML-Lesehelfer fehlt.' 'install.sh ausführen oder die vollständige App verwenden.'
-    [ -x "$RTF_HELPER" ] || doctor_issue rtf-helper-missing warning 'Der macOS-RTF-Lesehelfer fehlt.' 'install.sh ausführen oder die vollständige App verwenden.'
-  elif [ "$2" = true ] && [ "$1" = false ]; then
-    doctor_issue pandoc-no-rtf warning 'Der RTF-Reader von pandoc fehlt.' 'pandoc mit RTF-Unterstützung installieren; HTML und Klartext separat verwenden.'
-  fi
-}
-
-native_preview_helper_path() {
-  [ "$PLATFORM" = macos ] || return 2
-  local bundle
-  bundle=$(cd "$SCRIPT_DIR/../../MacOS" 2>/dev/null && pwd || true)
-  if [ -n "$bundle" ] && [ -x "$bundle/md-clip-preview" ]; then
-    printf '%s\n' "$bundle/md-clip-preview"
-  else printf '%s\n' "$PROJECT_ROOT/helpers/md-clip-preview"; fi
-}
-
-native_preview_available() {
-  local helper
-  helper=$(native_preview_helper_path) || return 1
-  [ -x "$helper" ]
-}
-
 check_native_preview() {
   [ "$PLATFORM" = macos ] || { err "Die native Fenstervorschau ist nur unter macOS verfügbar."; return 2; }
   native_preview_available || { err "Vorschau-Helfer fehlt (install.sh ausführen oder vollständige App verwenden)."; return 2; }
@@ -538,76 +293,55 @@ show_native_preview() {
   return "$status"
 }
 
-clip_read_tools_ready() {
-  case "$PLATFORM:$CLIP_BACKEND" in
-    macos:*) command -v pbpaste ;;
-    linux:x11) command -v xclip ;;
-    linux:wayland) command -v wl-paste ;;
-  esac >/dev/null 2>&1
-}
-
-clip_write_tools_ready() {
-  case "$PLATFORM:$CLIP_BACKEND" in
-    macos:*) command -v pbcopy ;;
-    linux:x11) command -v xclip ;;
-    linux:wayland) command -v wl-copy ;;
-  esac >/dev/null 2>&1
-}
-
-# Feste Kennung statt ungefilterter Helferfehler; Diagnose liest keine Nutzdaten.
-clip_diagnose() {
-  local helper diagnosis
-  helper=$(undo_helper_path)
-  [ -x "$helper" ] || { printf 'undo-helper-missing'; return; }
-  if [ "$PLATFORM" = linux ] && ! command -v python3 >/dev/null 2>&1; then
-    printf 'python-missing'; return
+# Das Bundle hält Laufzeitdateien neben der CLI, der Checkout in lib/.
+RUNTIME_DIR="$PROJECT_ROOT/lib"
+if [ -f "$SCRIPT_DIR/pipeline.sh" ] || [ -f "$SCRIPT_DIR/platform.sh" ]; then RUNTIME_DIR="$SCRIPT_DIR"; fi
+for module in platform doctor conversion-report pipeline; do
+  if [ ! -f "$RUNTIME_DIR/$module.sh" ] || [ ! -s "$RUNTIME_DIR/$module.sh" ] || [ ! -r "$RUNTIME_DIR/$module.sh" ]; then
+    err "Laufzeitdatei fehlt, ist leer oder nicht lesbar: $RUNTIME_DIR/$module.sh"
+    exit 2
   fi
-  diagnosis=$("$helper" diagnose 2>/dev/null) || { printf 'undo-helper-failed'; return; }
-  case "$diagnosis" in
-    ok|macos-session-missing|python-unsupported|local-security-unsupported|runtime-unsafe|x11-session-missing|x11-connect-failed|x11-libraries-missing|x11-xfixes-missing|wayland-runtime-missing|wayland-connect-failed|wayland-data-control-missing|wayland-seat-unsupported)
-      printf '%s' "$diagnosis" ;;
-    *) printf 'undo-helper-failed' ;;
-  esac
-}
-
-clip_prepare_replace() { clip_undo_command prepare; }
-clip_cancel_replace() { clip_undo_command cancel "$1"; }
-clip_restore() { clip_undo_command undo; }
-
-# clip_write_text ersetzt alle Rich-Flavors durch Text. Der Helfer prüft direkt
-# davor den ursprünglichen Eigentümer und bindet Undo an seinen Schreibvorgang.
-clip_write_text() {
-  clip_undo_command replace "$UNDO_TOKEN"
-}
-
-# rtf_fix_escaped_newlines liegt in lib/pipeline.sh und wird dort von
-# Produkt und Tests gemeinsam verwendet.
-
-# rtf_to_html: RTF von stdin nach HTML auf stdout.
-#
-# macOS: textutil (Bordmittel, nutzt Apples eigenen RTF-Parser).
-# Linux: pandocs RTF-Reader (seit pandoc 2.19), plus die Spec-Korrektur oben.
-#
-# Beide Wege liefern für tests/fixtures/word-rtf.rtf identisches Markdown —
-# das pinnt der word-rtf-Test auf beiden Plattformen gegen dieselbe Erwartung.
-rtf_to_html() {
-  if [ "$PLATFORM" = "macos" ]; then
-    # textutil setzt die \par-Kurzform von sich aus korrekt um — hier ist
-    # rtf_fix_escaped_newlines nicht nötig und bleibt bewusst weg, damit der
-    # macOS-Pfad exakt der bisherige bleibt.
-    textutil -convert html -format rtf -stdin -stdout
-  else
-    rtf_fix_escaped_newlines | pandoc -f rtf -t html
-  fi
-}
+done
+# shellcheck source=../lib/platform.sh
+source "$RUNTIME_DIR/platform.sh"
+# shellcheck source=../lib/doctor.sh
+source "$RUNTIME_DIR/doctor.sh"
+# shellcheck source=../lib/conversion-report.sh
+source "$RUNTIME_DIR/conversion-report.sh"
+# shellcheck source=../lib/pipeline.sh
+source "$RUNTIME_DIR/pipeline.sh"
 
 # ---------- Flag-Parsing ----------
 
-# Argumente durchgehen, lange und kurze Form akzeptieren.
-# `getopts` (Bash-Builtin) kann nur kurze Optionen — daher manuell.
+select_action() {
+  case "$ACTION" in
+    convert|"$1") ACTION="$1" ;;
+    *) die 2 "Nur eine Aktion aus --doctor, --undo, --help, --version und --check-updates ist erlaubt." ;;
+  esac
+}
+
+show_version() {
+  local version
+  printf 'md-clip %s\n' "$VERSION"
+  if [ "$PLATFORM" = macos ]; then
+    printf 'System  macOS\n'
+  else
+    printf 'System  Linux (%s)\n' "$CLIP_BACKEND"
+  fi
+  if [ -x "$SCRIPT_DIR/pandoc" ]; then
+    version=$("$SCRIPT_DIR/pandoc" --version 2>/dev/null) || version=""
+    printf 'pandoc  %s (gebundelt)\n' "$(awk 'NR == 1 { print $2 }' <<< "$version")"
+  elif command -v pandoc >/dev/null 2>&1; then
+    version=$(pandoc --version 2>/dev/null) || version=""
+    printf 'pandoc  %s (System)\n' "$(awk 'NR == 1 { print $2 }' <<< "$version")"
+  else
+    printf 'pandoc  nicht installiert\n'
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --undo) UNDO=1 ;;
+    --undo) select_action undo ;;
     --stdin)
       CONVERSION_OPTIONS=1
       [ "$INPUT_MODE" = clipboard ] || die 2 "Nur eine Eingabequelle erlaubt."
@@ -618,7 +352,7 @@ while [ "$#" -gt 0 ]; do
       shift
       [ -n "${1:-}" ] || die 2 "--input benötigt einen Dateipfad."
       INPUT_MODE=file; INPUT_PATH="$1" ;;
-    --doctor) DOCTOR=1 ;;
+    --doctor) select_action doctor ;;
     --json) JSON=1 ;;
     --preview) PREVIEW=1 ;;
     --preview-window) NATIVE_PREVIEW=1; CONVERSION_OPTIONS=1 ;;
@@ -659,45 +393,9 @@ while [ "$#" -gt 0 ]; do
     -q|--quiet)     QUIET=1 ;;
     -n|--notify)    NOTIFY=1 ;;
     -V|--verbose)   VERBOSE=1 ;;
-    -v|--version)
-      # md-clip-Version + pandoc-Version (vorzugsweise das gebundelte
-      # Binary, sonst das aus dem PATH). Nützlich beim Bug-Reporting,
-      # weil sich das pandoc-Verhalten zwischen Versionen merklich
-      # unterscheiden kann.
-      printf 'md-clip %s\n' "$VERSION"
-      # Plattform + Clipboard-Backend mit ausgeben: Beim Bug-Reporting ist
-      # „X11 statt Wayland erkannt" eine der ersten Fragen.
-      if [ "$PLATFORM" = "macos" ]; then
-        printf 'System  macOS\n'
-      else
-        printf 'System  Linux (%s)\n' "$CLIP_BACKEND"
-      fi
-      if [ -x "$SCRIPT_DIR/pandoc" ]; then
-        printf 'pandoc  %s (gebundelt)\n' "$("$SCRIPT_DIR/pandoc" --version 2>/dev/null | head -1 | awk '{print $2}')"
-      elif command -v pandoc >/dev/null 2>&1; then
-        printf 'pandoc  %s (System)\n'    "$(pandoc --version 2>/dev/null | head -1 | awk '{print $2}')"
-      else
-        printf 'pandoc  nicht installiert\n'
-      fi
-      exit 0
-      ;;
-    -h|--help)      usage; exit 0 ;;
-    --check-updates)
-      # Sichtbare Update-Suche über Sparkle. Aktualisiert wird die App-
-      # Installation: Der Updater-Helfer liegt im App-Bundle unter
-      # Contents/MacOS/, dieses Skript im selben Bundle unter
-      # Contents/Resources/bin/ — daher der Verwandtschaftspfad. Eine
-      # git-/install.sh-Installation hat keinen Updater (Update-Weg dort:
-      # git pull), und unter Linux gibt es keine App.
-      # `|| true`, damit ein fehlendes MacOS-Verzeichnis (kein Bundle-Layout)
-      # unter `set -e` nicht das Skript beendet, sondern unten sauber in der
-      # Fehlermeldung landet.
-      UPDATER_DIR="$(cd -P "$SCRIPT_DIR/../../MacOS" 2>/dev/null && pwd || true)"
-      if [ "$PLATFORM" != "macos" ] || [ -z "$UPDATER_DIR" ] || [ ! -x "$UPDATER_DIR/md-clip-updater" ]; then
-        die 2 "Die Update-Suche gibt es nur in der macOS-App-Installation (md-clip.app). Diese Installation wird per git pull bzw. install.sh aktualisiert."
-      fi
-      exec "$UPDATER_DIR/md-clip-updater" --interactive
-      ;;
+    -v|--version) select_action version ;;
+    -h|--help) select_action help ;;
+    --check-updates) select_action updates ;;
     --)
       shift
       if [ "$#" -gt 0 ]; then
@@ -712,259 +410,34 @@ while [ "$#" -gt 0 ]; do
 done
 
 
-# ---------- Dependency-Checks ----------
-
-# command -v $cmd liefert leeren Output und Exit 1, wenn $cmd nicht im PATH ist.
-# Wir prüfen hier alle Pflicht-Binaries — early-fail mit klarem Fehlertext.
-# Nur Werkzeuge des tatsächlich ausgeführten Weges prüfen. Rückgabe statt
-# exit: auto darf einen nicht verfügbaren Rich-Weg überspringen.
-check_dependencies() {
-  local kind="$1" tool
-  local required=()
-  if [ "$kind" = write ]; then
-    clip_undo_command available || return 2
-    return 0
-  fi
-  case "$kind" in
-    html|rtf) required=(pandoc perl) ;;
-  esac
-  if [ "$kind" = rtf ] && [ "$PLATFORM" = macos ]; then required+=(textutil); fi
-  if [ "$kind" = read ]; then
-    case "$PLATFORM:$CLIP_BACKEND:$kind" in
-      macos:*:read)
-        case "$FROM" in
-          html) [ -x "$HTML_HELPER" ] || { err "HTML-Helper fehlt (install.sh ausführen)."; return 2; } ;;
-          rtf) [ -x "$RTF_HELPER" ] || { err "RTF-Helper fehlt (install.sh ausführen)."; return 2; } ;;
-          plain) required=(pbpaste) ;;
-          auto) ;; # Fehlende einzelne Flavor-Werkzeuge überspringen.
-        esac ;;
-      linux:wayland:read) required=(wl-paste) ;;
-      linux:x11:read) required=(xclip) ;;
-    esac
-  fi
-  for tool in ${required[@]+"${required[@]}"}; do
-    command -v "$tool" >/dev/null 2>&1 || {
-      err "Fehlende Dependency: $tool"; return 2;
-    }
-  done
-  case "$kind" in
-    html|rtf)
-      if ! pandoc_supports_sandbox; then
-        err "Das installierte pandoc kennt die Option --sandbox nicht. Bitte pandoc >= 2.15 installieren."
-        return 2
-      fi ;;
-  esac
-  if [ "$kind" = rtf ] && [ "$PLATFORM" = linux ] && ! pandoc_supports_rtf; then
-    err "Pandoc unterstützt das Eingabeformat RTF nicht. Bitte pandoc >= 2.15 installieren."
-    return 2
-  fi
-}
-
-doctor_json_string() {
-  local value="$1"
-  value=${value//\\/\\\\}; value=${value//\"/\\\"}
-  value=${value//$'\n'/\\n}; value=${value//$'\r'/\\r}; value=${value//$'\t'/\\t}
-  printf '"%s"' "$value"
-}
-
-doctor_state_label() {
-  case "$1" in
-    true) printf 'ja' ;;
-    false) printf 'nein' ;;
-    ready) printf 'bereit' ;;
-    unavailable) printf 'nicht erreichbar' ;;
-    unsupported) printf 'nicht unterstützt' ;;
-    *) printf 'nicht geprüft' ;;
-  esac
-}
-
-doctor_issue() {
-  local code="$1" severity="$2" message="$3" next="$4"
-  issues+="$issue_sep{\"code\":\"$code\",\"severity\":\"$severity\",\"message\":$(doctor_json_string "$message"),\"next_step\":$(doctor_json_string "$next")}"
-  issue_sep=,
-  if [ "$JSON" -eq 0 ]; then
-    printf '[%s] %s\n  Nächster Schritt: %s\n' "$code" "$message" "$next"
-  fi
-}
-
-# Doctor prüft ausschließlich Werkzeuge und Sitzungsmetadaten. Es liest keine
-# Formate, erzeugt keinen Undo-Daemon und sagt nichts über eine gültige Sicherung.
-doctor() {
-  local tool available version path sep="" sandbox=false rtf=false lua=false undo=false
-  local diagnosis session read_tools=false write_tools=false read_ready=null replace_ready=false
-  local native_preview=false native_resource=false native_label="nicht verfügbar"
-  local html=false rtf_conversion=false pandoc_runs=false issues="" issue_sep=""
-  if native_preview_available; then
-    native_resource=true
-    clip_undo_command status >/dev/null 2>&1 && native_preview=true
-  fi
-  if [ "$native_preview" = true ]; then native_label="verfügbar"; fi
-  diagnosis=$(clip_diagnose)
-  case "$diagnosis" in
-    ok) session=ready; undo=true ;;
-    x11-xfixes-missing|wayland-data-control-missing|wayland-seat-unsupported) session=unsupported ;;
-    *session-missing|*connect-failed|wayland-runtime-missing|runtime-unsafe) session=unavailable ;;
-    *) session=unverified ;;
-  esac
-  clip_read_tools_ready && read_tools=true
-  clip_write_tools_ready && write_tools=true
-  pandoc_supports_sandbox && sandbox=true
-  pandoc_supports_rtf && rtf=true
-  pandoc_supports_table_filter && lua=true
-  if command -v perl >/dev/null 2>&1 && [ "$sandbox" = true ] && [ "$lua" = true ]; then html=true; fi
-  if [ "$html" = true ] && rtf_tools_ready "$rtf"; then rtf_conversion=true; fi
-  if [ "$read_tools" = false ]; then read_ready=false
-  elif [ "$session" = ready ]; then read_ready=true
-  elif [ "$session" = unavailable ]; then read_ready=false; fi
-  if [ "$undo" = true ] && [ "$write_tools" = true ]; then replace_ready=true; fi
-  if [ "$JSON" -eq 1 ]; then
-    printf '{"version":"%s","backend":"%s","sandbox":%s,"rtf_reader":%s,"table_filter":%s,"stdin":true,"files":true,"preview":true,"native_preview":%s,"strict":true,"image_modes":["keep","alt","omit"],"table_modes":["reject","text"],"undo":%s,"dependencies":{' "$VERSION" "${CLIP_BACKEND:-macos}" "$sandbox" "$rtf" "$lua" "$native_preview" "$undo"
-  else
-    printf 'md-clip %s; Backend: %s\n' "$VERSION" "${CLIP_BACKEND:-macos}"
-    printf 'stdin/Datei: ja; Vorschau: Terminal; Fenstervorschau: %s; Undo-Helfer: %s\nSandbox: %s; RTF-Reader: %s; Tabellenfilter: %s\n' "$native_label" "$undo" "$sandbox" "$rtf" "$lua"
-  fi
-  for tool in pandoc perl textutil pbpaste pbcopy xclip wl-paste wl-copy iconv clipboard-html clipboard-rtf python3; do
-    available=false; version=""
-    case "$tool" in
-      clipboard-html) path="$HTML_HELPER" ;;
-      clipboard-rtf) path="$RTF_HELPER" ;;
-      *) path=$(command -v "$tool" || true) ;;
-    esac
-    if [ -n "$path" ] && [ -x "$path" ]; then
-      available=true
-      case "$tool" in
-        pandoc) if version=$(pandoc --version 2>/dev/null | head -1); then pandoc_runs=true; fi ;;
-        perl) version=$(perl -e 'printf "%vd", $^V' 2>/dev/null || true) ;;
-        python3) version=$(python3 --version 2>/dev/null | head -1 || true) ;;
-        wl-copy|wl-paste) version=$("$tool" --version 2>/dev/null | head -1 || true) ;;
-        xclip) version=$(xclip -version 2>&1 | head -1 || true) ;;
-        *) version="Systemwerkzeug (Version separat nicht verfuegbar)" ;;
-      esac
-    fi
-    version=$(printf '%s' "$version" | LC_ALL=C tr -cd '[:print:]')
-    version=${version:0:200}
-    if [ "$JSON" -eq 1 ]; then
-      printf '%s"%s":{"available":%s,"version":%s}' "$sep" "$tool" "$available" "$(doctor_json_string "$version")"
-      sep=,
-    else
-      printf '%s: %s %s\n' "$tool" "$available" "$version"
-    fi
-  done
-  if [ "$JSON" -eq 0 ]; then
-    printf 'Fähigkeiten: Plain-Datei/stdin: ja; HTML: %s; RTF: %s\n' "$(doctor_state_label "$html")" "$(doctor_state_label "$rtf_conversion")"
-    printf 'Clipboard-Lesewerkzeuge: %s; Schreibwerkzeuge: %s; Sitzung: %s\n' "$(doctor_state_label "$read_tools")" "$(doctor_state_label "$write_tools")" "$(doctor_state_label "$session")"
-    printf 'Clipboard lesen: %s; Ersetzen mit Undo: %s\n' "$(doctor_state_label "$read_ready")" "$(doctor_state_label "$replace_ready")"
-  fi
-  if ! command -v pandoc >/dev/null 2>&1; then
-    doctor_issue pandoc-missing error 'pandoc fehlt; Rich-Text-Konvertierung ist nicht verfügbar.' 'pandoc installieren; Klartext-Datei/stdin funktioniert bereits.'
-  elif [ "$pandoc_runs" = false ]; then
-    doctor_issue pandoc-unusable error 'pandoc lässt sich nicht ausführen.' 'pandoc-Installation und ausführbare Datei prüfen oder neu installieren.'
-  else
-    [ "$sandbox" = true ] || doctor_issue pandoc-no-sandbox error 'pandoc unterstützt die erforderliche Sandbox nicht.' 'Ein aktuelles pandoc mit --sandbox installieren.'
-    [ "$lua" = true ] || doctor_issue table-filter-unavailable error 'Der gemeinsame Tabellenfilter ist nicht ausführbar.' 'Perl und die vollständigen lib-Ressourcen prüfen; anschließend pandoc aktualisieren.'
-  fi
-  command -v perl >/dev/null 2>&1 || doctor_issue perl-missing error 'Perl fehlt; Rich-Text-Konvertierung ist nicht verfügbar.' 'Perl beziehungsweise perl-base installieren.'
-  doctor_platform_issues "$rtf" "$pandoc_runs"
-  if [ "$native_resource" = true ] && [ "$native_preview" = false ]; then
-    doctor_issue preview-status-unavailable warning 'Die Fenstervorschau kann den Undo-Status nicht prüfen.' 'Helfer/Installation prüfen; eine ältere laufende Sicherung zuerst zurücknehmen oder ablaufen lassen.'
-  fi
-  [ "$read_tools" = true ] || doctor_issue clipboard-read-tool-missing warning 'Das Lesewerkzeug dieses Clipboard-Backends fehlt.' 'Unter X11 xclip, unter Wayland wl-clipboard installieren; unter macOS pbpaste/PATH prüfen.'
-  [ "$write_tools" = true ] || doctor_issue clipboard-write-tool-missing warning 'Das Schreibwerkzeug dieses Clipboard-Backends fehlt.' 'Unter X11 xclip, unter Wayland wl-clipboard installieren; unter macOS pbcopy/PATH prüfen.'
-  case "$diagnosis" in
-    ok) ;;
-    undo-helper-missing) doctor_issue "$diagnosis" error 'Der Undo-Helfer fehlt oder ist nicht ausführbar.' 'install.sh ausführen oder die vollständige App verwenden.' ;;
-    python-missing|python-unsupported) doctor_issue "$diagnosis" error 'Linux-Undo benötigt Python 3.8 oder neuer.' 'Einen unterstützten Python-3-Interpreter im PATH bereitstellen.' ;;
-    x11-libraries-missing) doctor_issue "$diagnosis" error 'libX11 oder libXfixes fehlt oder lässt sich nicht laden.' 'Die Laufzeitbibliotheken libX11 und libXfixes der Distribution installieren.' ;;
-    x11-session-missing) doctor_issue "$diagnosis" warning 'Es ist keine X11-Sitzung angegeben.' 'In der grafischen Sitzung starten; für Datei/stdin ist keine Sitzung nötig.' ;;
-    x11-connect-failed) doctor_issue "$diagnosis" warning 'Die angegebene X11-Sitzung ist nicht erreichbar.' 'DISPLAY und die Sitzungsberechtigung im Terminal der grafischen Sitzung prüfen.' ;;
-    x11-xfixes-missing) doctor_issue "$diagnosis" warning 'Der X11-Server bietet das für Undo nötige XFixes nicht an.' 'Einen X11-Server mit XFixes verwenden; Datei/stdin bleibt verfügbar.' ;;
-    wayland-runtime-missing) doctor_issue "$diagnosis" warning 'Das Wayland-Sitzungsverzeichnis fehlt.' 'Im Terminal der Wayland-Sitzung starten; WAYLAND_DISPLAY und XDG_RUNTIME_DIR prüfen.' ;;
-    wayland-connect-failed) doctor_issue "$diagnosis" warning 'Die Wayland-Sitzung ist nicht erreichbar.' 'WAYLAND_DISPLAY und XDG_RUNTIME_DIR in der grafischen Sitzung prüfen.' ;;
-    wayland-data-control-missing) doctor_issue "$diagnosis" warning 'Der Compositor bietet kein unterstütztes Data-Control-Protokoll.' 'Einen Compositor mit ext_data_control_manager_v1 oder zwlr_data_control_manager_v1 verwenden; Datei/stdin funktioniert unabhängig davon.' ;;
-    wayland-seat-unsupported) doctor_issue "$diagnosis" warning 'Wayland-Undo benötigt genau einen Seat.' 'Eine Sitzung mit genau einem Seat verwenden; Datei/stdin bleibt verfügbar.' ;;
-    runtime-unsafe) doctor_issue "$diagnosis" error 'Das Sitzungsverzeichnis ist nicht privat oder nicht zugänglich.' 'XDG_RUNTIME_DIR der eigenen grafischen Sitzung verwenden; Eigentümer und Modus 0700 prüfen.' ;;
-    macos-session-missing) doctor_issue "$diagnosis" warning 'Für diesen Benutzer ist keine aktive macOS-Konsolensitzung erkennbar.' 'In der angemeldeten grafischen Sitzung starten; Datei/stdin funktioniert unabhängig davon.' ;;
-    local-security-unsupported) doctor_issue "$diagnosis" error 'Sichere lokale Undo-Verbindungen werden nicht unterstützt.' 'Eine unterstützte Linux-/Python-Laufzeit mit SO_PEERCRED und O_NOFOLLOW verwenden.' ;;
-    *) doctor_issue undo-helper-failed error 'Der Undo-Helfer liefert keine gültige Diagnose.' 'Helfer und Laufzeit prüfen oder install.sh erneut ausführen.' ;;
-  esac
-  if [ "$JSON" -eq 1 ]; then
-    printf '},"diagnostics_version":1,"session":{"status":"%s","code":"%s"},"clipboard_tools":{"read":%s,"write":%s},"capabilities":{"plain_input":true,"html_conversion":%s,"rtf_conversion":%s,"clipboard_read":%s,"clipboard_replace":%s},"diagnostics":[%s]}\n' "$session" "$diagnosis" "$read_tools" "$write_tools" "$html" "$rtf_conversion" "$read_ready" "$replace_ready" "$issues"
-  fi
-}
-
-# ---------- Gemeinsame Konvertierungs-Pipeline ----------
-
-# Bundle-Layout: pipeline.sh liegt neben md-clip. Projekt-Layout: lib/pipeline.sh.
-if [ -f "$SCRIPT_DIR/pipeline.sh" ]; then
-  PIPELINE_LIB="$SCRIPT_DIR/pipeline.sh"
-else
-  PIPELINE_LIB="$PROJECT_ROOT/lib/pipeline.sh"
-fi
-if [ ! -f "$PIPELINE_LIB" ]; then
-  die 2 "Pipeline-Bibliothek fehlt: $PIPELINE_LIB"
-fi
-# shellcheck source=../lib/pipeline.sh
-source "$PIPELINE_LIB"
-
-# is_mso_html: Prüft, ob ein HTML-Blob aus Microsoft Word stammt.
-# Word legt seine eigene HTML-Variante aufs Clipboard, voller Office-XML-
-# Namespaces und mso-*-CSS — strukturell so verbogen, dass Pandoc damit
-# komplett überfordert ist (Output: rohes HTML statt Markdown). Wenn wir
-# diese Variante erkennen, ist der RTF-Pfad fast immer das bessere
-# Ergebnis. Heuristik:
-#   1. Office-Namespace im <html>-Tag (sehr zuverlässig), ODER
-#   2. mindestens 10 `mso-`-Marker im Body (Fallback für variantenreiche
-#      Office-Versionen).
-# Argument: $1 = erfasste HTML-Datei.
-# Rückgabe: 0 wenn MSO, 1 wenn normales HTML.
-is_mso_html() {
-  local html
-  # Nur die Heuristik ignoriert NUL. Die lineare Byte-Filterung vermeidet die
-  # Bash-Warnung von $(cat); die ursprüngliche Datei bleibt unverändert.
-  html=$(LC_ALL=C tr -d '\000' < "$1") || return 1
-
-  # Schneller, exakter Check: Office-XML-Namespace im <html>-Tag.
-  # Das dritte Pattern (*'Microsoft Word'*'Generator'*) wurde entfernt: Im echten
-  # Word-HTML steht "Generator" im Meta-Tag VOR "Microsoft Word" — die umgekehrte
-  # Reihenfolge trifft niemals zu. Das zweite Pattern (*'name=Generator content="Microsoft'*)
-  # deckt diesen Fall korrekt ab.
-  case "$html" in
-    *'microsoft-com:office'*)  return 0 ;;
-    *'name=Generator content="Microsoft'*)  return 0 ;;
-  esac
-
-  # Fallback: tatsächliche mso-Marker zählen, nicht nur Zeilen mit Treffern.
-  # Word-HTML kann minifiziert in einer einzigen Zeile ankommen; `grep -c`
-  # lieferte dafür unabhängig von der Markerzahl nur 1 und verfehlte die
-  # Erkennung. Die Längendifferenz ist exakt vier Zeichen je entferntem
-  # ASCII-Marker und braucht keinen weiteren Prozess.
-  local without_mso count
-  without_mso="${html//mso-/}"
-  count=$(( (${#html} - ${#without_mso}) / 4 ))
-  [ "${count:-0}" -ge 10 ] && return 0
-
-  return 1
-}
-
 # ---------- Quellenwahl und Eingabevertrag ----------
 
 export MD_CLIP_STRICT="$STRICT"
 export MD_CLIP_IMAGES="$IMAGES"
 export MD_CLIP_TABLES="$TABLES"
-[ "$JSON" -eq 0 ] || [ "$DOCTOR" -eq 1 ] || die 2 "--json benötigt --doctor."
-if [ "$UNDO" -eq 1 ]; then
-  [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$NATIVE_PREVIEW" -eq 0 ] && [ "$DOCTOR" -eq 0 ] || die 2 "--undo ist nicht mit Konvertierung, Vorschau oder --doctor kombinierbar."
-  check_dependencies write || exit 2
-  clip_restore || exit $?
-  log "md-clip: Ursprüngliche Clipboard-Formate wiederhergestellt."
-  notify "Ursprüngliche Clipboard-Formate wiederhergestellt."
-  exit 0
+[ "$JSON" -eq 0 ] || [ "$ACTION" = doctor ] || die 2 "--json benötigt --doctor."
+if [ "$ACTION" != convert ]; then
+  [ "$CONVERSION_OPTIONS" -eq 0 ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] ||
+    die 2 "Die gewählte Aktion ist nicht mit Konvertierungsoptionen kombinierbar."
 fi
-if [ "$DOCTOR" -eq 1 ]; then
-  [ "$INPUT_MODE" = clipboard ] && [ "$REPLACE" -eq 0 ] && [ "$PREVIEW" -eq 0 ] && [ "$NATIVE_PREVIEW" -eq 0 ] && [ "$STRICT" -eq 0 ] && [ "$IMAGES" = keep ] && [ "$TABLES" = reject ] || die 2 "--doctor ist nicht mit Eingabe, Ersetzen, --strict oder Inhaltsvereinfachung kombinierbar."
-  doctor
-  exit 0
-fi
+case "$ACTION" in
+  help) usage; exit 0 ;;
+  version) show_version; exit 0 ;;
+  updates)
+    if [ -z "$BUNDLE_MACOS_DIR" ] || [ ! -x "$BUNDLE_MACOS_DIR/md-clip-updater" ]; then
+      die 2 "Die Update-Suche gibt es nur in der macOS-App-Installation (md-clip.app). Diese Installation wird per git pull bzw. install.sh aktualisiert."
+    fi
+    exec "$BUNDLE_MACOS_DIR/md-clip-updater" --interactive
+    ;;
+  undo)
+    check_dependencies write || exit 2
+    clip_restore || exit $?
+    log "md-clip: Ursprüngliche Clipboard-Formate wiederhergestellt."
+    notify "Ursprüngliche Clipboard-Formate wiederhergestellt."
+    exit 0
+    ;;
+  doctor) doctor; exit 0 ;;
+esac
 [ "$PREVIEW" -eq 0 ] || [ "$REPLACE" -eq 1 ] || die 2 "--preview benötigt --replace."
 if [ "$NATIVE_PREVIEW" -eq 1 ]; then
   [ "$REPLACE" -eq 1 ] && [ "$PREVIEW" -eq 0 ] || die 2 "--preview-window benötigt --replace und ist nicht mit --preview kombinierbar."
@@ -987,7 +460,8 @@ fi
 if [ "$INPUT_MODE" = clipboard ]; then check_dependencies read || exit 2; fi
 if [ "$REPLACE" -eq 1 ]; then check_dependencies write || exit 2; fi
 
-WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/md-clip.XXXXXX")
+TEMP_BASE=${TMPDIR:-/tmp}
+WORK_DIR=$(mktemp -d "${TEMP_BASE%/}/md-clip.XXXXXX")
 OUTPUT_FILE="$WORK_DIR/output"
 export MD_CLIP_RESULT_FILE="$WORK_DIR/result"
 if [ "$NATIVE_PREVIEW" -eq 1 ]; then
@@ -1037,7 +511,7 @@ if [ "$REPLACE" -eq 1 ]; then
 fi
 
 # Dateien erhalten auch NUL-Bytes und abschließende Newlines. Kein Nutzdaten-
-# Transport über Shell-Variablen; nur die Word-Heuristik sammelt einen HTML-String.
+# Transport über Shell-Variablen.
 read_source() {
   local kind="$1" dest="$2"
   if [ "$INPUT_MODE" = stdin ]; then run_io_command cat > "$dest"
@@ -1053,132 +527,28 @@ read_source() {
 
 # Quellen einmal lesen, dann in fester Reihenfolge versuchen. Ein fehlender
 # Flavor ist keine erfolgreiche leere Eingabe und darf nicht ersetzen.
-ORDER="$FROM"
+ORDER=("$FROM")
 if [ "$FROM" = auto ]; then
   read_source html "$WORK_DIR/html" 2>/dev/null || rm -f "$WORK_DIR/html"
   read_source rtf "$WORK_DIR/rtf" 2>/dev/null || rm -f "$WORK_DIR/rtf"
   read_source plain "$WORK_DIR/plain" 2>/dev/null || rm -f "$WORK_DIR/plain"
-  ORDER="html rtf plain"
+  ORDER=(html rtf plain)
   if [ -s "$WORK_DIR/html" ] && is_mso_html "$WORK_DIR/html"; then
-    ORDER="rtf html plain"
+    ORDER=(rtf html plain)
     vlog "Microsoft Word: Reihenfolge RTF → HTML → Klartext"
   fi
 else
   read_source "$FROM" "$WORK_DIR/$FROM" || die 1 "Quelle $FROM konnte nicht gelesen werden."
 fi
 
-# ---------- Konvertierung und Ergebnisbewertung ----------
-CONVERTED=0
-RESULT=""
-TABLE_CELLS_FLATTENED=0
-LAYOUT_TABLES_FLATTENED=0
-TABLES_TEXT=0
-IMAGES_ALT=0
-IMAGES_OMITTED=0
-SOURCE_REASON=""
-
-# Der Bericht enthält nur feste Kennungen und Anzahlen, niemals Nutztext.
-# Neue Kennungen werden ausdrücklich aufgenommen, statt fremde Daten als
-# Shell-Ausdruck oder als erfolgreich bewertete Konvertierung zu behandeln.
-read_conversion_report() {
-  local record="" code count count_value
-  TABLE_CELLS_FLATTENED=0
-  LAYOUT_TABLES_FLATTENED=0
-  TABLES_TEXT=0
-  IMAGES_ALT=0
-  IMAGES_OMITTED=0
-  SOURCE_REASON=""
-  while IFS= read -r record; do
-    case "$record" in
-      *$'\t'*) code=${record%%$'\t'*}; count=${record#*$'\t'} ;;
-      *) err "Ungültiger Konvertierungsbericht."; return 3 ;;
-    esac
-    case "$count" in
-      ""|*[!0-9]*) err "Ungültiger Konvertierungsbericht."; return 3 ;;
-    esac
-    [ "${#count}" -le 9 ] || { err "Ungültiger Konvertierungsbericht."; return 3; }
-    count_value=$((10#$count))
-    [ "$count_value" -gt 0 ] || { err "Ungültiger Konvertierungsbericht."; return 3; }
-    case "$code" in
-      table-cells-flattened) TABLE_CELLS_FLATTENED=$((TABLE_CELLS_FLATTENED + count_value)) ;;
-      layout-tables-flattened) LAYOUT_TABLES_FLATTENED=$((LAYOUT_TABLES_FLATTENED + count_value)) ;;
-      tables-text) TABLES_TEXT=$((TABLES_TEXT + count_value)) ;;
-      images-alt) IMAGES_ALT=$((IMAGES_ALT + count_value)) ;;
-      images-omitted) IMAGES_OMITTED=$((IMAGES_OMITTED + count_value)) ;;
-      table-nested|table-spanned|table-ambiguous|empty-document|rtf-header-invalid)
-        [ -n "$SOURCE_REASON" ] || SOURCE_REASON="$code" ;;
-      *) err "Unbekannter Konvertierungsbericht: $code"; return 3 ;;
-    esac
-  done < "$MD_CLIP_RESULT_FILE"
-  [ -z "$record" ] || { err "Unvollständiger Konvertierungsbericht."; return 3; }
-}
-
-source_label() {
-  case "$1" in html) printf 'HTML' ;; rtf) printf 'RTF' ;; plain) printf 'Klartext' ;; esac
-}
-
-source_failure_reason() {
-  if [ "$STRICT" -eq 1 ] && { [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ]; }; then
-    printf 'Strenger Modus verbietet die Bildvereinfachung'
-    return
-  fi
-  if [ "$STRICT" -eq 1 ] && { [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ] || [ "$TABLES_TEXT" -gt 0 ]; }; then
-    printf 'Strenger Modus verbietet die nötige Strukturvereinfachung'
-    return
-  fi
-  case "$SOURCE_REASON" in
-    rtf-header-invalid) printf 'kein gültiger RTF-Kopf' ;;
-    table-nested) printf 'verschachtelte Tabelle nicht darstellbar' ;;
-    table-spanned) printf 'verbundene Tabellenzellen nicht darstellbar' ;;
-    table-ambiguous) printf 'Tabellenzellen nicht eindeutig zuordenbar' ;;
-    empty-document)
-      if [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ]; then
-        printf 'Bildbehandlung lässt keinen sichtbaren Inhalt'
-      else printf 'kein sichtbarer Rich-Text-Inhalt'; fi ;;
-    *)
-      if [ "$1" -eq 2 ]; then printf 'benötigtes Werkzeug oder Fähigkeit fehlt'
-      else printf 'Konvertierung fehlgeschlagen'; fi ;;
-  esac
-}
-
-report_simplifications() {
-  local label
-  if [ "$TABLE_CELLS_FLATTENED" -gt 0 ]; then
-    label=Tabellenzellen
-    if [ "$TABLE_CELLS_FLATTENED" -eq 1 ]; then label=Tabellenzelle; fi
-    conversion_note "md-clip: Vereinfachung: $TABLE_CELLS_FLATTENED $label; Blockgrenzen und Umbrüche zusammengeführt."
-  fi
-  if [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ]; then
-    label=RTF-Layouttabellen
-    if [ "$LAYOUT_TABLES_FLATTENED" -eq 1 ]; then label=RTF-Layouttabelle; fi
-    conversion_note "md-clip: Vereinfachung: $LAYOUT_TABLES_FLATTENED $label in Absätze umgewandelt."
-  fi
-  if [ "$TABLES_TEXT" -gt 0 ]; then
-    label=Tabellen
-    if [ "$TABLES_TEXT" -eq 1 ]; then label=Tabelle; fi
-    conversion_note "md-clip: Vereinfachung: $TABLES_TEXT $label als beschrifteten Text dargestellt."
-  fi
-  if [ "$IMAGES_ALT" -gt 0 ]; then
-    label=Bilder
-    if [ "$IMAGES_ALT" -eq 1 ]; then label=Bild; fi
-    conversion_note "md-clip: Vereinfachung: $IMAGES_ALT $label auf Alternativtext reduziert."
-  fi
-  if [ "$IMAGES_OMITTED" -gt 0 ]; then
-    label=Bilder
-    if [ "$IMAGES_OMITTED" -eq 1 ]; then label=Bild; fi
-    conversion_note "md-clip: Vereinfachung: $IMAGES_OMITTED $label entfernt."
-  fi
-}
-
-has_simplification() {
-  [ "$TABLE_CELLS_FLATTENED" -gt 0 ] || [ "$LAYOUT_TABLES_FLATTENED" -gt 0 ] \
-    || [ "$IMAGES_ALT" -gt 0 ] || [ "$IMAGES_OMITTED" -gt 0 ] || [ "$TABLES_TEXT" -gt 0 ]
-}
-
 convert_source() {
-  local kind="$1" status
-  : > "$MD_CLIP_RESULT_FILE"
-  read_conversion_report || return 3
+  local kind="$1"
+  if ! : > "$MD_CLIP_RESULT_FILE"; then
+    err "Konvertierungsbericht konnte nicht angelegt werden."
+    REPORT_FAILED=1
+    return 3
+  fi
+  read_conversion_report || { REPORT_FAILED=1; return 3; }
   if [ "$kind" = plain ]; then
     run_io_command cat "$WORK_DIR/plain" > "$OUTPUT_FILE" || return 3
     RESULT="Klartext übernommen"
@@ -1186,16 +556,16 @@ convert_source() {
   fi
   check_dependencies "$kind" || return 2
   if [ "$kind" = rtf ] && ! check_rtf_header "$WORK_DIR/rtf"; then
-    read_conversion_report || return 3
+    read_conversion_report || { REPORT_FAILED=1; return 3; }
     return 3
   fi
   if "convert_$kind" "$TO" < "$WORK_DIR/$kind" > "$OUTPUT_FILE"; then
     [ -s "$OUTPUT_FILE" ] || return 3
   else
-    read_conversion_report || return 3
+    read_conversion_report || { REPORT_FAILED=1; return 3; }
     return 3
   fi
-  read_conversion_report || return 3
+  read_conversion_report || { REPORT_FAILED=1; return 3; }
   CONVERTED=1
   RESULT="Markdown erzeugt"
   if has_simplification; then
@@ -1205,7 +575,8 @@ convert_source() {
 
 HAD_SOURCE=0
 FAILED_RICH=0
-for source_kind in $ORDER; do
+REPORT_FAILED=0
+for source_kind in "${ORDER[@]}"; do
   if [ ! -s "$WORK_DIR/$source_kind" ]; then
     [ "$FROM" = auto ] && continue
     die 1 "Quelle $source_kind ist leer."
@@ -1222,6 +593,11 @@ for source_kind in $ORDER; do
     break
   else
     status=$?
+    if [ "$REPORT_FAILED" -eq 1 ] ||
+        grep -Eq '(^|[.]lua:[0-9]+: )Konvertierungsbericht konnte nicht geschrieben werden[.]$' "$WORK_DIR/diagnostic"; then
+      cat "$WORK_DIR/diagnostic" >&2
+      exit 3
+    fi
     if [ "$FROM" != auto ]; then
       if [ -n "$SOURCE_REASON" ] || has_simplification; then
         if [ "$VERBOSE" -eq 1 ] && [ "$QUIET" -eq 0 ]; then cat "$WORK_DIR/diagnostic" >&2; fi
@@ -1241,17 +617,8 @@ done
 
 # Output ausliefern: entweder Clipboard ersetzen oder stdout.
 if [ "$REPLACE" -eq 1 ]; then
-  # Schluss-Newline eines KONVERTIERTEN Ergebnisses vor dem Clipboard weg.
-  # pandoc beendet sein Markdown immer mit einem LF. In einer Datei ist das
-  # richtig, im Clipboard nicht: Beim Einfügen entsteht daraus eine zusätzliche
-  # leere Zeile, die im kopierten Original nie stand. Durchgereichter
-  # Plain-Text bleibt davon unberührt — dort sind die Newlines Nutzdaten und
-  # müssen bytegenau erhalten bleiben (siehe tests/test-plain-newlines.sh).
-  #
-  # GENAU EINS, nicht `\n+`: Endet das Dokument auf einen echten leeren Absatz,
-  # liefert die Kette zwei LFs — eines ist Pandocs Dateiende, das andere der
-  # Absatz. `\n+` fraß beide und damit den Absatz (Review-Fund 2026-08-05,
-  # belegt an `<p>a</p><p><br></p>` → `a\n\n`).
+  # Ein Schluss-LF fügt Pandoc für die Datei hinzu. Weitere LFs und die
+  # Bytes einer durchgereichten Klartextquelle gehören zum Inhalt.
   if [ "$CONVERTED" -eq 1 ]; then
     perl -0777 -i -pe 's/\n\z//' "$OUTPUT_FILE"
   fi

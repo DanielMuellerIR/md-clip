@@ -17,9 +17,15 @@ results['startup_version'],_=measure(['bash','bin/md-clip','--version'],b'')
 for name,data in cases.items():
     result={'bytes':len(data)}
     result['pipeline'],_=measure(['bash','-c',setup+('convert_rtf' if name=='word' else 'convert_html')],data)
-    stages=['rtf_to_html','flatten_layout_tables','unwrap_list_paragraphs'] if name=='word' else ['preprocess_claude_desktop','preprocess_google_classroom']
-    if 'inline_table_cells()' in (root/'lib/pipeline.sh').read_text(): stages+=['inline_table_cells']
-    stages+=['run_pandoc','tidy_markdown','require_nonempty_markdown']
+    pipeline = (root/'lib/pipeline.sh').read_text()
+    if 'preprocess_rtf_html()' in pipeline:
+        stages = ['rtf_to_html', 'preprocess_rtf_html'] if name == 'word' else ['preprocess_html']
+        stages += ['run_pandoc', 'tidy_markdown gfm --require-visible']
+    else:
+        stages = ['rtf_to_html', 'flatten_layout_tables', 'unwrap_list_paragraphs'] if name == 'word' else ['preprocess_claude_desktop', 'preprocess_google_classroom']
+        if 'inline_table_cells()' in pipeline:
+            stages += ['inline_table_cells']
+        stages += ['run_pandoc', 'tidy_markdown', 'require_nonempty_markdown']
     result['stages']={}
     for stage in stages: result['stages'][stage],data=measure(['bash','-c',setup+stage],data)
     results['cases'][name]=result

@@ -10,11 +10,7 @@ source "$TESTS_DIR/lib/test-helpers.sh"
 init_test_environment "$TESTS_DIR"
 
 mkdir -p "$TEST_ROOT/runtime" "$TEST_ROOT/fake-bin"
-cp "$PROJECT_ROOT/bin/md-clip" "$TEST_ROOT/runtime/md-clip"
-cp "$PROJECT_ROOT/lib/pipeline.sh" "$TEST_ROOT/runtime/pipeline.sh"
-cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$TEST_ROOT/runtime/tidy-markdown.pl"
-cp "$PROJECT_ROOT/lib/tables.lua" "$TEST_ROOT/runtime/tables.lua"
-cp "$PROJECT_ROOT/lib/preprocess-html.pl" "$TEST_ROOT/runtime/preprocess-html.pl"
+stage_runtime "$PROJECT_ROOT" "$TEST_ROOT/runtime"
 
 cat > "$TEST_ROOT/runtime/clipboard-undo" <<'SH'
 #!/bin/sh

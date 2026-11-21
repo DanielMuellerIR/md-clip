@@ -24,15 +24,6 @@ source "$SCRIPT_DIR/lib/pipeline.sh"
 # Pfade im Projekt.
 MAIN_SCRIPT="bin/md-clip"
 
-# Swift-Helper als (Source, Binary)-Paare. Die Schleife unten
-# kompiliert jedes Paar, falls die Source neuer ist als das Binary.
-HELPERS=(
-  "helpers/clipboard-html.swift:helpers/clipboard-html"
-  "helpers/clipboard-rtf.swift:helpers/clipboard-rtf"
-  "helpers/clipboard-undo.swift:helpers/clipboard-undo"
-  "helpers/md-clip-preview.swift:helpers/md-clip-preview"
-)
-
 # --- Plattform erkennen (spiegelt bin/md-clip) ---
 case "$(uname -s)" in
   Darwin) PLATFORM="macos" ;;
@@ -119,8 +110,8 @@ if [ "$PLATFORM" = "linux" ]; then
   # auch hier die Produkt-Weiche; DISPLAY wäre unter Wayland durch XWayland
   # häufig ebenfalls gesetzt und würde die falsche Abhängigkeit verlangen.
   if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    if ! command -v wl-paste >/dev/null 2>&1 || ! command -v wl-copy >/dev/null 2>&1; then
-      missing+=("wl-clipboard (Wayland-Sitzung; wl-paste + wl-copy)")
+    if ! command -v wl-paste >/dev/null 2>&1; then
+      missing+=("wl-clipboard (Wayland-Sitzung; wl-paste)")
     fi
   else
     command -v xclip >/dev/null 2>&1 || missing+=("xclip (X11-Sitzung)")
@@ -167,22 +158,23 @@ if [ "$PLATFORM" = "macos" ]; then
   # swiftc kommt mit den Xcode CommandLineTools (xcode-select --install).
   # Wenn kein swiftc da ist, geben wir einen klaren Hinweis.
   if ! command -v swiftc >/dev/null 2>&1; then
-    echo "FEHLER: swiftc nicht gefunden."
+    echo "FEHLER: swiftc nicht gefunden. Der macOS-Build benötigt Swift 6."
     echo "       Installation: xcode-select --install"
     exit 2
   fi
 
-  # Alle Helper durchgehen. Format pro Eintrag: "source:binary".
-  # `[ A -nt B ]` testet: ist A neuer als B?
-  for entry in "${HELPERS[@]}"; do
-    src="${entry%%:*}"   # alles vor dem Doppelpunkt
-    bin="${entry##*:}"   # alles nach dem Doppelpunkt
-    if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
-      echo "==> Kompiliere $src → $bin"
-      swiftc "$src" -o "$bin"
-      chmod +x "$bin"
+  # shellcheck source=wrappers/macos-helpers.sh
+  source "$SCRIPT_DIR/wrappers/macos-helpers.sh"
+  target=$(uname -m)
+  for helper in clipboard-html clipboard-rtf clipboard-undo md-clip-preview; do
+    binary="helpers/$helper"
+    if [ ! -x "$binary" ] || [ "helpers/$helper.swift" -nt "$binary" ] ||
+      [ "helpers/$helper-main.swift" -nt "$binary" ] || [ wrappers/macos-helpers.sh -nt "$binary" ]; then
+      echo "==> Kompiliere $helper"
+      compile_macos_helper "$helper" "$binary" "$target"
+      chmod +x "$binary"
     else
-      echo "✓ Helper-Binary ist aktuell: $bin"
+      echo "✓ Helper-Binary ist aktuell: $binary"
     fi
   done
 else
@@ -209,7 +201,7 @@ if [ ! -d "$INSTALL_PREFIX" ]; then
       echo "FEHLER: Verzeichnis existiert nicht: $INSTALL_PREFIX"
       echo "       Vorher gezielt anlegen, zum Beispiel:"
       echo "         sudo mkdir -p \"$INSTALL_PREFIX\""
-      echo "       oder INSTALL_PREFIX auf ein Verzeichnis in deinem Home setzen."
+      echo "       oder INSTALL_PREFIX auf ein Verzeichnis im Benutzerordner setzen."
       exit 2
       ;;
   esac
@@ -261,10 +253,4 @@ esac
 
 echo
 echo "Fertig. Test:"
-if [ "$PLATFORM" = "macos" ]; then
-  echo "  echo '<p>Hallo <b>Welt</b></p>' | pbcopy && md-clip"
-elif [ -n "${WAYLAND_DISPLAY:-}" ]; then
-  echo "  echo '<p>Hallo <b>Welt</b></p>' | wl-copy --type text/html && md-clip"
-else
-  echo "  echo '<p>Hallo <b>Welt</b></p>' | xclip -selection clipboard -t text/html && md-clip"
-fi
+echo "  printf '%s\\n' '<p>Hallo <b>Welt</b></p>' | md-clip --stdin --from html"

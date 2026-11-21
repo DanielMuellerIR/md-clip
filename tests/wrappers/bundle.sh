@@ -143,9 +143,13 @@ for executable in \
   "$XPC_TEST_APP/Contents/MacOS/md-clip-preview" \
   "$XPC_TEST_APP/Contents/Resources/bin/md-clip" \
   "$XPC_TEST_APP/Contents/Resources/bin/pipeline.sh" \
+  "$XPC_TEST_APP/Contents/Resources/bin/platform.sh" \
+  "$XPC_TEST_APP/Contents/Resources/bin/doctor.sh" \
+  "$XPC_TEST_APP/Contents/Resources/bin/conversion-report.sh" \
   "$XPC_TEST_APP/Contents/Resources/bin/tidy-markdown.pl" \
-  "$XPC_TEST_APP/Contents/Resources/bin/tables.lua" \
+  "$XPC_TEST_APP/Contents/Resources/bin/pandoc-filter.lua" \
   "$XPC_TEST_APP/Contents/Resources/bin/preprocess-html.pl" \
+  "$XPC_TEST_APP/Contents/Resources/bin/conversion-support.pl" \
   "$XPC_TEST_APP/Contents/Resources/bin/pandoc" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-html" \
   "$XPC_TEST_APP/Contents/Resources/bin/clipboard-rtf" \
@@ -155,13 +159,13 @@ for executable in \
   chmod +x "$executable"
 done
 printf 'icon\n' > "$XPC_TEST_APP/Contents/Resources/md-clip.icns"
-for resource in tidy-markdown.pl tables.lua preprocess-html.pl; do
+for resource in pipeline.sh platform.sh doctor.sh conversion-report.sh tidy-markdown.pl pandoc-filter.lua preprocess-html.pl conversion-support.pl; do
   printf 'resource\n' > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
 done
 for license in pandoc-COPYRIGHT.txt Sparkle-LICENSE.txt README.txt; do
   printf 'Lizenz\n' > "$XPC_TEST_APP/Contents/Resources/Licenses/$license"
 done
-for resource in tidy-markdown.pl tables.lua preprocess-html.pl; do
+for resource in pipeline.sh platform.sh doctor.sh conversion-report.sh tidy-markdown.pl pandoc-filter.lua preprocess-html.pl conversion-support.pl; do
   : > "$XPC_TEST_APP/Contents/Resources/bin/$resource"
   if bash "$VERIFY_BUNDLE" "$XPC_TEST_APP" > "$TEST_ROOT/resource.out" 2> "$TEST_ROOT/resource.err"; then
     echo "Leere Pipeline-Ressource akzeptiert: $resource" >&2; exit 1
@@ -224,10 +228,9 @@ chmod +x "$TRUST_TEST_ROOT/fake-bin/vtool"
 PATH="$TRUST_TEST_ROOT/fake-bin:$PATH"
 export PATH
 
-COMPATIBILITY_CHECK="$TEST_ROOT/macos-compatibility-check.sh"
-extract_shell_block "$VERIFY_BUNDLE" MACOS_COMPATIBILITY_CHECK "$COMPATIBILITY_CHECK"
-# shellcheck source=/dev/null
-source "$COMPATIBILITY_CHECK"
+# shellcheck source=../../wrappers/verify-macos-compatibility.sh
+source "$PROJECT_ROOT/wrappers/verify-macos-compatibility.sh"
+verify_all_macos_compatibility "$MINIMUM_SYSTEM_VERSION"
 
 EXPECTED_VTOOL_TARGETS="$TRUST_TEST_ROOT/expected-vtool-targets"
 printf '%s\n' \
@@ -266,10 +269,8 @@ echo "✓ Bundle-Kompatibilität deckt Info.plist und alle Mach-O-Ziele"
 
 # --- Lokaler Build: nur die gerade gebaute, bytegleiche CLI ausführen. ---
 BUILD_SCRIPT="$PROJECT_ROOT/build.sh"
-BUILD_CLI_SMOKE="$TEST_ROOT/build-cli-smoke.sh"
-extract_shell_block "$BUILD_SCRIPT" TRUSTED_BUILD_CLI_SMOKE "$BUILD_CLI_SMOKE"
-# shellcheck source=/dev/null
-source "$BUILD_CLI_SMOKE"
+# shellcheck source=../../wrappers/verify-built-cli.sh
+source "$PROJECT_ROOT/wrappers/verify-built-cli.sh"
 
 SMOKE_SOURCE="$TEST_ROOT/smoke-source"
 SMOKE_BUNDLE="$TEST_ROOT/smoke-bundle"
@@ -310,7 +311,8 @@ mkdir -p "$ICON_PROJECT/wrappers" "$ICON_PROJECT/bin" "$ICON_PROJECT/assets" \
   "$ICON_PROJECT/build/md-clip.app" "$ICON_PROJECT/fake-bin"
 cp "$PROJECT_ROOT/wrappers/build-app-bundled.sh" \
   "$PROJECT_ROOT/wrappers/version.sh" "$PROJECT_ROOT/wrappers/verified-cache.sh" \
-  "$PROJECT_ROOT/wrappers/pandoc-pin.sh" \
+  "$PROJECT_ROOT/wrappers/pandoc-pin.sh" "$PROJECT_ROOT/wrappers/app-icon.sh" \
+  "$PROJECT_ROOT/wrappers/macos-helpers.sh" \
   "$ICON_PROJECT/wrappers/"
 cp "$PROJECT_ROOT/bin/md-clip" "$ICON_PROJECT/bin/"
 printf 'alter Build\n' > "$ICON_PROJECT/build/md-clip.app/keep"
@@ -355,12 +357,12 @@ set -e
 [ -s "$MD_CLIP_ICON_SIDE_EFFECT" ]
 echo "✓ App-Build verlangt ein lesbares, nicht leeres Icon vor Nebenwirkungen"
 
-ICON_COPY="$TEST_ROOT/icon-copy.sh"
-extract_shell_block "$PROJECT_ROOT/wrappers/build-app-bundled.sh" APP_ICON_COPY "$ICON_COPY"
+# shellcheck source=../../wrappers/app-icon.sh
+source "$PROJECT_ROOT/wrappers/app-icon.sh"
 ICNS_SOURCE="$PROJECT_ROOT/assets/md-clip.icns"
 APP_BUNDLE="$TEST_ROOT/icon-copy.app"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
-source "$ICON_COPY"
+copy_app_icon "$ICNS_SOURCE" "$APP_BUNDLE"
 cmp "$ICNS_SOURCE" "$APP_BUNDLE/Contents/Resources/md-clip.icns"
 echo "✓ App-Build kopiert das vorhandene Icon bytegenau"
 

@@ -87,8 +87,9 @@ HTML
 
 Der zweite Listenpunkt enthält einen Codeblock. Die beiden Zeilen behalten zwei
 beziehungsweise vier führende Leerzeichen sowie die Backslashes. Eine Sprache
-wird nicht hinzugefügt. Je nach Zielformat können Backtick- oder Tilde-Zäune
-entstehen; das ändert den Codeinhalt nicht. Reine `pre`-Blöcke dürfen Text, Spans
+wird nicht hinzugefügt. Je nach Zielformat und pandoc-Version kann die Ausgabe
+den Block einrücken oder Backtick- bzw. Tilde-Zäune verwenden. Der Codeinhalt
+bleibt dabei erhalten. Reine `pre`-Blöcke dürfen Text, Spans
 und `br` enthalten. Links, Bilder, andere Rich-Inhalte sowie unvollständige oder
 verschachtelte `pre`-Blöcke sind von dieser Code-Reparatur ausgenommen.
 

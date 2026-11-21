@@ -1,10 +1,6 @@
-# Veroeffentlicht nach dem unprivilegierten Release-Dispatcher den signierten
-# Sparkle-Feed (appcast.xml) ueber GitHub Pages. workflow_run laedt diese Datei
-# aus dem Default-Branch, nicht aus dem Release-Tag.
-#
-# Der Release-Tag ist absichtlich nur Datenquelle. Downloader, Sparkle-Pins und
-# Generator kommen aus einem fest eingetragenen Tooling-SHA; Shell-Code daraus
-# wird nie mit dem privaten Sparkle-Schluessel zusammen ausgefuehrt.
+# Veröffentlicht den signierten Sparkle-Feed mit dem Workflow des Default-Branches.
+# Release-Dateien sind Daten. Der Signierschritt führt ausschließlich
+# Workflow-Code, geprüftes gepinntes Tooling und den Sparkle-Generator aus.
 name: Publish Sparkle appcast
 
 on:
@@ -30,8 +26,8 @@ concurrency:
 jobs:
   appcast:
     # workflow_run kommt aus dem Default-Branch. Ein manueller Lauf ist nur
-    # dort erlaubt, damit ein Tag keine veraenderte Workflow-Datei samt Secret
-    # ausfuehren kann.
+    # dort erlaubt, damit ein Tag keine veränderte Workflow-Datei samt Secret
+    # ausführen kann.
     if: >-
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch)
@@ -44,79 +40,35 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
+      # Alle fremden Actions sind unveränderlich an Commit-SHAs gebunden.
+      # Dieser SHA ist absichtlich ein Literal statt einer Environment-Variable:
+      # GITHUB_ENV kann ihn dadurch nicht überschreiben.
+      - name: Check out trusted appcast tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 92bbe437f0a45e38f132614436c58d65ff014717
+          path: tooling
+          persist-credentials: false
+
       - name: Select current stable release
         shell: bash
         env:
           REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          # BEGIN RELEASE_TAG_SELECTOR
-          validate_release_tag() {
-            local candidate="$1"
-            case "$candidate" in
-              *$'\n'*|*$'\r'*)
-                echo "FEHLER: Release-Tag muss genau eine Zeile enthalten." >&2
-                return 64
-                ;;
-            esac
-            if [[ ! "$candidate" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-              echo "FEHLER: Ungueltiges stabiles Release-Tag: '$candidate'." >&2
-              return 64
-            fi
-          }
-
-          select_release_tag() {
-            local requested_tag="$1"
-            local latest_tag
-
-            case "$GITHUB_EVENT_NAME" in
-              workflow_dispatch)
-                # Manuelle Eingaben werden validiert, aber niemals selbst an
-                # spaetere Schritte weitergereicht.
-                validate_release_tag "$requested_tag" || return $?
-                ;;
-              workflow_run)
-                if [[ -n "$requested_tag" ]]; then
-                  echo "FEHLER: Automatischer Lauf erhielt unerwartet eine Tag-Eingabe." >&2
-                  return 64
-                fi
-                ;;
-              *)
-                echo "FEHLER: Unerwarteter Workflow-Ausloeser: $GITHUB_EVENT_NAME" >&2
-                return 64
-                ;;
-            esac
-
-            latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" || return $?
-            validate_release_tag "$latest_tag" || return $?
-            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$requested_tag" != "$latest_tag" ]]; then
-              echo "FEHLER: $requested_tag ist nicht das aktuelle stabile Release ($latest_tag)." >&2
-              return 1
-            fi
-
-            # Erst nach allen Prüfungen schreiben, und ausschließlich den von
-            # der API ermittelten Wert — nie die manuelle Eingabe.
-            printf '%s\n' "RELEASE_TAG=$latest_tag" >> "$GITHUB_ENV"
-          }
-          # END RELEASE_TAG_SELECTOR
+          if [[ "$(git -C tooling rev-parse HEAD)" != "92bbe437f0a45e38f132614436c58d65ff014717" ]]; then
+            echo "FEHLER: Tooling-Checkout entspricht nicht dem freigegebenen Commit." >&2
+            exit 1
+          fi
+          source tooling/wrappers/appcast.sh
 
           select_release_tag "${REQUESTED_TAG:-}"
           # runner.temp ist erst innerhalb eines laufenden Schritts verfügbar,
           # nicht beim Auflösen des jobweiten env-Blocks.
           printf '%s\n' "APPCAST_WORK=$RUNNER_TEMP/md-clip-appcast" >> "$GITHUB_ENV"
 
-      # Alle fremden Actions sind unveraenderlich an Commit-SHAs gebunden.
-      # Dieser SHA ist absichtlich ein Literal statt einer Environment-Variable:
-      # GITHUB_ENV kann ihn dadurch nicht ueberschreiben.
-      - name: Check out trusted appcast tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: 9eaffab05a3984ac5f01d0a3fa331a3f84304248
-          path: tooling
-          persist-credentials: false
-
       # Der Tag liegt in einem getrennten Verzeichnis und liefert nur
-      # bin/md-clip als Versionsquelle. Kein Skript daraus wird ausgefuehrt.
+      # bin/md-clip als Versionsquelle. Kein Skript daraus wird ausgeführt.
       - name: Check out release data
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -128,10 +80,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$(git -C tooling rev-parse HEAD)" != "9eaffab05a3984ac5f01d0a3fa331a3f84304248" ]]; then
-            echo "FEHLER: Tooling-Checkout entspricht nicht dem freigegebenen Commit." >&2
-            exit 1
-          fi
           tag_commit="$(git -C release-source rev-parse "$RELEASE_TAG^{commit}")"
           if [[ "$(git -C release-source rev-parse HEAD)" != "$tag_commit" ]]; then
             echo "FEHLER: Release-Checkout entspricht nicht $RELEASE_TAG." >&2
@@ -142,8 +90,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Der Feed traegt genau einen Eintrag und wird bei jedem Lauf komplett
-          # ersetzt. Ein Prerelease oder aelteres Tag wuerde den stabilen Feed
+          # Der Feed trägt genau einen Eintrag und wird bei jedem Lauf komplett
+          # ersetzt. Ein Prerelease oder älteres Tag würde den stabilen Feed
           # deshalb unbrauchbar machen.
           release_state="$(gh release view "$RELEASE_TAG" \
             -R "$GITHUB_REPOSITORY" \
@@ -153,11 +101,11 @@ jobs:
           latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
 
           if [[ "$prerelease" != "false" || "$draft" != "false" ]]; then
-            echo "FEHLER: $RELEASE_TAG ist ein Prerelease oder Entwurf und gehoert nicht in den stabilen Feed." >&2
+            echo "FEHLER: $RELEASE_TAG ist ein Prerelease oder Entwurf und gehört nicht in den stabilen Feed." >&2
             exit 1
           fi
           if [[ "$latest_tag" != "$RELEASE_TAG" ]]; then
-            echo "FEHLER: $RELEASE_TAG ist nicht das aktuelle stabile Release ($latest_tag); der Feed wuerde zurueckfallen." >&2
+            echo "FEHLER: $RELEASE_TAG ist nicht das aktuelle stabile Release ($latest_tag); der Feed würde zurückfallen." >&2
             exit 1
           fi
 
@@ -179,16 +127,8 @@ jobs:
             exit 1
           fi
 
-          # Tag, DMG-Name und Produktquelle muessen dieselbe Version meinen.
-          # Die Datei aus dem Tag wird nur gelesen, nie gesourct oder gestartet.
-          #
-          # Bewusst dieselbe awk-Grammatik wie md_clip_version in
-          # wrappers/version.sh, aber ausgeschrieben: Die Funktion kaeme aus der
-          # fest gepinnten Tooling-Revision, und ein Pin ist aelter als jede neue
-          # Datei darin — ein `source tooling/wrappers/version.sh` scheiterte hier
-          # mit "No such file or directory" (belegt 2026-09-03). Der Pin bleibt
-          # unangetastet; dafuer haelt tests/test-wrapper-safety.sh fest, dass
-          # hier genau dieselbe Grammatik steht.
+          # Release-Tag, Bundle-Dateiname und Quellversion müssen übereinstimmen.
+          # Die Version wird direkt aus der Release-Datei gelesen.
           version="${RELEASE_TAG#v}"
           product_version="$(awk -F'"' '/^VERSION=/{print $2; exit}' release-source/bin/md-clip)"
           if [[ "$product_version" != "$version" ]]; then
@@ -196,7 +136,7 @@ jobs:
             exit 1
           fi
           if [[ "$(basename "${dmgs[0]}")" != "md-clip-${version}.dmg" ]]; then
-            echo "FEHLER: DMG heisst $(basename "${dmgs[0]}"), erwartet war md-clip-${version}.dmg." >&2
+            echo "FEHLER: DMG heißt $(basename "${dmgs[0]}"), erwartet war md-clip-${version}.dmg." >&2
             exit 1
           fi
 
@@ -207,7 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Downloader und Pins kommen ausschliesslich aus dem festen Tooling-SHA.
+          # Downloader und Pins kommen ausschließlich aus dem festen Tooling-SHA.
           # Das Ziel liegt ausserhalb beider Checkouts in einem Runner-Tempordner.
           SPARKLE_VERSION="$(grep '^SPARKLE_VERSION=' tooling/wrappers/build-app-bundled.sh | cut -d'"' -f2)"
           SPARKLE_TAR_SHA256="$(grep '^SPARKLE_TAR_SHA256=' tooling/wrappers/build-app-bundled.sh | cut -d'"' -f2)"
@@ -242,32 +182,13 @@ jobs:
             exit 1
           fi
 
-          # Dieselbe Grammatik wie im Schritt "Download release data"; die
-          # Begruendung, warum hier nicht die Funktion steht, ist dort notiert.
           version="${RELEASE_TAG#v}"
           product_version="$(awk -F'"' '/^VERSION=/{print $2; exit}' release-source/bin/md-clip)"
           expected_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/md-clip-${version}.dmg"
 
-          # BEGIN APPCAST_GENERATOR_RUNNER
-          run_appcast_generator() {
-            local generator_output
-            # Command-Substitution wartet auf die gesamte Pipeline und erfasst
-            # stdout und stderr gemeinsam. Sparkle schreibt auch sicherheits-
-            # relevante Warnungen auf stdout; eine asynchrone Prozess-
-            # substitution koennte beim anschliessenden grep noch leer sein.
-            if ! generator_output="$(printf '%s' "$sparkle_private_key" | "$@" 2>&1)"; then
-              printf '%s\n' "$generator_output" >&2
-              return 1
-            fi
-            printf '%s\n' "$generator_output" >&2
-            if grep -Fq 'does not match key EdDSA' <<<"$generator_output"; then
-              echo "FEHLER: SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel der App." >&2
-              return 1
-            fi
-          }
-          # END APPCAST_GENERATOR_RUNNER
+          source tooling/wrappers/appcast.sh
 
-          # Der Schluessel steht weder in argv noch in einer Datei oder im Log.
+          # Der Schlüssel steht weder in argv noch in einer Datei oder im Log.
           run_appcast_generator \
             "$APPCAST_WORK/sparkle-dist/bin/generate_appcast" \
               --ed-key-file - \
@@ -280,44 +201,6 @@ jobs:
               "$APPCAST_WORK/update"
           unset sparkle_private_key
 
-          # BEGIN APPCAST_METADATA_VALIDATOR
-          validate_appcast() {
-            local appcast_file="$1"
-            local expected_version="$2"
-            local expected_short_version="$3"
-            local expected_enclosure_url="$4"
-            local item_xpath='/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"]'
-            local enclosure_xpath="${item_xpath}/*[local-name()=\"enclosure\"]"
-            local version_xpath="${item_xpath}/*[local-name()=\"version\"]"
-            local short_version_xpath="${item_xpath}/*[local-name()=\"shortVersionString\"]"
-            local item_count enclosure_count feed_version feed_short_version feed_url feed_signature
-
-            xmllint --noout "$appcast_file"
-            item_count="$(xmllint --xpath "count(${item_xpath})" "$appcast_file")"
-            enclosure_count="$(xmllint --xpath "count(${enclosure_xpath})" "$appcast_file")"
-            feed_version="$(xmllint --xpath "string(${version_xpath})" "$appcast_file")"
-            feed_short_version="$(xmllint --xpath "string(${short_version_xpath})" "$appcast_file")"
-            feed_url="$(xmllint --xpath "string(${enclosure_xpath}/@url)" "$appcast_file")"
-            feed_signature="$(xmllint --xpath "string(${enclosure_xpath}/@*[local-name()=\"edSignature\"])" "$appcast_file")"
-
-            if [[ "$item_count" != "1" || "$enclosure_count" != "1" ]]; then
-              echo "FEHLER: Appcast braucht genau einen Eintrag mit genau einem Enclosure (gefunden: $item_count/$enclosure_count)." >&2
-              return 1
-            fi
-            if [[ "$feed_version" != "$expected_version" || "$feed_short_version" != "$expected_short_version" ]]; then
-              echo "FEHLER: Appcast-Versionen '$feed_version'/'$feed_short_version' passen nicht zu $expected_version." >&2
-              return 1
-            fi
-            if [[ "$feed_url" != "$expected_enclosure_url" ]]; then
-              echo "FEHLER: Appcast-URL '$feed_url' passt nicht zu '$expected_enclosure_url'." >&2
-              return 1
-            fi
-            if [[ -z "$feed_signature" ]]; then
-              echo "FEHLER: Appcast-Enclosure hat keine Sparkle-EdDSA-Signatur." >&2
-              return 1
-            fi
-          }
-          # END APPCAST_METADATA_VALIDATOR
 
           validate_appcast \
             "$APPCAST_WORK/site/appcast.xml" \
@@ -396,7 +279,7 @@ jobs:
 
       # Derselbe Pfad wie APPCAST_WORK, aber bewusst noch einmal ausgeschrieben:
       # `runner.temp` gibt es hier, `env.APPCAST_WORK` waere erst zur Laufzeit
-      # des Schritts belegt und liesse sich hier nicht nachpruefen. Dass beide
+      # des Schritts belegt und ließe sich hier nicht nachprüfen. Dass beide
       # Schreibweisen zusammenpassen, haelt tests/test-wrapper-safety.sh fest.
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5

@@ -14,7 +14,6 @@ OUT_DIR = Path(__file__).parent
 SIZE = 1024
 RADIUS = 224
 
-# Farb-Palette — angelehnt an die Beispiel-Vorlage des Nutzers.
 TOP_BLUE = (89, 196, 230, 255)        # heller, lichter Blauton oben
 BOTTOM_BLUE = (48, 130, 192, 255)     # tieferes Blau unten
 SHADOW_BLUE = (32, 95, 145, 255)      # noch dunkler für Tiefen

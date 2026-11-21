@@ -132,9 +132,7 @@ assert_linux_dependency_missing() {
 
 assert_linux_dependency_missing x11 "" 'xclip (X11-Sitzung)' wl-paste wl-copy
 assert_linux_dependency_missing wayland-paste wayland-test \
-  'wl-clipboard (Wayland-Sitzung; wl-paste + wl-copy)' xclip wl-copy
-assert_linux_dependency_missing wayland-copy wayland-test \
-  'wl-clipboard (Wayland-Sitzung; wl-paste + wl-copy)' xclip wl-paste
+  'wl-clipboard (Wayland-Sitzung; wl-paste)' xclip wl-copy
 
 assert_linux_backend_succeeds() {
   local name="$1"
@@ -155,7 +153,7 @@ assert_linux_backend_succeeds() {
 }
 
 assert_linux_backend_succeeds X11 "" xclip
-assert_linux_backend_succeeds Wayland wayland-test wl-paste wl-copy
+assert_linux_backend_succeeds Wayland wayland-test wl-paste
 
 # Fehlende Präfixe: innerhalb von HOME anlegen, außerhalb fail-closed und
 # mit einem konkreten vorbereitenden Befehl erklären.

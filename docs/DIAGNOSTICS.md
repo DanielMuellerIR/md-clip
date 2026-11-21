@@ -26,8 +26,10 @@ Größenlimits oder die spätere Stabilität eines Clipboard-Eigentümers.
 - `session`: `status` ist `ready`, `unavailable`, `unsupported` oder `unverified`;
   `code` ist `ok` oder eine feste Diagnosekennung. Fehlende Bibliotheken/Helfer
   verhindern eine Prüfung und ergeben `unverified`.
-- `clipboard_tools`: Verfügbarkeit des Lesewerkzeugs bzw. Schreibwerkzeugs des
-  gewählten Backends. Dies prüft unabhängig von der Sitzungsverbindung.
+- `clipboard_tools`: `read` bezeichnet das Lesewerkzeug des gewählten Backends.
+  `write` bezeichnet den nativen Undo-Helfer mit seinen Laufzeitabhängigkeiten.
+  Die Sitzungsprüfung steht separat in `session`. Die Einträge für frühere
+  Schreibwerkzeuge bleiben im Werkzeug-Inventar erhalten.
 - `capabilities`: `plain_input`, `html_conversion`, `rtf_conversion`,
   `clipboard_read` und `clipboard_replace`. Die Konvertierung berücksichtigt
   Perl, Sandbox und den gemeinsamen Lua-Filter; RTF verwendet unter macOS
@@ -35,8 +37,8 @@ Größenlimits oder die spätere Stabilität eines Clipboard-Eigentümers.
 - `clipboard_read` ist `null`, wenn Werkzeuge vorhanden sind, die Sitzung aber
   nicht ausreichend geprüft werden konnte. Ein fehlendes XFixes oder ungeeignetes
   Data-Control blockiert Undo, beweist jedoch nicht, dass ein anderes Lesewerkzeug
-  ebenfalls scheitern muss. `clipboard_replace` benötigt ein Schreibwerkzeug und
-  einen bereiten Undo-Helfer.
+  ebenfalls scheitern muss. `clipboard_replace` meldet einen bereiten nativen Undo-Helfer.
+  Ein externes Clipboard-Programm ist dafür nicht erforderlich.
 - `native_preview`: nativer Vorschau-Helfer vorhanden und Statusabfrage
   ausführbar. Die grafische Sitzungsbereitschaft steht weiterhin getrennt in
   `session`; die Angabe startet kein Fenster.
@@ -58,7 +60,7 @@ keine Dokumenttitel, URLs, Clipboard-Texte oder Sitzungsinhalte ausgegeben.
 | `table-filter-unavailable` | Synthetische Filterprüfung scheitert; Perl, lib-Ressourcen und pandoc prüfen |
 | `perl-missing`, `textutil-missing` | Werkzeug des Rich-Text-Wegs fehlt |
 | `html-helper-missing`, `rtf-helper-missing` | macOS-Lesehelfer fehlt; install.sh oder vollständige App verwenden |
-| `clipboard-read-tool-missing`, `clipboard-write-tool-missing` | Werkzeug des gewählten Backends fehlt; xclip bzw. wl-clipboard installieren |
+| `clipboard-read-tool-missing` | Werkzeug des gewählten Backends fehlt; xclip bzw. wl-clipboard installieren |
 | `preview-status-unavailable` | Vorschau-Helfer vorhanden, aber Undo-Status nicht prüfbar; Helfer aktualisieren oder ältere laufende Sicherung zuerst zurücknehmen/ablaufen lassen |
 | `undo-helper-missing`, `undo-helper-failed` | Helfer fehlt, startet nicht oder liefert eine ungültige Diagnose |
 | `python-missing`, `python-unsupported` | Linux-Helfer benötigt Python 3.8 oder neuer |

@@ -10,11 +10,13 @@ var environment = ProcessInfo.processInfo.environment
 environment["MD_CLIP_TEST_PASTEBOARD"] = board.name.rawValue
 environment["MD_CLIP_TEST_DIRECTORY"] = root + "/service"
 let service = environment["MD_CLIP_TEST_DIRECTORY"]!
+let replyGate = root + "/reply-gate"
+environment["MD_CLIP_TEST_REPLY_GATE"] = replyGate
 struct Result { let status: Int32; let output: String; let error: String }
 func launch(_ arguments: [String], _ input: Data? = nil) -> (Process, Pipe, Pipe) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: helper)
-    process.arguments = arguments
+    process.arguments = arguments == ["--worker"] ? arguments + [String(getpid())] : arguments
     process.environment = environment
     let output = Pipe(), error = Pipe()
     process.standardOutput = output
@@ -95,7 +97,7 @@ func pause(_ seconds: Double) {
     while Date() < until { _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
 }
 func stop() { _ = call(["stop"]) }
-func unreadRequest(_ request: [String: Any]) {
+func connectServiceSocket() -> Int32 {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     precondition(fd >= 0)
     var enabled: Int32 = 1, limit = timeval(tv_sec: 3, tv_usec: 0)
@@ -107,7 +109,13 @@ func unreadRequest(_ request: [String: Any]) {
     precondition(path.count <= MemoryLayout.size(ofValue: address.sun_path))
     withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
     precondition(withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } } == 0)
-    precondition(shutdown(fd, SHUT_RD) == 0)
+    return fd
+}
+func statusAfterUnreadReply(_ request: [String: Any], token: String? = nil) -> UndoStatus {
+    let files = FileManager.default
+    let acknowledged = replyGate + ".ready"
+    precondition(files.createFile(atPath: replyGate, contents: nil))
+    let fd = connectServiceSocket()
     let payload = try! JSONSerialization.data(withJSONObject: request), size = UInt32(payload.count)
     let bytes = Data([UInt8(size >> 24), UInt8((size >> 16) & 255), UInt8((size >> 8) & 255), UInt8(size & 255)]) + payload
     var offset = 0
@@ -115,10 +123,17 @@ func unreadRequest(_ request: [String: Any]) {
         let count = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress!.advanced(by: offset), bytes.count-offset) }
         precondition(count > 0); offset += count
     }
-    // Die vollständige Anfrage ist bereits gepuffert. Erst danach schließen,
-    // damit der Antwortfehler ohne Warten auf die vorhandene Frist sichtbar wird.
-    precondition(shutdown(fd, SHUT_WR) == 0)
-    close(fd)
+    // Erst nach verarbeitetem Request schließen, dann die Antwort freigeben.
+    // Auf Darwin kann der Dienst nach einem bloßen SHUT_RD weiter schreiben.
+    let deadline = Date().addingTimeInterval(10)
+    while !files.fileExists(atPath: acknowledged) && Date() < deadline {
+        pause(0.01)
+    }
+    precondition(files.fileExists(atPath: acknowledged), "Undo service did not reach the reply gate")
+    precondition(close(fd) == 0)
+    try! files.removeItem(atPath: acknowledged)
+    try! files.removeItem(atPath: replyGate)
+    return status(token)
 }
 defer { stop(); board.releaseGlobally() }
 expect(call(["available"]), 0, "available without clipboard reads")
@@ -156,8 +171,7 @@ print("PASS: 2 Items, HTML/RTF/Bild/custom/binär/leer bytegenau; Token und einm
 write(original); replace(prepare())
 do {
     let previous = readRaw(), count = board.changeCount
-    unreadRequest(["command":"prepare"])
-    precondition(status().undo_available)
+    precondition(statusAfterUnreadReply(["command":"prepare"]).undo_available)
     let next = prepare()
     unchanged(count, previous)
     expect(call(["cancel",next]),0,"cancel after failed prepare reply")
@@ -170,8 +184,7 @@ write(original); replace(prepare())
 do {
     let token = prepare(), previous = readRaw(), count = board.changeCount
     for request: [String: Any] in [["command":"prepare"], ["command":[]], ["command":"status","token":token]] {
-        unreadRequest(request)
-        let state = status(token)
+        let state = statusAfterUnreadReply(request, token: token)
         precondition(state.pending_valid && state.undo_available)
         unchanged(count, previous)
     }
@@ -184,9 +197,13 @@ print("PASS: nicht empfangene Busy-/Fehler-/Status-Antwort verwirft keinen gült
 write(original)
 do {
     let token = prepare()
-    unreadRequest(["command":"replace","token":token,"bytes":Data("replacement".utf8).base64EncodedString()])
-    let state = status(token)
-    precondition(state.undo_available && !state.pending_valid && board.string(forType:.string)=="replacement")
+    let replacement = Data("replacement".utf8)
+    let state = statusAfterUnreadReply(
+        ["command":"replace", "token":token, "bytes":replacement.base64EncodedString()], token: token)
+    precondition(state.undo_available, "Successful replace needs an undo entry")
+    precondition(!state.pending_valid, "Successful replace consumes the pending token")
+    precondition(readRaw().first?[NSPasteboard.PasteboardType.string.rawValue] == replacement,
+                 "Independent reader did not receive replacement")
     expect(call(["undo"]),0,"undo after unread successful replace")
     precondition(readRaw()==raw)
 }
@@ -292,48 +309,62 @@ let excessiveCount = board.changeCount, excessive = readRaw()
 expect(call(["prepare"]), 1, "129 formats")
 unchanged(excessiveCount, excessive)
 types.removeValue(forKey: "org.example.md-clip.type128")
+struct WorkerSnapshot: Codable {
+    struct Format: Codable, Equatable {
+        let type: String
+        let bytes: Data
+    }
+
+    let count: Int
+    var items: [[Format]]
+}
+
+struct WorkerReply: Decodable {
+    let status: Int
+    let snapshot: WorkerSnapshot?
+}
+
+struct RestoreRequest: Encodable {
+    let command = "restore"
+    let snapshot: WorkerSnapshot
+    let count: Int
+}
+
+func captureInOtherProcess() -> WorkerSnapshot {
+    let result = call(["--worker"], Data("{\"command\":\"capture\"}".utf8))
+    expect(result, 0, "independent capture process")
+    let reply = try! JSONDecoder().decode(WorkerReply.self, from: Data(result.output.utf8))
+    guard reply.status == 0, let snapshot = reply.snapshot else { fatalError("Clipboard capture failed") }
+    return snapshot
+}
+
+func restoreInOtherProcess(_ snapshot: WorkerSnapshot) -> Result {
+    let request = RestoreRequest(snapshot: snapshot, count: board.changeCount)
+    return call(["--worker"], try! JSONEncoder().encode(request))
+}
+
+write([types])
+let duplicateCount = board.changeCount
+var duplicated = captureInOtherProcess()
+duplicated.items[0].append(.init(type: duplicated.items[0][0].type, bytes: Data([255])))
+let duplicateResult = restoreInOtherProcess(duplicated)
+expect(duplicateResult, 0, "duplicate format worker response")
+let duplicateReply = try! JSONDecoder().decode(WorkerReply.self, from: Data(duplicateResult.output.utf8))
+precondition(duplicateReply.status == 1, "Worker accepted a duplicate format")
+unchanged(duplicateCount, [types])
+
 for _ in 0..<10 {
     write([types])
     let maximumTypes = readRaw()
-    // Im Grenzfall getrennt erfassen, was ein zweiter Prozess tatsächlich sieht.
-    let peerCapture = call(["--worker"], Data("{\"command\":\"capture\"}".utf8))
-    expect(peerCapture, 0, "independent capture process")
-    let peerReply = try! JSONSerialization.jsonObject(with: Data(peerCapture.output.utf8)) as! [String: Any]
-    let peerItems = (peerReply["snapshot"] as! [String: Any])["items"] as! [[Any]]
-    let peerCount = peerItems.reduce(0) { $0 + $1.count }
-    // Derselbe Snapshot direkt zurückgeschrieben trennt AppKit vom Undo-Dienst.
-    let peerSnapshot = peerReply["snapshot"] as! [String: Any]
-    let directRequest: [String: Any] = ["command": "restore", "snapshot": peerSnapshot, "count": board.changeCount]
-    let directResult = call(["--worker"], try! JSONSerialization.data(withJSONObject: directRequest))
-    expect(directResult, 0, "direct 128 format writer")
-    let directTypes = readRaw()
-    print("128 direct writer: source", peerCount, "restored", directTypes.first?.count ?? 0)
-    precondition(directTypes == maximumTypes, "Direct writer lost formats")
-    let directPeer = call(["--worker"], Data("{\"command\":\"capture\"}".utf8))
-    expect(directPeer, 0, "independent direct-write reader")
-    let directPeerReply = try! JSONSerialization.jsonObject(with: Data(directPeer.output.utf8)) as! [String: Any]
-    let directPeerItems = (directPeerReply["snapshot"] as! [String: Any])["items"] as! [[Any]]
-    let expectedPeerBytes = try! JSONSerialization.data(withJSONObject: peerItems, options: [.sortedKeys])
-    precondition(try! JSONSerialization.data(withJSONObject: directPeerItems, options: [.sortedKeys]) == expectedPeerBytes, "Direct writer changed independent format bytes")
+    let originalCapture = captureInOtherProcess()
+    expect(restoreInOtherProcess(originalCapture), 0, "direct 128 format writer")
+    precondition(readRaw() == maximumTypes, "Direct writer lost formats")
+    precondition(captureInOtherProcess().items == originalCapture.items, "Direct writer changed independent format bytes")
+
     replace(prepare())
     expect(call(["undo"]), 0, "128 formats exact limit")
-    let restoredTypes = readRaw()
-    let restoredPeer = call(["--worker"], Data("{\"command\":\"capture\"}".utf8))
-    expect(restoredPeer, 0, "independent Undo reader")
-    let restoredReply = try! JSONSerialization.jsonObject(with: Data(restoredPeer.output.utf8)) as! [String: Any]
-    let restoredSnapshot = restoredReply["snapshot"] as! [String: Any]
-    let restoredPeerItems = restoredSnapshot["items"] as! [[Any]]
-    let restoredPeerBytes = try! JSONSerialization.data(withJSONObject: restoredPeerItems, options: [.sortedKeys])
-    precondition(restoredPeerBytes == expectedPeerBytes, "Undo changed independent format bytes")
-    if restoredTypes != maximumTypes {
-        print("128 format mismatch: local source", maximumTypes.first?.count ?? 0,
-              "peer capture", peerCount, "restored", restoredTypes.first?.count ?? 0)
-        for key in Set(maximumTypes.first?.keys.map { $0 } ?? []).union(restoredTypes.first?.keys.map { $0 } ?? []) {
-            let before = maximumTypes.first?[key], after = restoredTypes.first?[key]
-            if before != after { print("Mismatch", key, before?.count ?? -1, after?.count ?? -1) }
-        }
-    }
-    precondition(restoredTypes == maximumTypes)
+    precondition(readRaw() == maximumTypes, "Undo lost formats")
+    precondition(captureInOtherProcess().items == originalCapture.items, "Undo changed independent format bytes")
 }
 write([["org.example.md-clip.large": Data(repeating: 255, count: 64 * 1024 * 1024 + 1)]])
 let largeCount = board.changeCount
@@ -398,8 +429,13 @@ precondition(directService.0.isRunning)
 write(original)
 replace(prepare())
 let signalCount = board.changeCount, signalRaw = readRaw()
+let stalled = connectServiceSocket()
+pause(0.15)
+let signalStarted = ProcessInfo.processInfo.systemUptime
 kill(directService.0.processIdentifier, SIGTERM)
 expect(finish(directService), 0, "daemon SIGTERM")
+close(stalled)
+precondition(ProcessInfo.processInfo.systemUptime - signalStarted < 3, "SIGTERM waited for the blocked socket read")
 unchanged(signalCount, signalRaw)
 expect(call(["undo"]), 1, "SIGTERM discarded RAM snapshot")
 precondition(!FileManager.default.fileExists(atPath: service + "/service.sock"))

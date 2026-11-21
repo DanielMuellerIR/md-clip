@@ -112,18 +112,13 @@ echo "✓ Launcher meldet ein Bundle ohne eingebettete CLI sichtbar"
 unset -f show_error_dialog
 
 # --- Updater: genau ein eindeutiger Modus. ---
-# Der Testmodus schließt AppKit und Sparkle beim Kompilieren aus, führt aber
-# denselben Swift-Parser aus wie das Bundle-Programm. Damit sind nicht nur die
-# Launcher-Argumente, sondern auch die Ablehnung mehrdeutiger Aufrufe dauerhaft
-# repositoryweit geprüft.
-UPDATER_MODE_SOURCE="$PROJECT_ROOT/helpers/md-clip-updater.swift"
+# Derselbe Argumentparser lässt sich ohne AppKit und Sparkle ausführen.
+UPDATER_MODE_SOURCE="$PROJECT_ROOT/helpers/md-clip-updater-mode.swift"
+UPDATER_MODE_TEST_SOURCE="$PROJECT_ROOT/tests/md-clip-updater-mode-test-main.swift"
 UPDATER_MODE_BINARY="$TEST_ROOT/md-clip-updater-mode-test"
 SWIFTC=$(PATH="$MD_CLIP_HOST_PATH" command -v swiftc || true)
-# Der Updater ist ein reiner macOS-Bestandteil (Sparkle, App-Bundle). Auf macOS
-# gehört swiftc mit den Xcode-Kommandozeilenwerkzeugen zur Grundausstattung —
-# fehlt er dort, ist das ein Fehler. Auf Linux gibt es weder Updater noch
-# Swift-Toolchain: dort wird der Block sichtbar übersprungen, statt die in der
-# README dokumentierte Testfolge scheitern zu lassen (Review-Fund 2026-08-17).
+# In der macOS-Matrix muss der Compiler verfügbar sein. Linux kann den
+# isolierten Parser-Test ausführen, wenn dort ein Swift-Compiler vorhanden ist.
 UPDATER_MODE_SKIPPED=0
 if [ -z "$SWIFTC" ]; then
   if [ "$(uname -s)" = "Darwin" ]; then
@@ -136,8 +131,8 @@ if [ -z "$SWIFTC" ]; then
 fi
 
 if [ "$UPDATER_MODE_SKIPPED" -eq 0 ]; then
-PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" -D MD_CLIP_UPDATER_MODE_TEST \
-  "$UPDATER_MODE_SOURCE" -o "$UPDATER_MODE_BINARY"
+PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" -warnings-as-errors \
+  "$UPDATER_MODE_SOURCE" "$UPDATER_MODE_TEST_SOURCE" -o "$UPDATER_MODE_BINARY"
 
 [ "$("$UPDATER_MODE_BINARY" --background)" = '--background' ]
 [ "$("$UPDATER_MODE_BINARY" --interactive)" = '--interactive' ]
@@ -183,7 +178,9 @@ fi   # Ende des swiftc-Blocks
 # und der Lauf scheiterte dort mit „no such module 'AppKit'" (2026-09-03).
 if [ "$(uname -s)" = "Darwin" ] && [ -n "$SWIFTC" ]; then
 HUD_BINARY="$TEST_ROOT/md-clip-hud-contract-test"
-PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" "$PROJECT_ROOT/helpers/md-clip-hud.swift" -o "$HUD_BINARY"
+PATH="$MD_CLIP_HOST_PATH" "$SWIFTC" -target "$(uname -m)-apple-macos14.0" \
+  -swift-version 6 -strict-concurrency=complete -warnings-as-errors \
+  "$PROJECT_ROOT/helpers/md-clip-hud.swift" -o "$HUD_BINARY"
 
 assert_hud_rejected() {
   local label="$1"
@@ -210,9 +207,10 @@ else
   echo "⚠ HUD-Vertragstest übersprungen: der Helfer ist AppKit-basiert und damit macOS-only." >&2
 fi
 
-grep -Fq 'private let maximumDialogLifetime: TimeInterval = 30 * 60' "$UPDATER_MODE_SOURCE"
-grep -Fq 'DispatchQueue.main.asyncAfter(' "$UPDATER_MODE_SOURCE"
-grep -Fq 'dialogDeadline?.cancel()' "$UPDATER_MODE_SOURCE"
+UPDATER_SOURCE="$PROJECT_ROOT/helpers/md-clip-updater.swift"
+grep -Fq 'private let maximumDialogLifetime: TimeInterval = 30 * 60' "$UPDATER_SOURCE"
+grep -Fq 'Task.sleep(for: .seconds(maximumDialogLifetime))' "$UPDATER_SOURCE"
+grep -Fq 'dialogDeadline?.cancel()' "$UPDATER_SOURCE"
 echo "✓ Updater beendet auch einen unbeantworteten Sparkle-Dialog nach 30 Minuten"
 
 # RFC-8032-Testvektor 1 signiert eine leere Datei. Damit prüft derselbe
@@ -240,14 +238,9 @@ else
 fi
 
 # --- Erfolgsmeldung: HUD-Helfer zuerst, osascript nur als Fallback. ---
-# Vertrag in bin/md-clip (Befunde 2026-08-06: osascript-Meldungen laufen
-# unter „Skripteditor", und die Erlaubnis-Mechanik des Notification Centers
-# verbrennt Bundle-IDs still, sobald eine Anfrage aus einem Automations-
-# kontext kam — deshalb ein eigenes Einblend-Fenster ohne Erlaubnis):
-# Innerhalb von notify() muss der HUD-Helfer VOR dem osascript-Aufruf
-# stehen, ENTKOPPELT starten (&) und direkt zurückkehren, damit weder
-# gewartet wird noch etwas in den osascript-Zweig durchfällt.
-MD_CLIP_SRC="$PROJECT_ROOT/bin/md-clip"
+# Der HUD-Start wartet weder auf die Animation noch ruft er zusätzlich den
+# Fallback für CLI-Installationen ohne HUD auf.
+MD_CLIP_SRC="$PROJECT_ROOT/lib/platform.sh"
 # `|| true`: Ein Nicht-Treffer soll unten die sprechende Fehlermeldung
 # auslösen, nicht das Skript über set -e wortlos beenden.
 HUD_CALL_LINE=$(grep -n '"\$hud" "\$1" >/dev/null 2>&1 &' "$MD_CLIP_SRC" | head -1 | cut -d: -f1 || true)

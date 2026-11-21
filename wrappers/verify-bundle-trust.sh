@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Reine Vertrauenspruefung fuer ein signiertes md-clip.app-Bundle.
-# Das Skript liest nur Metadaten und prueft Signaturen; Produktcode wird hier
+# Reine Vertrauensprüfung für ein signiertes md-clip.app-Bundle.
+# Das Skript liest nur Metadaten und prüft Signaturen; Produktcode wird hier
 # nie gestartet. Fuer isolierte Tests duerfen PlistBuddy und codesign durch
-# Attrappen als ausdrueckliche Funktionsargumente eingesetzt werden; der
+# Attrappen als ausdrückliche Funktionsargumente eingesetzt werden; der
 # normale Skriptaufruf akzeptiert keine Werkzeugpfade aus der Umgebung.
 
 set -euo pipefail
@@ -33,7 +33,7 @@ verify_signed_bundle_trust() {
   verify_bundle_identifier "$app" "$plistbuddy" || return
 
   # Apples Developer-ID-Kette, die erwartete Team-ID und die Bundle-ID werden
-  # gemeinsam als Designated Requirement geprueft. Ein gueltig signiertes
+  # gemeinsam als Designated Requirement geprüft. Ein gültig signiertes
   # Bundle eines anderen Developer-ID-Inhabers reicht damit nicht aus.
   requirement="anchor apple generic and identifier \"$EXPECTED_BUNDLE_ID\" and certificate leaf[subject.OU] = \"$expected_team_id\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
   "$codesign" --verify --deep --strict --verbose=2 \

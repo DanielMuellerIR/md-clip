@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
 # Vom Wrapper-Testrunner im isolierten Testverzeichnis geladen.
 TEST_SCRIPT="${BASH_SOURCE[0]}"
-# --- Launcher: Pfade sind Umgebung, niemals AppleScript-Quelltext. ---
+# --- Launcher: Pfade sind Argumente, niemals AppleScript-Quelltext. ---
 MD_CLIP_HOST_PATH="$PATH"
 mkdir -p "$TEST_ROOT/fake-bin" "$TEST_ROOT/capture"
 cat > "$TEST_ROOT/fake-bin/osascript" <<'SH'
 #!/bin/sh
-# Meldungsdialoge erhalten Text und Symbolart als Argumente.
-if [ "${1:-}" = "-" ] && [ "$#" -eq 3 ]; then
-  printf '%s' "$2" > "$MD_CLIP_CAPTURE/error-text"
-  cat > "$MD_CLIP_CAPTURE/error-source"
-  exit 0
-fi
-if [ "${MD_CLIP_OSASCRIPT_FAIL_INSTALL:-0}" = "1" ]; then
-  cat > "$MD_CLIP_CAPTURE/source"
-  exit 7
-fi
-printf '%s' "$BUNDLE_CLI" > "$MD_CLIP_CAPTURE/bundle"
-printf '%s' "$SYSTEM_CLI" > "$MD_CLIP_CAPTURE/system"
-cat > "$MD_CLIP_CAPTURE/source"
+script=$(cat)
+case "$script" in
+  *'with administrator privileges'*)
+    [ "$1" = - ] && [ "$#" -eq 3 ] || exit 90
+    printf '%s' "$2" > "$MD_CLIP_CAPTURE/bundle"
+    printf '%s' "$3" > "$MD_CLIP_CAPTURE/system"
+    printf '%s\n' "$script" > "$MD_CLIP_CAPTURE/source"
+    if [ "${MD_CLIP_OSASCRIPT_FAIL_INSTALL:-0}" = 1 ]; then exit 7; fi ;;
+  *'set bundlePath to item 1 of arguments'*)
+    [ "$1" = - ] && [ "$#" -eq 2 ] || exit 90
+    printf '%s' "$2" > "$MD_CLIP_CAPTURE/move-path"
+    printf '%s\n' "$script" > "$MD_CLIP_CAPTURE/move-source" ;;
+  *)
+    [ "$1" = - ] && [ "$#" -eq 3 ] || exit 90
+    printf '%s' "$2" > "$MD_CLIP_CAPTURE/error-text"
+    printf '%s\n' "$script" > "$MD_CLIP_CAPTURE/error-source" ;;
+esac
 SH
 chmod +x "$TEST_ROOT/fake-bin/osascript"
 export PATH="$TEST_ROOT/fake-bin:/usr/bin:/bin"
@@ -27,8 +31,8 @@ export MD_CLIP_LAUNCHER_SOURCE_ONLY=1
 # shellcheck source=../wrappers/launcher.sh
 source "$PROJECT_ROOT/wrappers/launcher.sh"
 
-BUNDLE_CLI="$TEST_ROOT/O'Neil/$(printf '%s' '$(touch NIE)')/md-clip"
-SYSTEM_CLI="$TEST_ROOT/Ziel mit Leerzeichen/md-clip"
+BUNDLE_CLI="$TEST_ROOT/Müller's/$(printf '%s' '$(touch NIE)')/md-clip"
+SYSTEM_CLI="$TEST_ROOT/Ziel mit Leerzeichen und Ö/md-clip"
 install_cli
 
 [ "$(cat "$TEST_ROOT/capture/bundle")" = "$BUNDLE_CLI" ]
@@ -38,6 +42,10 @@ if grep -Fq "$BUNDLE_CLI" "$TEST_ROOT/capture/source"; then
   echo "✗ Launcher interpoliert Bundle-Pfad in AppleScript-Quelltext" >&2
   exit 1
 fi
+BUNDLE_DIR="$TEST_ROOT/Müller's App.app"
+ask_move_first
+[ "$(cat "$TEST_ROOT/capture/move-path")" = "$BUNDLE_DIR" ]
+! grep -Fq "$BUNDLE_DIR" "$TEST_ROOT/capture/move-source"
 echo "✓ Launcher übergibt problematische Pfade nur als Daten"
 
 export MD_CLIP_OSASCRIPT_FAIL_INSTALL=1
@@ -58,24 +66,9 @@ unset MD_CLIP_OSASCRIPT_FAIL_INSTALL
 echo "✓ Launcher zeigt einen Fehler der privilegierten CLI-Installation an"
 
 # --- Launcher: der privilegierte Schritt prüft das Ziel selbst. ---
-# decide_cli_action prüft das Ziel VOR dem Passwort-Dialog; in diesem
-# Zeitfenster kann dort eine fremde Datei entstehen. Geprüft wird deshalb genau
-# der Befehl, den der Launcher an `do shell script` übergibt: Im
-# mitgeschnittenen AppleScript wird die Ausführungszeile durch
-# `return commandText` ersetzt, dann liefert der echte osascript den Text.
-# osascript gibt es nur auf macOS. Die vier Zustandsfälle liefen deshalb früher
-# ausschließlich dort — und damit NIE in der Linux-CI, obwohl genau dieser
-# Befehl als root läuft (Review-Fund 2026-08-05). Jetzt läuft der funktionale
-# Teil überall:
-#
-#   * Auf macOS liefert der echte osascript den Befehlstext.
-#   * Sonst baut ihn `build_link_command` nach.
-#
-# Damit die Nachbildung nicht still vom AppleScript wegdriftet, wird zuerst der
-# Vertrag geprüft: Der Befehlsaufbau im mitgeschnittenen Quelltext MUSS exakt
-# der hier festgehaltenen Fassung entsprechen. Wer den Launcher ändert, sieht
-# hier rot und muss beide Seiten nachziehen. Auf macOS wird zusätzlich belegt,
-# dass Nachbildung und osascript zeichengleich dasselbe liefern.
+# Der Zielzustand kann sich während des Passwortdialogs ändern. Auf macOS
+# führt der echte AppleScript-Parser die Quoting-Regeln aus. Auf Linux
+# prüft dieselbe Zustandsmatrix eine Nachbildung des Shell-Befehls.
 EXPECTED_COMMAND_STMT='set commandText to "/bin/mkdir -p \"$(/usr/bin/dirname " & target & ")\"" & " && [ ! -e " & target & " ]" & " && { [ ! -L " & target & " ] || /bin/rm " & target & "; }" & " && /bin/ln -s " & quoted form of bundleCli & " " & target'
 ACTUAL_COMMAND_STMT=$(
   awk '/^set commandText to /{f=1} /^do shell script /{f=0} f' "$TEST_ROOT/capture/source" \
@@ -109,13 +102,13 @@ if [ "$(uname -s)" = "Darwin" ] && [ -x /usr/bin/osascript ]; then
   grep -Fxq 'return commandText' "$LINK_SCRIPT"
 
   link_command() {
-    BUNDLE_CLI="$1" SYSTEM_CLI="$2" /usr/bin/osascript "$LINK_SCRIPT"
+    /usr/bin/osascript - "$1" "$2" < "$LINK_SCRIPT"
   }
 
   # Beleg, dass die Nachbildung dem echten AppleScript entspricht — sonst
   # prüfte die Linux-CI etwas anderes als das, was auf dem Mac wirklich läuft.
-  probe_real=$(link_command "/tmp/O'Neil/md-clip" "/tmp/Ziel mit Leerzeichen/md-clip")
-  probe_built=$(build_link_command "/tmp/O'Neil/md-clip" "/tmp/Ziel mit Leerzeichen/md-clip")
+  probe_real=$(link_command "/tmp/Müller's/md-clip" "/tmp/Ziel mit Leerzeichen und Ö/md-clip")
+  probe_built=$(build_link_command "/tmp/Müller's/md-clip" "/tmp/Ziel mit Leerzeichen und Ö/md-clip")
   if [ "$probe_real" != "$probe_built" ]; then
     echo "✗ Nachbildung des Launcher-Befehls weicht von osascript ab" >&2
     echo "  osascript:  $probe_real" >&2

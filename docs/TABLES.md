@@ -9,7 +9,7 @@ Textdarstellung. `--strict` lehnt sie vor der Ausgabe ab.
 
 Eine komplexe Außentabelle wird vollständig in einen Zitatblock umgewandelt.
 Ihre Tabellenüberschrift bleibt mit ihrer Auszeichnung erhalten. Die neu
-hinzugefügten Beschriftungen sind fett, keine Markdown-Überschriften.
+hinzugefügten Beschriftungen sind deutsch und werden fett gesetzt.
 
 - Nummern zählen die als Text dargestellten Tabellen in ihrer Reihenfolge,
   einschließlich verschachtelter Tabellen. Einfache Tabellen außerhalb davon

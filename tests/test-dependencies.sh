@@ -11,11 +11,7 @@ init_test_environment "$TESTS_DIR"
 RUNTIME="$TEST_ROOT/runtime"
 FAKE_BIN="$TEST_ROOT/fake-bin"
 mkdir -p "$RUNTIME" "$FAKE_BIN"
-cp "$PROJECT_ROOT/bin/md-clip" "$RUNTIME/md-clip"
-cp "$PROJECT_ROOT/lib/pipeline.sh" "$RUNTIME/pipeline.sh"
-cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$RUNTIME/tidy-markdown.pl"
-cp "$PROJECT_ROOT/lib/tables.lua" "$RUNTIME/tables.lua"
-cp "$PROJECT_ROOT/lib/preprocess-html.pl" "$RUNTIME/preprocess-html.pl"
+stage_runtime "$PROJECT_ROOT" "$RUNTIME"
 
 cat > "$RUNTIME/xclip" <<'SH'
 #!/bin/sh
@@ -82,7 +78,7 @@ echo "✓ Installer lehnt pandoc ohne --sandbox ab"
 PATH_RUNTIME="$TEST_ROOT/path-runtime"
 mkdir -p "$PATH_RUNTIME"
 PATH_RUNTIME="$(cd "$PATH_RUNTIME" && pwd -P)"
-cp "$RUNTIME/md-clip" "$RUNTIME/pipeline.sh" "$RUNTIME/tidy-markdown.pl" "$RUNTIME/tables.lua" "$RUNTIME/preprocess-html.pl" "$PATH_RUNTIME/"
+stage_runtime "$PROJECT_ROOT" "$PATH_RUNTIME"
 cat > "$PATH_RUNTIME/pandoc" <<'MOCK'
 #!/bin/sh
 printf '%s\n' "$PATH" > "$MD_CLIP_PATH_CAPTURE"

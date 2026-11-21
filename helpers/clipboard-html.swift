@@ -1,26 +1,9 @@
-// clipboard-html.swift
-// Holt den HTML-Flavor aus dem macOS-Clipboard und schreibt ihn nach stdout.
-// Exit 1, wenn kein HTML vorhanden ist.
-//
-// Kompilieren: swiftc clipboard-html.swift -o clipboard-html
-// Aufruf:      ./clipboard-html
-
-import AppKit  // für NSPasteboard
+import AppKit
 import Foundation
 
-// Das System-Clipboard, "general pasteboard" in macOS-Sprech.
-let pb = NSPasteboard.general
-
-// Eine BOM am Anfang ist eine verbindliche Kodierungsangabe. Scheitert die
-// dadurch vorgeschriebene Dekodierung, sind die Daten beschaedigt — dann ist
-// nil die ehrliche Antwort und der Aufrufer faellt auf den Plain-Text zurueck.
-// Frueher lief dieser Fall bis zum Latin-1-Zweig durch; ISO-8859-1 kennt jeden
-// Bytewert 0…255, lieferte also Zeichensalat mit Exit 0. Der Auto-Pfad in
-// bin/md-clip hielt das fuer brauchbaren Rich Text, erreichte den vorhandenen
-// Plain-Text-Fallback nicht und konnte mit --replace das Clipboard damit
-// ueberschreiben.
-// Nur der Weg OHNE BOM endet weiterhin garantiert erfolgreich bei Latin-1.
 func decodeHTML(_ data: Data) -> String? {
+    // Ein BOM legt die Kodierung verbindlich fest. Fehlerhafte Daten sollen
+    // den Klartext-Fallback auslösen und nicht als Latin-1 erscheinen.
     let bytes = [UInt8](data.prefix(3))
 
     if bytes.starts(with: [0xFF, 0xFE]) || bytes.starts(with: [0xFE, 0xFF]) {
@@ -33,24 +16,22 @@ func decodeHTML(_ data: Data) -> String? {
         return utf8
     }
     // Alte Clipboard-Quellen liefern gelegentlich Latin-1 ohne Kennzeichnung.
-    // ISO-8859-1 kennt jeden Bytewert, dieser Aufruf liefert also nie nil.
     return String(data: data, encoding: .isoLatin1)
 }
 
 // Daten statt string(forType:) lesen: NSPasteboard garantiert für public.html
 // keine UTF-8-Kodierung. Damit bleiben auch UTF-16 mit BOM und Latin-1 lesbar.
-guard let data = pb.data(forType: .html) else {
-    FileHandle.standardError.write("Kein HTML auf dem Clipboard.\n".data(using: .utf8)!)
+guard let data = NSPasteboard.general.data(forType: .html) else {
+    FileHandle.standardError.write(Data("Kein HTML auf dem Clipboard.\n".utf8))
     exit(1)
 }
 guard let html = decodeHTML(data) else {
-    FileHandle.standardError.write(
-        "HTML auf dem Clipboard ist nicht dekodierbar (BOM passt nicht zum Inhalt).\n"
-            .data(using: .utf8)!)
+    let message = "HTML auf dem Clipboard ist nicht dekodierbar (BOM passt nicht zum Inhalt).\n"
+    FileHandle.standardError.write(Data(message.utf8))
     exit(1)
 }
 guard html.range(of: #"\S"#, options: .regularExpression) != nil else {
-    FileHandle.standardError.write("HTML auf dem Clipboard ist leer.\n".data(using: .utf8)!)
+    FileHandle.standardError.write(Data("HTML auf dem Clipboard ist leer.\n".utf8))
     exit(1)
 }
 

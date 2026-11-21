@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.10.21 — 2026-11-21
+
+- Die Einrichtung des CLI-Links, der Verschiebehinweis und das Finder-Layout
+  übergeben Pfade mit Umlauten und anderen UTF-8-Zeichen unverändert.
+- Die CLI prüft alle Argumente, bevor sie eine Aktion startet. Doctor lehnt
+  Konvertierungsoptionen ab. Diagnose und Installer orientieren sich beim
+  Schreiben und bei Undo am nativen Helfer der Sitzung. Wayland benötigt
+  zum Lesen `wl-paste`.
+- Die automatische Word-Erkennung durchsucht HTML direkt mit Perl, um größere
+  Angebote unter macOS schneller zu erkennen. Die HTML-Aufbereitung verwendet
+  eine gemeinsame Tokenisierung. Die RTF-Layoutreparatur schützt dabei
+  Kommentare, Attribute und SVG. Ungültige Tabellenspannweiten liefern eine
+  Tabellendiagnose. Ein fehlerhafter Konvertierungsbericht stoppt die Ausgabe.
+- Die nativen macOS-Helfer lassen sich im Swift-6-Sprachmodus bauen. Undo
+  verwendet einen privaten Dienstpfad und bestätigt die wieder lesbaren
+  Formate mit Prüfsummen. Die Vorschau kann laufende Statusabfragen abbrechen.
+- Der Linux-Undo-Helfer räumt bei fehlgeschlagenem Sitzungsaufbau bereits
+  geöffnete Ressourcen auf. Nach Undo bleiben die wiederhergestellten Daten
+  weiterhin abrufbar, solange der Helfer sie anbietet.
+- `./tests/run-all.sh` bündelt die Basis-, Sitzungs-, Bundle- und statischen
+  Prüfungen. [Testanleitung](CONTRIBUTING.md#prüfungen)
+- Unter macOS liegt der Undo-Socket im privaten temporären Benutzerordner.
+  Eine beim Wechsel auf 1.10.21 aktive Undo-Sicherung bleibt nur über die
+  frühere Version bis zu ihrem Ablauf erreichbar.
+
 ## 1.10.20 — 2026-10-18
 
 - Die Hintergrund-Updater-Attrappe veröffentlicht ihren Aufruf erst nach
@@ -333,9 +358,6 @@
 
 ## 1.2.9 — 2026-09-03
 
-Fünf Fixes aus dem Code-Review vom 2026-09-03. Die ersten vier trafen den
-Standardweg und liefen dabei ohne Fehlermeldung durch.
-
 - **Eine Tabelle mit Zeilenumbruch in einer Zelle ging komplett verloren.**
   Eine Pipe-Tabelle hat pro Zelle genau eine Zeile. Enthielt eine Zelle einen
   `<br>`, zwei Absätze oder eine Liste, konnte pandoc sie dort nicht
@@ -372,8 +394,7 @@ Standardweg und liefen dabei ohne Fehlermeldung durch.
   gelöschten Datei. Jetzt endet es mit 130 beziehungsweise 143, wie es die
   übrigen Skripte des Projekts schon taten.
 
-Aus der CodeQA-Kampagne desselben Tages, alle neun Bereiche und beide
-Querschnitts-Funde:
+Weitere Korrekturen:
 
 - **Ein beschädigtes App-Bundle meldet sich jetzt.** Fehlte der eingebettete
   Befehl, schrieb der Launcher nur „No such file or directory" nach stderr —
@@ -419,8 +440,6 @@ behoben und im `swift:6.0`-Container unter genau der CI-Bedingung nachgeprüft.
 
 ## 1.2.8 — 2026-08-28
 
-Fixes aus dem Code-Review vom 2026-08-28:
-
 - **Ein beschädigter HTML-Flavor mit BOM gilt nicht mehr als lesbarer
   Rich Text.** Eine Byte-Order-Mark sagt verbindlich, in welcher Kodierung
   die Daten vorliegen. Scheiterte diese Dekodierung, lief
@@ -460,8 +479,6 @@ BOM mit Plain-Text-Fallback, unsichtbare Zeichen, mehrzeiliger Listenpunkt in
 allen drei Zieldialekten) plus die vier `tests/test-*.sh` grün.
 
 ## 1.2.7 — 2026-08-21
-
-Fixes aus dem Code-Review vom 2026-08-21:
 
 - **`--sandbox` wird jetzt vorab geprüft.** Die Option steckt in jedem
   HTML→Markdown-Aufruf, gibt es aber erst ab pandoc 2.15. Auf der bisher
@@ -571,9 +588,6 @@ eine nur im fake-bin gepflegte Attrappe wurde nie befragt.
 
 ## 1.2.3 — 2026-08-10
 
-Diese Version schließt die fünf Befunde des Code-Reviews vom 2026-08-09 und
-härtet den Weg vom GitHub-Release bis zum signierten Sparkle-Feed.
-
 - Der privilegierte Appcast-Lauf stammt jetzt immer aus dem Default-Branch.
   Ein Release-Tag löst nur noch einen unprivilegierten Dispatcher aus und kann
   weder ausführbaren Workflow-Code noch das Sparkle-Secret liefern.
@@ -591,9 +605,6 @@ härtet den Weg vom GitHub-Release bis zum signierten Sparkle-Feed.
   aktuelle stabile Release wiederholen darf.
 
 ## 1.2.2 — 2026-08-07
-
-Alle zehn Befunde des Code-Reviews vom 2026-08-06, jeder vor dem Fix am echten
-Code nachvollzogen. Die beiden Doku-Befunde stehen im letzten Punkt zusammen.
 
 - Inline-Code, der auf einen Backslash endet, bleibt unverändert. Der
   schließende Backtick galt bisher als maskiert, der Code-Span blieb offen und
@@ -654,11 +665,11 @@ sonst dieselbe Versionsnummer und denselben DMG-Dateinamen getragen, obwohl der
 Inhalt ein anderer ist. Mit dem eingebauten Updater ist aus dem Fix-Stand
 (zwischenzeitlich als 1.1.2 geführt) eine Funktions-Version geworden.
 
-- Die App aktualisiert sich selbst über Sparkle 2.9.4 (wie Poor Man's Text):
+- Die App aktualisiert sich selbst über Sparkle 2.9.4:
   stille Suche nach einer Konvertierung, höchstens einmal täglich; sichtbare
   Suche per `md-clip --check-updates`. Installiert wird ausschließlich nach
-  Bestätigung im Dialog, Feed und Archiv sind Ed25519-signiert, Hardware- und
-  Systemprofildaten werden nicht übertragen. Details:
+  Bestätigung im Dialog. Der Feed enthält die Ed25519-Signatur des Archivs.
+  Hardware- und Systemprofildaten werden nicht übertragen. Details:
   `docs/SPARKLE-RELEASE.md`. Ältere Installationen müssen diese Version
   einmalig von Hand per DMG installieren; erst danach greifen Updates aus der
   App heraus.

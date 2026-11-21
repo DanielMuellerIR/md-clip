@@ -10,12 +10,13 @@ Schnittstelle, keine weitere Ausgabe auf stdout.
 `MD_CLIP_RESULT_FILE` bezeichnet eine private temporäre Datei des Aufrufers.
 Jeder Datensatz hat genau das Format `kennung<TAB>anzahl<LF>`. Die Anzahl ist
 eine positive Dezimalzahl mit höchstens neun Stellen. Der Bericht enthält keine
-URLs, Dokumenttitel, Textausschnitte oder anderen Nutzinhalt.
+URLs, Dokumenttitel, Textausschnitte oder andere Nutzdaten. NUL-Bytes sind ungültig.
 
 Die CLI leert die Datei vor jedem Quellenversuch; Pipeline-Stufen hängen ihre
 Datensätze an. Wiederholte Kennungen werden addiert. Fehlende Datensätze bedeuten
 keinen gemeldeten Vorgang. Unbekannte Kennungen oder beschädigte Datensätze
-verhindern die Übernahme des betreffenden Konvertierungsergebnisses.
+beenden wie Lese- oder Schreibfehler des Berichts den Lauf mit Exit 3.
+Auch bei automatischer Quellenwahl erfolgt dann keine Ausgabe oder Ersetzung.
 
 | Kennung | Bedeutung der Anzahl |
 |---|---|

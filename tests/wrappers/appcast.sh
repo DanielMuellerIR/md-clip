@@ -22,7 +22,7 @@ if grep -Fq 'release:' "$APPCAST_WORKFLOW"; then
   echo "✗ Privilegierter Appcast-Workflow wird weiterhin aus dem Release-Tag geladen" >&2
   exit 1
 fi
-TOOLING_SHA="9eaffab05a3984ac5f01d0a3fa331a3f84304248"
+TOOLING_SHA="92bbe437f0a45e38f132614436c58d65ff014717"
 grep -Fq "ref: $TOOLING_SHA" "$APPCAST_WORKFLOW"
 grep -Fq "!= \"$TOOLING_SHA\"" "$APPCAST_WORKFLOW"
 if grep -Fq 'TOOLING_REVISION' "$APPCAST_WORKFLOW"; then
@@ -40,13 +40,11 @@ if [ "$(grep -Fc -- '-R "$GITHUB_REPOSITORY"' "$APPCAST_WORKFLOW")" -ne 3 ]; the
   exit 1
 fi
 
-# Der echte Auswahlblock aus dem Workflow läuft mit einer gh-Attrappe. Nur ein
-# strikt validiertes API-Ergebnis darf genau eine Zeile in GITHUB_ENV schreiben;
-# manuelle Eingaben sind lediglich eine zu bestätigende Erwartung.
-TAG_SELECTOR="$TEST_ROOT/release-tag-selector.sh"
-extract_shell_block "$APPCAST_WORKFLOW" RELEASE_TAG_SELECTOR "$TAG_SELECTOR" 1
-# shellcheck source=/dev/null
-source "$TAG_SELECTOR"
+# Die Tag-Auswahl läuft mit einer gh-Attrappe und darf genau eine validierte
+# Zeile aus der API an GITHUB_ENV übergeben.
+APPCAST_HELPER="$PROJECT_ROOT/wrappers/appcast.sh"
+# shellcheck source=../../wrappers/appcast.sh
+source "$APPCAST_HELPER"
 
 TAG_FAKE_BIN="$TEST_ROOT/tag-fake-bin"
 mkdir -p "$TAG_FAKE_BIN"
@@ -114,11 +112,13 @@ workflow_step_line() {
   fi
   printf '%s\n' "$matches" | head -1 | cut -d: -f1
 }
+TAG_SELECTION_LINE=$(workflow_step_line 'Select current stable release')
 TOOLING_CHECKOUT_LINE=$(workflow_step_line 'Check out trusted appcast tooling')
 RELEASE_CHECKOUT_LINE=$(workflow_step_line 'Check out release data')
 SECRET_STEP_LINE=$(workflow_step_line 'Generate and verify signed appcast')
 if [ -z "$TOOLING_CHECKOUT_LINE" ] || [ -z "$RELEASE_CHECKOUT_LINE" ] || [ -z "$SECRET_STEP_LINE" ] \
-   || [ "$TOOLING_CHECKOUT_LINE" -ge "$RELEASE_CHECKOUT_LINE" ] \
+   || [ "$TOOLING_CHECKOUT_LINE" -ge "$TAG_SELECTION_LINE" ] \
+   || [ "$TAG_SELECTION_LINE" -ge "$RELEASE_CHECKOUT_LINE" ] \
    || [ "$RELEASE_CHECKOUT_LINE" -ge "$SECRET_STEP_LINE" ]; then
   echo "✗ Appcast-Workflow trennt Tooling, Release-Daten und Secret nicht in dieser Reihenfolge" >&2
   exit 1
@@ -134,6 +134,7 @@ if grep -Eq 'release-source/(wrappers|\.github)|source release-source' <<<"$FETC
 fi
 
 SIGNING_BLOCK=$(sed -n '/- name: Generate and verify signed appcast/,/- name: Upload Pages artifact/p' "$APPCAST_WORKFLOW")
+grep -Fq 'source tooling/wrappers/appcast.sh' <<<"$SIGNING_BLOCK"
 grep -Fq '"$APPCAST_WORK/sparkle-dist/bin/generate_appcast"' <<<"$SIGNING_BLOCK"
 if grep -Fq 'release-source/wrappers' <<<"$SIGNING_BLOCK"; then
   echo "✗ Signierschritt führt ein Werkzeug aus dem Release-Tag aus" >&2
@@ -144,10 +145,6 @@ echo "✓ Appcast-Tooling kommt fest gepinnt aus einer vom Release-Tag getrennte
 # Der echte Generator-Runner muss stdout und stderr vollständig abwarten. Eine
 # Sparkle-Warnung darf auch dann nicht entkommen, wenn sie verspätet auf stdout
 # erscheint und der Generator selbst mit Erfolg endet.
-APPCAST_GENERATOR_RUNNER="$TEST_ROOT/appcast-generator-runner.sh"
-extract_shell_block "$APPCAST_WORKFLOW" APPCAST_GENERATOR_RUNNER "$APPCAST_GENERATOR_RUNNER" 1
-# shellcheck source=/dev/null
-source "$APPCAST_GENERATOR_RUNNER"
 sparkle_private_key="synthetic-test-key"
 cat > "$TEST_ROOT/generator-warning" <<'SH'
 #!/bin/sh
@@ -169,21 +166,10 @@ fi
 run_appcast_generator "$TEST_ROOT/generator-ok" >/dev/null 2>&1
 echo "✓ Appcast wartet auf stdout und stderr des Generators und prüft beide"
 
-# Die folgende Funktion ist der echte Validator aus dem Workflow. Wir ziehen
-# genau diesen Block heraus und testen ihn mit einer xmllint-Attrappe; weder
-# GitHub noch ein DMG oder ein Sparkle-Schlüssel werden dabei berührt.
-APPCAST_VALIDATOR="$TEST_ROOT/appcast-validator.sh"
-extract_shell_block "$APPCAST_WORKFLOW" APPCAST_METADATA_VALIDATOR "$APPCAST_VALIDATOR" 1
-# shellcheck source=/dev/null
-source "$APPCAST_VALIDATOR"
-
-# Echte Sparkle-Appcasts tragen beide Versionswerte als Kindelemente des
-# Items, nicht als Attribute des Enclosures. Der reale xmllint-Lauf verhindert,
-# dass die Attrappen unten einen falschen XPath versehentlich grün machen. Auf
-# Linux ist xmllint nicht Teil des CI-Images; dort bleibt die exakte
-# Strukturprüfung des extrahierten Produktionscodes verbindlich.
-grep -Fq 'local version_xpath="${item_xpath}/*[local-name()=\"version\"]"' "$APPCAST_VALIDATOR"
-grep -Fq 'local short_version_xpath="${item_xpath}/*[local-name()=\"shortVersionString\"]"' "$APPCAST_VALIDATOR"
+# Prüfe beide Versionsfelder am Item. Wenn xmllint verfügbar ist, werden
+# dieselben XPath-Ausdrücke zusätzlich gegen ein echtes XML ausgeführt.
+grep -Fq 'local version_xpath="${item_xpath}/*[local-name()=\"version\"]"' "$APPCAST_HELPER"
+grep -Fq 'local short_version_xpath="${item_xpath}/*[local-name()=\"shortVersionString\"]"' "$APPCAST_HELPER"
 if command -v xmllint >/dev/null 2>&1; then
   APPCAST_REAL="$TEST_ROOT/appcast-real.xml"
   cat > "$APPCAST_REAL" <<'XML'
@@ -270,8 +256,8 @@ expect_appcast_rejected "fehlende EdDSA-Signatur"
 MD_CLIP_XML_SIGNATURE="synthetic-signature"
 echo "✓ Appcast verlangt genau einen passenden, signierten Release-Eintrag"
 
-grep -Fq "does not match key EdDSA" <<<"$SIGNING_BLOCK"
-grep -Fq "SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel" <<<"$SIGNING_BLOCK"
+grep -Fq "does not match key EdDSA" "$APPCAST_HELPER"
+grep -Fq "SPARKLE_PRIVATE_KEY passt nicht zum öffentlichen Schlüssel" "$APPCAST_HELPER"
 grep -Fq -- "-c 'Print :SUPublicEDKey'" <<<"$SIGNING_BLOCK"
 grep -Fq '"$APPCAST_WORK/verify-sparkle-signature"' <<<"$SIGNING_BLOCK"
 grep -Fq '"$public_key" "$feed_signature" "${dmgs[0]}"' <<<"$SIGNING_BLOCK"

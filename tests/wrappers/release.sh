@@ -6,11 +6,14 @@ RELEASE_SCRIPT="$PROJECT_ROOT/wrappers/sign-and-release.sh"
 NOTARY_HELPER="$PROJECT_ROOT/wrappers/notarization.sh"
 # shellcheck source=../wrappers/notarization.sh
 source "$NOTARY_HELPER"
+RELEASE_IMAGE_HELPER="$PROJECT_ROOT/wrappers/release-image.sh"
+# shellcheck source=../../wrappers/release-image.sh
+source "$RELEASE_IMAGE_HELPER"
 grep -Fq 'mktemp -d "$BUILD_DIR/.md-clip-mount.XXXXXX"' "$RELEASE_SCRIPT"
 grep -Fq -- '-plist > "$ATTACH_PLIST"' "$RELEASE_SCRIPT"
-grep -Fq 'detach_release_mount "$MOUNT_DEVICE"' "$RELEASE_SCRIPT"
-grep -Fq 'hdiutil detach "$device"' "$RELEASE_SCRIPT"
-if grep -Eq 'hdiutil detach "/Volumes|hdiutil detach "\$MOUNT_DIR"|hdiutil detach .*force' "$RELEASE_SCRIPT"; then
+grep -Fq 'detach_release_mount "$MOUNT_DEVICE"' "$RELEASE_IMAGE_HELPER"
+grep -Fq 'hdiutil detach "$device"' "$RELEASE_IMAGE_HELPER"
+if grep -Eq 'hdiutil detach "/Volumes|hdiutil detach "\$MOUNT_DIR"|hdiutil detach .*force' "$RELEASE_SCRIPT" "$RELEASE_IMAGE_HELPER"; then
   echo "✗ Release-Skript enthält weiterhin namens- oder mountpointbasiertes Force-Detach" >&2
   exit 1
 fi
@@ -19,10 +22,6 @@ echo "✓ Release-Skript löst ausschließlich das eigene attach-Device"
 # Die Zuordnung selbst läuft gegen den echten Funktionsblock. Der erste
 # Plist-Eintrag ist absichtlich nur ein Präfixtreffer; ausschließlich der
 # zweite, exakt passende Mountpoint darf sein Device liefern.
-DEVICE_SELECTOR="$TEST_ROOT/device-for-mountpoint.sh"
-extract_shell_block "$RELEASE_SCRIPT" DEVICE_FOR_MOUNTPOINT "$DEVICE_SELECTOR"
-# shellcheck source=/dev/null
-source "$DEVICE_SELECTOR"
 cat > "$TEST_ROOT/fake-bin/PlistBuddy-device" <<'SH'
 #!/bin/sh
 case "$2" in
@@ -41,15 +40,28 @@ SELECTED_DEVICE=$(device_for_mountpoint \
 [ "$SELECTED_DEVICE" = /dev/disk-exact ]
 echo "✓ Release ordnet nur den exakt passenden Mountpoint seinem Device zu"
 
+FINDER_TEST_PATH="$TEST_ROOT/Müller's Volume"
+(
+  osascript() {
+    [ "$#" -eq 2 ] && [ "$1" = - ] && [ "$2" = "$FINDER_TEST_PATH" ] || return 1
+    cat > "$TEST_ROOT/finder-layout.applescript"
+  }
+  apply_finder_layout "$FINDER_TEST_PATH"
+)
+grep -Fxq 'set mountPath to item 1 of arguments' "$TEST_ROOT/finder-layout.applescript"
+if [ -x /usr/bin/osascript ]; then
+  mount_probe=$(sed '/^tell application "Finder"/,$d' "$TEST_ROOT/finder-layout.applescript")
+  received=$(printf '%s\nreturn mountPath\nend run\n' "$mount_probe" |
+    /usr/bin/osascript - "$FINDER_TEST_PATH")
+  [ "$received" = "$FINDER_TEST_PATH" ]
+fi
+echo "✓ Finder-Layout erhält den unveränderten Mountpfad"
+
 # --- Release: das schreibbare Zwischen-Image hängt am Cleanup. ---
-# Es ist mehrere hundert MB groß und wurde früher erst im Erfolgsweg gelöscht;
-# jeder Abbruch davor ließ es liegen (Review-Fund 2026-08-05). Geprüft wird die
-# ganze Kette der Zuständigkeit: erst nach `hdiutil create` übernehmen, im
-# Cleanup nur bei ausgehängtem Device löschen, nach der regulären Löschung
-# wieder abgeben.
+# Nur ein vom aktuellen Lauf erstelltes, ausgehängtes Zwischen-Image löschen.
 grep -Fxq 'RW_DMG_OWNED=1' "$RELEASE_SCRIPT"
-grep -Fq 'if [ -n "$RW_DMG_OWNED" ] \' "$RELEASE_SCRIPT"
-grep -Fq '&& [ -z "$MOUNT_MAY_BE_ATTACHED" ]; then' "$RELEASE_SCRIPT"
+grep -Fq 'if [ -n "$RW_DMG_OWNED" ] \' "$RELEASE_IMAGE_HELPER"
+grep -Fq '&& [ -z "$MOUNT_MAY_BE_ATTACHED" ]; then' "$RELEASE_IMAGE_HELPER"
 # Die Übernahme muss NACH der Erzeugung stehen, sonst räumt der Cleanup ein
 # fremdes Image ab, das dort schon lag.
 CREATE_LINE=$(grep -n '^hdiutil create' "$RELEASE_SCRIPT" | head -1 | cut -d: -f1)
@@ -63,11 +75,6 @@ echo "✓ Release-Skript räumt sein schreibbares Zwischen-Image auch bei Abbruc
 # Schlägt nach einem erfolgreichen attach nur die Plist-Auswertung fehl, ist
 # das Device unbekannt, der private Mount kann aber noch aktiv sein. In diesem
 # Zustand dürfen weder seine Image-Unterlage noch der Pfad vergessen werden.
-RELEASE_CLEANUP_BLOCK="$TEST_ROOT/release-cleanup.sh"
-extract_shell_block "$RELEASE_SCRIPT" RELEASE_CLEANUP "$RELEASE_CLEANUP_BLOCK"
-# shellcheck source=/dev/null
-source "$RELEASE_CLEANUP_BLOCK"
-
 RELEASE_CLEANUP_ROOT="$TEST_ROOT/release-cleanup-state"
 MOUNT_DIR="$RELEASE_CLEANUP_ROOT/mount"
 RW_DMG_PATH="$RELEASE_CLEANUP_ROOT/intermediate.dmg"
@@ -112,15 +119,11 @@ if [ -z "$PENDING_CONVERT_LINE" ] || [ -z "$GATEKEEPER_LINE" ] || [ -z "$PUBLISH
   echo "✗ Release veröffentlicht das DMG vor Abschluss aller Prüfungen" >&2
   exit 1
 fi
-grep -Fq 'rm -f "$PENDING_DMG_PATH"' "$RELEASE_CLEANUP_BLOCK"
+grep -Fq 'rm -f "$PENDING_DMG_PATH"' "$RELEASE_IMAGE_HELPER"
 echo "✓ Release veröffentlicht nur ein vollständig geprüftes DMG"
 
 # Nur der belegte sporadische Keychain-Fehler wird wiederholt. Andere Fehler
 # bleiben im Log sichtbar und brechen sofort ab.
-NOTARY_CHECK="$TEST_ROOT/notary-profile-check.sh"
-extract_shell_block "$NOTARY_HELPER" NOTARY_PROFILE_CHECK "$NOTARY_CHECK"
-# shellcheck source=/dev/null
-source "$NOTARY_CHECK"
 cat > "$TEST_ROOT/fake-bin/xcrun" <<'SH'
 #!/bin/sh
 count_file="$MD_CLIP_NOTARY_COUNT"
@@ -209,11 +212,7 @@ echo "✓ Release-Skript bekommt fuer jede Plist einen eindeutigen Pfad"
 APPCAST_WORKFLOW="$PROJECT_ROOT/.github/workflows/publish-appcast.yml"
 
 # --- Version: eine Grammatik für alle sechs Leser. ---
-# bin/md-clip trägt die Produktversion; gelesen wird sie in build.sh,
-# build-app-bundled.sh, verify-bundle.sh, install-app.sh, sign-and-release.sh
-# und im Appcast-Workflow. Vorher standen dort drei Schreibweisen nebeneinander
-# — die im Workflow ohne `head`, die also bei zwei VERSION-Zeilen etwas anderes
-# gelesen hätte als der Build (Querschnitts-Fund 2026-09-03).
+# Build, Installation, Release und Appcast lesen den ersten VERSION-Eintrag.
 # shellcheck source=../wrappers/version.sh
 source "$PROJECT_ROOT/wrappers/version.sh"
 
@@ -281,7 +280,7 @@ ALLOWED_TOOLING_SOURCE="source tooling/wrappers/verified-cache.sh"
 # Nur echte Aufrufe am Zeilenanfang zaehlen; die Begruendung im Workflow nennt
 # den gescheiterten Aufruf beim Namen und ist selbst kein Aufruf.
 UNEXPECTED_SOURCE=$(grep -nE '^[[:space:]]*source tooling/' "$APPCAST_WORKFLOW" \
-  | grep -Fv "$ALLOWED_TOOLING_SOURCE" || true)
+  | grep -Ev ":[[:space:]]*($ALLOWED_TOOLING_SOURCE|source tooling/wrappers/appcast[.]sh)\$" || true)
 if [ -n "$UNEXPECTED_SOURCE" ]; then
   echo "✗ Der Appcast-Workflow sourct Tooling, das die gepinnte Revision nicht sicher enthält:" >&2
   printf '%s\n' "$UNEXPECTED_SOURCE" >&2

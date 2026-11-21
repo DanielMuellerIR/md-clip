@@ -40,33 +40,6 @@ if ! grep -Fq 'report-probe.sh:5 fehlgeschlagen' "$TEST_ROOT/report-probe.err" \
 fi
 echo "✓ Gescheiterte Zusicherungen nennen Datei, Zeile und Wortlaut"
 
-# Mehrere Prüfungen führen exakt den markierten Funktionsblock aus dem
-# Produktionscode mit Attrappen aus. Die Marker müssen eindeutig sein: Bei
-# einem fehlenden oder doppelten Marker wäre sonst unbemerkt nur ein Teil des
-# tatsächlichen Codes im Test gelandet.
-extract_shell_block() {
-  local source="$1"
-  local marker="$2"
-  local destination="$3"
-  local strip_workflow_indent="${4:-0}"
-
-  awk \
-    -v begin_marker="# BEGIN $marker" \
-    -v end_marker="# END $marker" \
-    -v strip_indent="$strip_workflow_indent" '
-      index($0, begin_marker) { begin_count++; capture=1; next }
-      index($0, end_marker) { end_count++; capture=0; next }
-      capture {
-        if (strip_indent) sub(/^          /, "")
-        print
-      }
-      END {
-        if (begin_count != 1 || end_count != 1) exit 65
-      }
-    ' "$source" > "$destination"
-  bash -n "$destination"
-}
-
 # Gemeinsame Attrappen und Funktionen bleiben in derselben isolierten Shell.
 # Die Reihenfolge erhält den bestehenden Vertrag der Prüfabschnitte.
 for suite in launcher release helpers appcast bundle; do

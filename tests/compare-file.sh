@@ -59,10 +59,9 @@ for helper in clipboard-html clipboard-rtf; do
   echo "==> Kompiliere helpers/$helper.swift"
   swiftc "$PROJECT_ROOT/helpers/$helper.swift" -o "$TEST_RUNTIME/$helper"
 done
-cp "$PROJECT_ROOT/bin/md-clip" "$TEST_RUNTIME/md-clip"
-for resource in pipeline.sh tidy-markdown.pl tables.lua preprocess-html.pl; do
-  cp "$PROJECT_ROOT/lib/$resource" "$TEST_RUNTIME/$resource"
-done
+# shellcheck source=../wrappers/stage-runtime.sh
+source "$PROJECT_ROOT/wrappers/stage-runtime.sh"
+stage_runtime "$PROJECT_ROOT" "$TEST_RUNTIME"
 export MD_CLIP_COMPARE_RUNTIME="$TEST_RUNTIME"
 
 # --- Datei mit dem passenden Flavor aufs Clipboard laden ---

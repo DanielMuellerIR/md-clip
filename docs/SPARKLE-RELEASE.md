@@ -1,7 +1,6 @@
 # Sparkle-Updates veröffentlichen
 
-md-clip bindet Sparkle 2.9.4 exakt gepinnt als fertig gebautes Framework ein
-(kein SwiftPM — die App ist ein Shell-Launcher, siehe unten). Die App prüft
+md-clip bindet Sparkle als exakt gepinntes Framework ein. Die App prüft
 den Feed unter `https://danielmuellerir.github.io/md-clip/appcast.xml`, lädt
 das DMG aus dem zugehörigen GitHub-Release und installiert ausschließlich nach
 Zustimmung. Anonyme Hardware- und Systemprofildaten sind abgeschaltet.
@@ -13,31 +12,25 @@ aktualisiert werden; erst danach funktionieren Updates aus der App heraus.
 Zwei unabhängige Prüfungen bleiben Pflicht:
 
 - Developer-ID-Signatur und Apple-Notarisierung für App und DMG.
-- Sparkle-Ed25519-Signatur für Update-Archiv und Feed.
+- Ed25519-Signatur für das Update-Archiv. Der Feed enthält die Signatur.
 
 Der private Sparkle-Schlüssel gehört weder in Git noch in Logs oder Argumente.
-Nur sein öffentlicher Gegenpart steht als `SUPublicEDKey` in der Info.plist
-(erzeugt in `wrappers/build-app-bundled.sh`). md-clip benutzt bewusst dasselbe
-Schlüsselpaar wie Poor Man's Text und Fastra; es liegt im lokalen
-Schlüsselbund unter dem Dienst `https://sparkle-project.org`. Eine Rotation
-beträfe damit alle drei Apps.
+Das Bundle enthält den öffentlichen Prüfschlüssel in `SUPublicEDKey`.
+Der private Schlüssel bleibt im Schlüsselbund und im Release-Environment.
 
 ## Warum ein eigener Updater-Helfer
 
-Anders als Poor Man's Text ist md-clip.app keine Swift-App, sondern ein
-Shell-Launcher: Beim Doppelklick konvertiert er das Clipboard und beendet
-sich. Sparkle braucht aber einen laufenden Cocoa-Prozess mit Runloop für
-Feed-Abruf, Dialoge, Download und App-Austausch. Diese Rolle übernimmt der
+Der Shell-Launcher konvertiert das Clipboard und beendet sich. Sparkle braucht
+für Feed-Abruf, Dialoge, Download und App-Austausch einen laufenden
+Cocoa-Prozess. Diese Rolle übernimmt der
 kompilierte Helfer `Contents/MacOS/md-clip-updater`
 (Quelle: `helpers/md-clip-updater.swift`):
 
 - Der Launcher startet ihn nach jeder Konvertierung entkoppelt mit
-  `--background`. Der Helfer drosselt sich selbst auf höchstens einen
-  Feed-Abruf je 24 Stunden und beendet sich ohne Fund wortlos; nur wenn es
-  ein Update gibt, erscheint Sparkles Dialog.
+  `--background`. Der Helfer ruft den Feed höchstens einmal je 24 Stunden ab.
+  Sparkles Dialog erscheint bei einem verfügbaren Update.
 - `md-clip --check-updates` startet ihn sichtbar (`--interactive`), inklusive
-  „Sie sind aktuell“-Meldung. Das ist das Gegenstück zum Menüpunkt
-  „Check for Updates…“ in Poor Man's Text — die md-clip.app hat kein Menü.
+  „Sie sind aktuell“-Meldung.
 - Nach der Installation startet Sparkle die App bewusst nicht neu. Ein
   automatischer Neustart würde den Launcher und damit ungefragt eine neue
   Clipboard-Konvertierung auslösen. Die neue Fassung läuft erst beim nächsten
@@ -64,12 +57,13 @@ kompilierte Helfer `Contents/MacOS/md-clip-updater`
 - `.github/workflows/request-appcast.yml` reagiert ohne Secret auf das Release.
   Erst sein Abschluss startet `.github/workflows/publish-appcast.yml` per
   `workflow_run` aus dem vertrauenswürdigen Default-Branch. Dieser zweite
-  Workflow erzeugt den signierten Feed und veröffentlicht ihn über GitHub
-  Pages. Downloader, Sparkle-Pins und Generator kommen dabei aus einer
+  Workflow erzeugt den Feed mit der Archivsignatur und veröffentlicht ihn
+  über GitHub Pages. Downloader, Sparkle-Pins und Generator kommen dabei aus einer
   festgelegten, vertrauenswürdigen Tooling-Revision; der Release-Tag liefert
   nur Version, DMG und Release Notes. Vor der Veröffentlichung muss der Feed
   genau einen Eintrag enthalten, dessen beide Versionsfelder und URL zum Tag
-  passen.
+  passen. Der Workflow prüft die Ed25519-Signatur gegen die DMG-Bytes mit
+  dem öffentlichen Schlüssel aus der App im DMG.
 
 ## Einmalige GitHub-Einrichtung
 
@@ -85,26 +79,25 @@ kompilierte Helfer `Contents/MacOS/md-clip-updater`
    `generate_keys -x` exportiert den Schlüssel vorübergehend in eine lokale
    Datei; beim Einfügen nie auf stdout ausgeben und die Datei danach sicher
    entfernen.
-3. Der Schlüssel ist derselbe wie bei Poor Man's Text und Fastra und dort
-   bereits verschlüsselt gesichert. Geht er verloren, ist eine kontrollierte
-   Rotation über Developer-ID-signierte DMGs nötig — für alle drei Apps
-   gemeinsam.
+3. Den privaten Schlüssel verschlüsselt sichern. Eine Rotation muss die
+   Aktualisierung bereits installierter Apps berücksichtigen. Bei Verlust des
+   Schlüssels lässt sich ein neues Developer-ID-signiertes und notarisiertes
+   DMG zur manuellen Installation bereitstellen.
 
 ## Ablauf pro Release
 
-1. Version in `bin/md-clip` (`VERSION=`), `CHANGELOG.md` und den Status in
-   `docs/DISTRIBUTION.md` pflegen. Die Bundle-Version leitet der Build daraus
-   ab; sie muss monoton steigen, denn Sparkle vergleicht Versionen über
-   `CFBundleVersion`.
-2. Release bauen: `./release.sh`. Das signiert (inkl. Sparkle), verifiziert,
-   notarisiert App und DMG und stapelt die Tickets.
+1. Version in `bin/md-clip` (`VERSION=`) und `CHANGELOG.md` pflegen. Der
+   Build übernimmt sie in `CFBundleVersion`. Sparkle erwartet einen
+   steigenden Wert.
+2. Mit `./release.sh` App und DMG bauen, mit Developer ID signieren und
+   notarisieren. [Build und Signaturprüfung](DISTRIBUTION.md)
 3. Tag und GitHub-Release mit genau einem DMG anlegen. Die Release Notes sind
    der Text, den Sparkle später im Update-Dialog anzeigt; erst danach
    veröffentlichen.
 4. `.github/workflows/request-appcast.yml` stößt ohne Secret den
    vertrauenswürdigen `.github/workflows/publish-appcast.yml` im Default-Branch
-   an. Dieser erzeugt mit Sparkles `generate_appcast` den signierten Feed und
-   veröffentlicht ihn über GitHub Pages.
+   an. Dieser erstellt mit Sparkles `generate_appcast` den Feed samt
+   Archivsignatur und veröffentlicht ihn über GitHub Pages.
 5. Workflow und Feed prüfen. Eine ältere, bereits Sparkle-fähige und
    notarisiert installierte Version muss das Release finden und installieren,
    ohne md-clip automatisch neu zu starten. Beim nächsten ausdrücklichen Start
@@ -115,7 +108,3 @@ aktuelle stabile Release, etwa wenn dessen automatischer Appcast-Lauf
 fehlgeschlagen ist. Ein älteres Tag, Prerelease oder Entwurf wird abgelehnt.
 Das Release muss genau ein `*.dmg` enthalten; der Feed enthält nur das aktuelle
 Vollupdate und keine Deltas.
-
-Die Pipeline-Ressourcen `pipeline.sh`, `preprocess-html.pl`, `tidy-markdown.pl` und `tables.lua`
-liegen gemeinsam unter `Contents/Resources/bin/`. Der Bundle-Prüfer lehnt
-fehlende oder leere Perl-/Lua-Ressourcen vor dem Start des Produktcodes ab.

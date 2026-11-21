@@ -136,11 +136,35 @@ with tempfile.TemporaryDirectory(prefix='md-clip-bundle-') as temporary:
     run(['--input',str(work/'missing.html')],expected=2)
     run(['--stdin','--from','html','--to','unknown'],b'<p>x</p>',2)
 
-    broken = work/'isolated runtime';broken.mkdir()
+    macos = work / 'isolated.app' / 'Contents' / 'MacOS'
+    macos.mkdir(parents=True)
+    broken = macos.parent / 'Resources' / 'bin'
+    broken.mkdir(parents=True)
     for source in [cli,*[resources/f.name for f in (ROOT/'lib').iterdir() if f.is_file()]]:
         shutil.copy2(source,broken/source.name)
     (broken/'pandoc').symlink_to(pandoc)
-    (broken/'tables.lua').unlink()
+    updater = macos / 'md-clip-updater'
+    updater_marker = work / 'updater-args'
+    env['BUNDLE_TEST_UPDATER'] = str(updater_marker)
+    updater.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$BUNDLE_TEST_UPDATER"\n')
+    updater.chmod(0o755)
+    run(['--check-updates', '--unknown'], expected=2, executable=broken/'md-clip')
+    run(['--unknown', '--check-updates'], expected=2, executable=broken/'md-clip')
+    assert not updater_marker.exists()
+    run(['--check-updates'], executable=broken/'md-clip')
+    assert updater_marker.read_text() == '--interactive\n'
+    for name in ('platform.sh', 'doctor.sh', 'conversion-report.sh', 'pipeline.sh'):
+        for mode in ('missing', 'empty'):
+            if mode == 'missing':
+                (broken/name).unlink()
+            else:
+                (broken/name).touch()
+            damaged = subprocess.run([str(broken/'md-clip'), '--version'], capture_output=True,
+                                     cwd=work, env=env, timeout=20)
+            assert damaged.returncode == 2 and not damaged.stdout, damaged
+            assert name.encode() in damaged.stderr and b'command not found' not in damaged.stderr
+        shutil.copy2(resources/name, broken/name)
+    (broken/'pandoc-filter.lua').unlink()
     failure = subprocess.run([str(broken/'md-clip'),'--stdin','--from','html','--quiet'],input=b'<p>VISIBLE</p>',
                              cwd=work,env=env,capture_output=True,timeout=20)
     assert failure.returncode != 0 and not failure.stdout and failure.stderr

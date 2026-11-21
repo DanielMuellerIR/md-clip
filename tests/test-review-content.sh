@@ -29,13 +29,21 @@ check quoted_fence_then_code "$(tidy $'> ```\n> \\- quoted\n> ```\n\n'"$code")" 
 check fence_literal_quote "$(tidy $'```\n> - item\n\\- keep\n```\n')" $'```\n> - item\n\\- keep\n```\n@'
 check claude_attribute_order "$(printf '%s' '<pre><code><div style="x" data-line="1">one</div><div class="x" data-line="2">two</div></code></pre>' | convert_html gfm)" $'    one\n    two'
 check claude_existing_order "$(printf '%s' '<pre><code><div data-line="1" class="x">one</div><div data-line="2">two</div></code></pre>' | convert_html gfm)" $'    one\n    two'
-check claude_unrelated_div "$(printf '%s' '<div data-lineage="1">one</div>' | preprocess_claude_desktop)" '<div>one</div>'
-classroom() { printf '%s' "<a href=\"https://example.test/doc\"><img src=\"https://classroom.google.com/webthumbnail/x\">$1</a>" | preprocess_google_classroom; }
+check claude_unrelated_div "$(printf '%s' '<div data-lineage="1">one</div>' | preprocess_html)" '<div>one</div>'
+classroom() { printf '%s' "<a href=\"https://example.test/doc\"><img src=\"https://classroom.google.com/webthumbnail/x\">$1</a>" | preprocess_html; }
 expected='<ul><li><a href="https://example.test/doc">Title</a></li></ul>'
 check classroom_following_attribute "$(classroom '<div class="mvRF3b" dir="auto">Title</div>')" "$expected"
 check classroom_existing_title "$(classroom '<div class="mvRF3b">Title</div>')" "$expected"
 check classroom_class_token "$(classroom '<div dir="auto" class=" other mvRF3b more ">Title</div>')" "$expected"
 check classroom_wrong_class "$(classroom '<div class="xmvRF3b">Title</div>')" '<a href="https://example.test/doc"></a>'
+# RTF-Reader liefern HTML. Die Quellenreparatur darf darin nur echte
+# Layout- und Listentags bearbeiten.
+protected='<!-- <table><tr><td>Kommentar</td></tr></table><li><p>Kommentar</p></li> --><svg><foreignObject><table><tr><td>SVG</td></tr></table><li><p>SVG</p></li></foreignObject></svg><script>"<li><p>Script</p></li>"</script><pre><code>&lt;li&gt;&lt;p&gt;Code&lt;/p&gt;&lt;/li&gt;</code></pre><pre><li><p>Literal</p></li><table><tr><td colspan="0">Literal</td></tr></table></pre>'
+table='<table title="1 > 0"><tr><td title="a > b">Wert</td></tr></table>'
+list='<ul><li title="3 > 2"> <p title="5 > 4">Ein <em>Punkt</em></p> </li></ul>'
+unwrapped='<ul><li title="3 > 2">Ein <em>Punkt</em></li></ul>'
+check rtf_html_protected "$(printf '%s' "$protected$table$list" | preprocess_rtf_html)" "$protected<p>Wert</p>$unwrapped"
+check rtf_html_tables_text "$(printf '%s' "$protected$table$list" | MD_CLIP_TABLES=text preprocess_rtf_html)" "$protected$table$unwrapped"
 # Der vollständige Code-Inhalt muss nach HTML-Konvertierung und erneutem
 # Parsen erhalten bleiben, auch wenn eine Liste vor einem eigenen Zitat steht.
 html=$'<ul><li>item</li></ul><blockquote><p>quote</p></blockquote><pre><code>&#92;- keep\nx&#92;\nnext\n</code></pre>'

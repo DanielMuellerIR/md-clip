@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Unit-Tests und optional echte Clipboard-Roundtrips in isoliertem Xvfb/sway."""
-import importlib.util
+import array
+from collections import deque
+import ctypes
+from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -8,41 +11,46 @@ import select
 import signal
 import socket
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "helpers" / "clipboard-undo-linux.py"
-spec = importlib.util.spec_from_file_location("clipboard_undo_linux", HELPER)
-undo = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(undo)
+sys.path.insert(0, str(HELPER.parent))
+
+from clipboard_undo import backends, cli, daemon, wayland, x11
+from clipboard_undo.common import UndoError
+from clipboard_undo.state import State
+from clipboard_undo.wayland import Wayland
+from clipboard_undo.x11 import X11, X11Format, X11Stamp
 
 
 class DiagnoseTests(unittest.TestCase):
     def test_no_session_needs_no_clipboard(self):
-        with patch.dict(os.environ, {}, clear=True), patch.object(undo, 'dependencies'), \
-             patch.object(undo, 'backend') as backend, patch.object(undo, 'private_directory') as directory:
-            self.assertEqual('x11-session-missing', undo.diagnose())
+        with patch.dict(os.environ, {}, clear=True), patch.object(backends, 'dependencies'), \
+             patch.object(backends, 'backend') as backend, patch.object(daemon, 'private_directory') as directory:
+            self.assertEqual('x11-session-missing', backends.diagnose())
             backend.assert_not_called()
             directory.assert_not_called()
 
     def test_probe_closes_without_creating_daemon_state(self):
-        with patch.dict(os.environ, {'DISPLAY': ':test'}, clear=True), patch.object(undo, 'dependencies'), \
-             patch.object(undo, 'backend') as backend, patch.object(undo, 'private_directory') as directory:
-            self.assertEqual('ok', undo.diagnose())
+        with patch.dict(os.environ, {'DISPLAY': ':test'}, clear=True), patch.object(backends, 'dependencies'), \
+             patch.object(backends, 'backend') as backend, patch.object(daemon, 'private_directory') as directory:
+            self.assertEqual('ok', backends.diagnose())
             backend.assert_called_once_with(probe=True)
             backend.return_value.close.assert_called_once_with()
             directory.assert_not_called()
 
     def test_library_and_protocol_causes(self):
         for reason in ('x11-libraries-missing', 'wayland-data-control-missing', 'wayland-seat-unsupported'):
-            with patch.dict(os.environ, {'DISPLAY': ':test'}, clear=True), patch.object(undo, 'dependencies'), \
-                 patch.object(undo, 'backend', side_effect=undo.UndoError('private error', 2, reason)):
-                self.assertEqual(reason, undo.diagnose())
+            with patch.dict(os.environ, {'DISPLAY': ':test'}, clear=True), patch.object(backends, 'dependencies'), \
+                 patch.object(backends, 'backend', side_effect=UndoError('private error', 2, reason)):
+                self.assertEqual(reason, backends.diagnose())
 
     def test_wayland_registry_capabilities_without_selection_binding(self):
         for interfaces, reason in ((['wl_seat'], 'wayland-data-control-missing'),
@@ -50,16 +58,16 @@ class DiagnoseTests(unittest.TestCase):
                                    (['zwlr_data_control_manager_v1', 'wl_seat', 'wl_seat'], 'wayland-seat-unsupported'),
                                    (['ext_data_control_manager_v1', 'wl_seat'], None)):
             def registry(clipboard):
-                clipboard.globals = {i + 1: (name, 1) for i, name in enumerate(interfaces)}
+                clipboard.globals = {i + 1: wayland.Global(name, 1) for i, name in enumerate(interfaces)}
             with patch.dict(os.environ, {'WAYLAND_DISPLAY': 'test', 'XDG_RUNTIME_DIR': '/tmp'}, clear=True), \
-                 patch.object(undo.socket, 'socket'), patch.object(undo.Wayland, 'sync', registry), \
-                 patch.object(undo.Wayland, 'send') as send, patch.object(undo.Wayland, 'bind') as bind:
+                 patch.object(socket, 'socket'), patch.object(Wayland, 'sync', registry), \
+                 patch.object(Wayland, 'send') as send, patch.object(Wayland, 'bind') as bind:
                 if reason:
-                    with self.assertRaises(undo.UndoError) as error:
-                        undo.Wayland(probe=True)
+                    with self.assertRaises(UndoError) as error:
+                        Wayland(probe=True)
                     self.assertEqual(reason, error.exception.reason)
                 else:
-                    clipboard = undo.Wayland(probe=True)
+                    clipboard = Wayland(probe=True)
                     clipboard.close()
                 send.assert_called_once()
                 self.assertEqual((1, 1), send.call_args[0][:2])  # Nur get_registry.
@@ -69,13 +77,13 @@ class DiagnoseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             environment = {'WAYLAND_DISPLAY': 'test', 'XDG_RUNTIME_DIR': directory}
             os.chmod(directory, 0o755)
-            with patch.dict(os.environ, environment, clear=True), patch.object(undo, 'dependencies'), \
-                 patch.object(undo, 'backend') as backend:
-                self.assertEqual('runtime-unsafe', undo.diagnose())
+            with patch.dict(os.environ, environment, clear=True), patch.object(backends, 'dependencies'), \
+                 patch.object(backends, 'backend') as backend:
+                self.assertEqual('runtime-unsafe', backends.diagnose())
                 backend.assert_not_called()
                 self.assertEqual([], os.listdir(directory))
-        with patch.dict(os.environ, {'WAYLAND_DISPLAY': 'test'}, clear=True), patch.object(undo, 'dependencies'):
-            self.assertEqual('wayland-runtime-missing', undo.diagnose())
+        with patch.dict(os.environ, {'WAYLAND_DISPLAY': 'test'}, clear=True), patch.object(backends, 'dependencies'):
+            self.assertEqual('wayland-runtime-missing', backends.diagnose())
 
 
 class FakeClipboard:
@@ -91,7 +99,7 @@ class FakeClipboard:
 
     def capture(self):
         if self.failure:
-            raise undo.UndoError("Nicht lesbar")
+            raise UndoError("Nicht lesbar")
         return self.epoch, self.data.copy()
 
     def text(self, data):
@@ -99,7 +107,7 @@ class FakeClipboard:
 
     def publish(self, data):
         if self.write_failure:
-            raise undo.UndoError("Nicht schreibbar", 3)
+            raise UndoError("Nicht schreibbar", 3)
         self.writes += 1
         self.data = data.copy()
         self.epoch += 1
@@ -110,7 +118,7 @@ class StateTests(unittest.TestCase):
     def setUp(self):
         self.clip = FakeClipboard()
         self.now = 1000
-        self.state = undo.State(self.clip, lambda: self.now)
+        self.state = State(self.clip, lambda: self.now)
 
     def replace(self):
         token = self.state.command("prepare")
@@ -145,14 +153,14 @@ class StateTests(unittest.TestCase):
         self.replace()
         self.state.command("undo")
         self.assertEqual(original, self.clip.data)
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("undo")
         self.assertEqual(2, self.clip.writes)
 
     def test_new_owner_with_identical_bytes_invalidates(self):
         self.replace()
         self.clip.epoch += 1
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("undo")
         self.assertIsNone(self.state.saved)
         self.assertEqual(1, self.clip.writes)
@@ -166,13 +174,13 @@ class StateTests(unittest.TestCase):
     def test_change_before_replace(self):
         token = self.state.command("prepare")
         self.clip.epoch += 1
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("replace", token, b"new")
         self.assertEqual(0, self.clip.writes)
 
     def test_pending_busy_cancel_only_matching(self):
         token = self.state.command("prepare")
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("prepare")
         self.state.command("cancel", "wrong")
         self.assertIsNotNone(self.state.pending)
@@ -184,7 +192,7 @@ class StateTests(unittest.TestCase):
         original = self.clip.data.copy()
         self.replace()
         self.clip.failure = True
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("prepare")
         self.clip.failure = False
         self.state.command("undo")
@@ -209,19 +217,19 @@ class StateTests(unittest.TestCase):
     def test_ttl_boundary_and_pending_expiry(self):
         token = self.state.command("prepare")
         self.now += 600
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("replace", token, b"new")
         self.replace()
         self.now += 600
         self.state.expire()
         self.assertIsNone(self.state.saved)
         self.assertIsNone(self.state.pending)
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("undo")
 
     def test_invalid_utf8_never_writes(self):
         token = self.state.command("prepare")
-        with self.assertRaises(undo.UndoError) as error:
+        with self.assertRaises(UndoError) as error:
             self.state.command("replace", token, b"\xff")
         self.assertEqual(3, error.exception.code)
         self.assertEqual(0, self.clip.writes)
@@ -230,7 +238,7 @@ class StateTests(unittest.TestCase):
         self.replace()
         token = self.state.command("prepare")
         self.clip.write_failure = True
-        with self.assertRaises(undo.UndoError):
+        with self.assertRaises(UndoError):
             self.state.command("replace", token, b"second")
         self.assertIsNotNone(self.state.saved)
         self.assertIsNone(self.state.pending)
@@ -252,17 +260,17 @@ class SecurityTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as root:
                 os.chmod(root, 0o700)
                 os.environ["XDG_RUNTIME_DIR"] = root
-                path, fd = undo.private_directory()
+                path, fd = daemon.private_directory()
                 os.close(fd)
                 self.assertEqual(0o700, os.stat(path).st_mode & 0o777)
                 os.chmod(path, 0o755)
-                with self.assertRaises(undo.UndoError):
-                    undo.private_directory()
+                with self.assertRaises(UndoError):
+                    daemon.private_directory()
                 os.chmod(path, 0o700)
                 os.rmdir(path)
                 os.symlink(root, path)
-                with self.assertRaises(undo.UndoError):
-                    undo.private_directory()
+                with self.assertRaises(UndoError):
+                    daemon.private_directory()
         finally:
             if old is None:
                 os.environ.pop("XDG_RUNTIME_DIR", None)
@@ -273,22 +281,106 @@ class SecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "control.sock"
             path.write_text("unrelated")
-            with self.assertRaises(undo.UndoError):
-                undo.check_socket(path)
+            with self.assertRaises(UndoError):
+                daemon.check_socket(path)
             path.unlink()
             path.symlink_to(Path(root) / "outside")
-            with self.assertRaises(undo.UndoError):
-                undo.check_socket(path)
+            with self.assertRaises(UndoError):
+                daemon.check_socket(path)
 
     def test_wayland_strings_preserve_names(self):
         for name in ("text/plain;charset=utf-8", "application/x-äö", "zero"):
-            encoded = undo.pack_string(name)
-            decoded, end = undo.unpack_string(encoded)
+            encoded = wayland.pack_string(name)
+            decoded, end = wayland.unpack_string(encoded)
             self.assertEqual(name, decoded)
             self.assertEqual(len(encoded), end)
         for raw in (b"", b"\x00\x00\x00\x00", b"\xff\xff\xff\xff"):
-            with self.assertRaises(undo.UndoError):
-                undo.unpack_string(raw)
+            with self.assertRaises(UndoError):
+                wayland.unpack_string(raw)
+
+
+class ResourceLifetimeTests(unittest.TestCase):
+    def test_wayland_initial_selection_failure_closes_socket_and_received_fds(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             socket.socket(socket.AF_UNIX) as listener, socket.socket(socket.AF_UNIX) as client:
+            listener.bind(os.path.join(directory, "test"))
+            listener.listen()
+            queued_read, queued_write = os.pipe()
+            transfer_read, transfer_write = os.pipe()
+            environment = {"WAYLAND_DISPLAY": "test", "XDG_RUNTIME_DIR": directory}
+
+            def enter_registry(clipboard):
+                clipboard.globals = {
+                    1: wayland.Global(wayland.WLR_MANAGER, 2),
+                    2: wayland.Global(wayland.SEAT_INTERFACE, 1),
+                }
+
+            def fail_selection(clipboard):
+                clipboard.fds.append(queued_write)
+                clipboard.writes[transfer_write] = wayland.Write(memoryview(b"data"), float("inf"))
+                raise UndoError("Initial offer failed")
+
+            try:
+                with patch.dict(os.environ, environment, clear=True), \
+                     patch.object(wayland.socket, "socket", return_value=client), \
+                     patch.object(Wayland, "send"), \
+                     patch.object(Wayland, "sync", enter_registry), \
+                     patch.object(Wayland, "_settle_initial_selection", fail_selection):
+                    with self.assertRaisesRegex(UndoError, "Initial offer failed"):
+                        Wayland()
+                self.assertEqual(-1, client.fileno())
+                for fd in (queued_write, transfer_write):
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+            finally:
+                for fd in (queued_read, queued_write, transfer_read, transfer_write):
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+
+    def test_x11_failed_selection_setup_restores_previous_error_handler(self):
+        for failure in ("chunk", "sync"):
+            with self.subTest(failure=failure):
+                library, fixes = Mock(), Mock()
+                library.XSetErrorHandler.return_value = 42
+                library.XOpenDisplay.return_value = 100
+                library.XInternAtom.return_value = 200
+                library.XCreateSimpleWindow.return_value = 300
+                library.XMaxRequestSize.return_value = 64 if failure == "chunk" else 1024
+                expected = "Transfergröße" if failure == "chunk" else "sync failure"
+                with patch.object(ctypes.util, "find_library", side_effect=["xlib", "xfixes"]), \
+                     patch.object(ctypes, "CDLL", side_effect=[library, fixes]), \
+                     patch.object(X11, "sync", side_effect=UndoError("sync failure")):
+                    with self.assertRaisesRegex(UndoError, expected):
+                        X11()
+                self.assertEqual([
+                    call.XSetErrorHandler(x11._X_ERROR_HANDLER),
+                    call.XDestroyWindow(100, 300),
+                    call.XCloseDisplay(100),
+                    call.XSetErrorHandler(42),
+                ], [entry for entry in library.mock_calls if entry[0] in (
+                    "XSetErrorHandler", "XDestroyWindow", "XCloseDisplay",
+                )])
+                self.assertEqual({}, X11._displays)
+
+    def test_replace_sends_payload_without_appending_it_to_header(self):
+        payload = b"converted content" * 2048
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.recv.return_value = b'{"code": 0, "result": ""}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            fd = os.open(directory, os.O_RDONLY)
+            with patch.object(cli, "private_directory", return_value=(directory, fd)), \
+                 patch.object(cli, "connect", return_value=connection), \
+                 patch.object(sys, "stdin", Mock(buffer=Mock(read=Mock(return_value=payload)))):
+                self.assertEqual("", cli.client(str(HELPER), "replace", "token"))
+        sent_header, sent_payload = [entry.args[0] for entry in connection.sendall.call_args_list]
+        length, = daemon.REQUEST_LENGTH.unpack_from(sent_header)
+        request = sent_header[daemon.REQUEST_LENGTH.size:]
+        self.assertEqual(length, len(request))
+        self.assertEqual({"command": "replace", "token": "token", "size": len(payload)}, json.loads(request))
+        self.assertIs(payload, sent_payload)
 
 
 class NativeRepresentationTests(unittest.TestCase):
@@ -296,8 +388,8 @@ class NativeRepresentationTests(unittest.TestCase):
         class Transport:
             def XChangeProperty(self, display, window, prop, typ, fmt, mode, ptr, count):
                 self.format = fmt
-                self.values = [undo.C.cast(ptr, undo.C.POINTER(undo.UL))[i] for i in range(count)]
-        clip = undo.X11.__new__(undo.X11)
+                self.values = [ctypes.cast(ptr, ctypes.POINTER(x11.UL))[i] for i in range(count)]
+        clip = X11.__new__(X11)
         clip.x, clip.display = Transport(), None
         raw = b"\x01\x00\x00\x00\xff\xff\xff\xff"
         if sys.byteorder != "little":
@@ -307,54 +399,54 @@ class NativeRepresentationTests(unittest.TestCase):
         self.assertEqual([1, 0xffffffff], clip.x.values)
 
     def test_xclip_incr_capability_is_not_a_payload_format(self):
-        clip = undo.X11.__new__(undo.X11)
+        clip = X11.__new__(X11)
         clip.targets, clip.timestamp, clip.multiple, clip.incr = 1, 2, 3, 4
         clip.atom_type, clip.window = 11, 999
         names = {"SAVE_TARGETS": 6, "DELETE": 7, "INSERT_SELECTION": 8, "INSERT_PROPERTY": 9}
         clip.atom = lambda name: names[name]
-        clip.stamp = lambda: (1, 42)
+        clip.stamp = lambda: X11Stamp(1, 42)
         requested = []
         def convert(target, deadline, limit):
             requested.append(target)
             if target == clip.targets:
-                return 11, 32, undo.struct.pack("=6I", 1, 2, 3, 4, 6, 10)
-            return 12, 8, b"opaque\x00data"
+                return X11Format(11, 32, struct.pack("=6I", 1, 2, 3, 4, 6, 10))
+            return X11Format(12, 8, b"opaque\x00data")
         clip._convert = convert
         stamp, snapshot = clip.capture()
-        self.assertEqual((1, 42), stamp)
-        self.assertEqual({10: (12, 8, b"opaque\x00data")}, snapshot)
+        self.assertEqual(X11Stamp(1, 42), stamp)
+        self.assertEqual({10: X11Format(12, 8, b"opaque\x00data")}, snapshot)
         self.assertEqual([1, 10], requested)
 
     def test_dead_foreign_x11_window_does_not_poison_transfer(self):
-        clip = undo.X11.__new__(undo.X11)
+        clip = X11.__new__(X11)
         clip.window, clip.read_window, clip.errors = 123, 456, False
-        error = undo.XError(0, None, 789, 0, 3, 18, 0)
-        clip._error(None, undo.C.byref(error))
+        error = x11.XError(0, None, 789, 0, 3, 18, 0)
+        clip._error(error)
         self.assertFalse(clip.errors)
         error.resourceid = clip.read_window
-        clip._error(None, undo.C.byref(error))
+        clip._error(error)
         self.assertTrue(clip.errors)
 
     def test_wayland_fd_precedes_its_send_message_in_a_batch(self):
-        sender, receiver = undo.socket.socketpair()
+        sender, receiver = socket.socketpair()
         read_fd, write_fd = os.pipe()
-        clip = undo.Wayland.__new__(undo.Wayland)
-        clip.sock, clip.message, clip.fds = receiver, bytearray(), []
+        clip = Wayland.__new__(Wayland)
+        clip.sock, clip.message, clip.fds = receiver, bytearray(), deque()
         clip.objects = {2: "callback", 10: "source"}
         clip.completed, clip.writes = set(), {}
         clip.sources = {10: {"binary": b"\x00\xffpayload"}}
-        callback = undo.struct.pack("=III", 2, 12 << 16, 0)
-        body = undo.pack_string("binary")
-        message = undo.struct.pack("=II", 10, (8 + len(body)) << 16) + body
+        callback = struct.pack("=III", 2, 12 << 16, 0)
+        body = wayland.pack_string("binary")
+        message = struct.pack("=II", 10, (8 + len(body)) << 16) + body
         try:
-            sender.sendmsg([callback + message], [(undo.socket.SOL_SOCKET, undo.socket.SCM_RIGHTS,
-                                                  undo.array.array("i", [write_fd]))])
+            sender.sendmsg([callback + message], [(socket.SOL_SOCKET, socket.SCM_RIGHTS,
+                                                  array.array("i", [write_fd]))])
             os.close(write_fd)
             write_fd = None
             clip._read(time.monotonic() + 1)
             self.assertEqual(1, len(clip.fds))
             clip._read(time.monotonic() + 1)
-            self.assertEqual([], clip.fds)
+            self.assertFalse(clip.fds)
             clip._pump_writes()
             self.assertEqual(b"\x00\xffpayload", os.read(read_fd, 100))
             self.assertEqual(b"", os.read(read_fd, 1))
@@ -370,15 +462,15 @@ class NativeRepresentationTests(unittest.TestCase):
             receiver.close()
 
     def test_wayland_empty_and_binary_send_close_fd(self):
-        clip = undo.Wayland.__new__(undo.Wayland)
+        clip = Wayland.__new__(Wayland)
         clip.objects = {10: "source"}
         clip.sources = {10: {"empty": b"", "binary": b"\x00\xffdata"}}
         clip.writes = {}
         for name, expected in clip.sources[10].items():
             read_fd, write_fd = os.pipe()
-            fds = [write_fd]
-            clip._event(10, 0, undo.pack_string(name), fds)
-            self.assertEqual([], fds)
+            fds = deque([write_fd])
+            clip._event(10, 0, wayland.pack_string(name), fds)
+            self.assertFalse(fds)
             clip._pump_writes()
             try:
                 self.assertEqual(expected, os.read(read_fd, 100))
@@ -398,25 +490,25 @@ def fixture(clip, size=2 * 1024 * 1024):
         "application/x-md-clip-opaque": bytes(range(256)) * 4,
         "application/x-md-clip-large": b"a\x00b\xff" * (size // 4),
     }
-    if isinstance(clip, undo.X11):
-        result = {clip.atom(name): (clip.atom(name), 8, value) for name, value in data.items()}
-        result[clip.atom("application/x-md-clip-16")] = clip.atom("MD_CLIP_SHORT"), 16, b"\x00\x01\xff\xff\x20\x30"
-        result[clip.atom("application/x-md-clip-32")] = clip.atom("MD_CLIP_LONG"), 32, b"\x00\x00\x00\x01\xff\xff\xff\xff"
+    if isinstance(clip, X11):
+        result = {clip.atom(name): X11Format(clip.atom(name), 8, value) for name, value in data.items()}
+        result[clip.atom("application/x-md-clip-16")] = X11Format(clip.atom("MD_CLIP_SHORT"), 16, b"\x00\x01\xff\xff\x20\x30")
+        result[clip.atom("application/x-md-clip-32")] = X11Format(clip.atom("MD_CLIP_LONG"), 32, b"\x00\x00\x00\x01\xff\xff\xff\xff")
         return result
     return data
 
 
 def source():
-    clip = undo.backend()
+    clip = backends.backend()
     held = []
     delayed = False
     capture_marker = Path(os.environ["MD_CLIP_TEST_CAPTURE_MARKER"])
-    if isinstance(clip, undo.Wayland):
+    if isinstance(clip, Wayland):
         original = clip._event
         def event(obj, opcode, data, fds):
             if delayed and clip.objects.get(obj) == "source" and opcode == 0:
                 if fds:
-                    held.append(fds.pop(0))
+                    held.append(fds.popleft())
                     capture_marker.touch()
             else:
                 original(obj, opcode, data, fds)
@@ -426,8 +518,8 @@ def source():
         original_serve, original_put = clip._serve, clip.put
         def serve(requestor, target, prop):
             value = clip._value(target)
-            if value and len(value[2]) > clip.chunk:
-                transfers[(requestor, prop)] = {"expected": len(value[2]), "sent": 0, "chunks": 0,
+            if value and len(value.data) > clip.chunk:
+                transfers[(requestor, prop)] = {"expected": len(value.data), "sent": 0, "chunks": 0,
                                                 "eof": False, "started": time.monotonic()}
             return original_serve(requestor, target, prop)
         def put(window, prop, typ, fmt, data):
@@ -457,14 +549,14 @@ def source():
             if command == "quit" or not command:
                 break
             if command == "stats":
-                if isinstance(clip, undo.X11):
+                if isinstance(clip, X11):
                     values = list(transfers.values())[-5:]
                     for stats in values:
-                        stats["active"] = any(info[2] and len(info[2]) == stats["expected"] for info in clip.outgoing.values())
+                        stats["active"] = any(info.value.data and len(info.value.data) == stats["expected"] for info in clip.outgoing.values())
                     state = {"transfers": values, "errors": clip.errors,
-                             "last_error": getattr(clip, "last_error", None),
-                             "active": [{"size": len(item[2]), "position": item[3],
-                                         "remaining": round(item[4] - time.monotonic(), 3)}
+                             "last_error": asdict(clip.last_error) if clip.last_error else None,
+                             "active": [{"size": len(item.value.data), "position": item.sent,
+                                         "remaining": round(item.expires - time.monotonic(), 3)}
                                         for item in clip.outgoing.values()]}
                     print(json.dumps(state), file=sys.stderr, flush=True)
             elif command == "delay":
@@ -554,16 +646,16 @@ class NativeTests(unittest.TestCase):
         return result.stdout.decode().strip()
 
     def read_clipboard(self):
-        clip = undo.backend()
+        clip = backends.backend()
         try:
             _, snapshot = clip.capture()
             return snapshot
-        except undo.UndoError as error:
-            if isinstance(clip, undo.X11) and self.publisher.poll() is None:
+        except UndoError as error:
+            if isinstance(clip, X11) and self.publisher.poll() is None:
                 self.source_command("stats")
                 if select.select([self.publisher.stderr], [], [], 1)[0]:
                     stats = self.publisher.stderr.readline().strip()
-                    raise undo.UndoError(str(error) + " Sender: " + stats, error.code)
+                    raise UndoError(str(error) + " Sender: " + stats, error.code)
             raise
         finally:
             clip.close()
@@ -596,6 +688,10 @@ class NativeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="md-clip-other-install-") as directory:
             other = Path(directory) / "clipboard-undo-linux.py"
             shutil.copyfile(HELPER, other)
+            shutil.copytree(
+                HELPER.parent / "clipboard_undo", other.parent / "clipboard_undo",
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
             result = subprocess.run([sys.executable, str(other), "undo"],
                                     capture_output=True, timeout=40)
             self.assertEqual(0, result.returncode, result.stderr.decode())
@@ -607,7 +703,7 @@ class NativeTests(unittest.TestCase):
         token = self.run_helper("prepare")
         self.source_command("republish")
         self.run_helper("replace", token, b"new", expected=1)
-        clip = undo.backend()
+        clip = backends.backend()
         try:
             self.assertEqual(self.read_clipboard(), fixture(clip))
         finally:
@@ -633,12 +729,12 @@ class NativeTests(unittest.TestCase):
         self.run_helper("cancel", token)
 
     def test_x11_selection_already_buffered_by_xlib(self):
-        clip = undo.backend()
+        clip = backends.backend()
         try:
-            if not isinstance(clip, undo.X11):
+            if not isinstance(clip, X11):
                 self.skipTest("Xlibs Ereigniswarteschlange betrifft nur X11")
-            clip.x.XPutBackEvent.restype = undo.C.c_int
-            clip.x.XPutBackEvent.argtypes = [undo.P, undo.C.POINTER(undo.Event)]
+            clip.x.XPutBackEvent.restype = ctypes.c_int
+            clip.x.XPutBackEvent.argtypes = [x11.P, ctypes.POINTER(x11.Event)]
             pump = clip.pump
             buffered = []
             def queue_after_pump(*args):
@@ -646,9 +742,9 @@ class NativeTests(unittest.TestCase):
                 if not buffered and clip.selection_events:
                     # Eine echte Antwort in Xlibs Queue nachbilden, nachdem
                     # der letzte Pump-Durchlauf sie noch nicht übernehmen konnte.
-                    event = undo.Event()
+                    event = x11.Event()
                     event.selection = clip.selection_events.pop(0)
-                    clip.x.XPutBackEvent(clip.display, undo.C.byref(event))
+                    clip.x.XPutBackEvent(clip.display, ctypes.byref(event))
                     clip.x.XSync(clip.display, 0)
                     buffered.append(event.selection.target)
             clip.pump = queue_after_pump
@@ -747,7 +843,13 @@ class NativeTests(unittest.TestCase):
                     while time.monotonic()<end and proc.poll() is None:
                         for value in Path('/proc/%s/task/%s/children'%(proc.pid,proc.pid)).read_text().split():
                             path = Path('/proc')/value/'comm'
-                            if path.exists() and path.read_text().strip()=='cat':child=int(value);break
+                            try:
+                                name = path.read_text().strip()
+                            except FileNotFoundError:
+                                continue  # The child may exit between listing and reading /proc.
+                            if name == 'cat':
+                                child = int(value)
+                                break
                         if child is not None:break
                         time.sleep(.01)
                     self.assertIsNotNone(child, 'stdin-Kopie wurde nicht erreicht')
@@ -781,7 +883,7 @@ class NativeTests(unittest.TestCase):
     def test_only_socket_is_persisted(self):
         token = self.run_helper("prepare")
         self.run_helper("replace", token, b"sensitive-test-data")
-        path, fd = undo.private_directory()
+        path, fd = daemon.private_directory()
         os.close(fd)
         self.assertEqual(["control.sock"], os.listdir(path))
         self.run_helper("undo")
@@ -790,10 +892,10 @@ class NativeTests(unittest.TestCase):
         original = self.read_clipboard()
         token = self.run_helper("prepare")
         self.run_helper("replace", token, b"new")
-        path, fd = undo.private_directory()
+        path, fd = daemon.private_directory()
         os.close(fd)
         for request in (b"x", b"[]", b"null", b'{"command":[]}'):
-            connection = undo.connect(os.path.join(path, "control.sock"))
+            connection = daemon.connect(os.path.join(path, "control.sock"))
             with connection:
                 connection.sendall(len(request).to_bytes(4, "big") + request)
                 response = json.loads(connection.recv(1024))
@@ -802,8 +904,8 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(original, self.read_clipboard())
 
     def unread_request(self, request, data=b''):
-        path, fd = undo.private_directory(); os.close(fd)
-        connection = undo.connect(os.path.join(path,'control.sock'))
+        path, fd = daemon.private_directory(); os.close(fd)
+        connection = daemon.connect(os.path.join(path,'control.sock'))
         try:
             connection.shutdown(socket.SHUT_RD)
             payload=json.dumps(dict(request,size=len(data))).encode()
@@ -840,7 +942,7 @@ class NativeTests(unittest.TestCase):
         with self.unread_request({'command':'replace','token':token},b'replacement'):
             status=json.loads(self.run_helper('status',token))
             self.assertTrue(status['undo_available'] and not status['pending_valid'])
-        clip=undo.backend()
+        clip=backends.backend()
         try:self.assertEqual(clip.text(b'replacement'),self.read_clipboard())
         finally:clip.close()
         self.run_helper('undo');self.assertEqual(original,self.read_clipboard())

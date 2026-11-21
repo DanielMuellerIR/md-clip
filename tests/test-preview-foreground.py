@@ -3,6 +3,7 @@
 import argparse
 import base64
 import json
+from itertools import count
 import os
 from pathlib import Path
 import platform
@@ -16,14 +17,14 @@ import tempfile
 import time
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--allow-focus', action='store_true', help='Fokussierte Tastaturprüfung ausdrücklich erlauben')
+mode = parser.add_mutually_exclusive_group(required=True)
+mode.add_argument('--allow-focus', action='store_true', help='Fokussierte Tastaturprüfung ausdrücklich erlauben')
+mode.add_argument('--background', action='store_true', help='AppKit-Ereignisse bei unverändertem Systemfokus prüfen')
 parser.add_argument('--output', type=Path, required=True, help='Neuer Ordner für synthetische Ergebnisbelege')
 args = parser.parse_args()
 if platform.system() != 'Darwin':
     print('SKIP: Vordergrundprüfung benötigt macOS')
     raise SystemExit(0)
-if not args.allow_focus:
-    parser.error('Diese Prüfung übernimmt den Fensterfokus; --allow-focus ist erforderlich.')
 console = plistlib.loads(subprocess.check_output(['ioreg', '-n', 'Root', '-d1', '-a']))
 console = console[0] if isinstance(console, list) else console
 # Der globale Wert kann bereits frei melden, während die Benutzersitzung noch gesperrt ist.
@@ -56,10 +57,10 @@ def osa(source, *arguments):
                                    text=True, stderr=subprocess.STDOUT, timeout=8).strip()
 
 
-def events(pid, command):
-    return osa('on run argv\ntell application "System Events"\n'
-               'tell first application process whose unix id is (item 1 of argv as integer)\n'
-               + command + '\nend tell\nend tell\nend run', pid)
+def activate(pid):
+    osa('on run argv\ntell application "System Events"\n'
+        'set frontmost of first application process whose unix id is (item 1 of argv as integer) to true\n'
+        'end tell\nend run', pid)
 
 
 def terminate(process):
@@ -97,14 +98,16 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
     preview = app/'Contents/MacOS/md-clip-preview'
     board_helper = work/'private-board'
     accessibility = work/'accessibility'
-    for source, binary, flags in (
-        ('helpers/clipboard-undo.swift', undo, ['-O', '-D', 'TEST']),
-        ('helpers/md-clip-preview.swift', preview, ['-D', 'TEST']),
-        ('tests/test-preview-integration.swift', board_helper, []),
-        ('tests/preview-accessibility.swift', accessibility, []),
+    swift = ['swiftc', '-target', platform.machine() + '-apple-macos14.0']
+    strict = ['-swift-version', '6', '-strict-concurrency=complete', '-warnings-as-errors']
+    for sources, binary, flags in (
+        (['helpers/clipboard-undo.swift', 'tests/clipboard-undo-test-main.swift'], undo, [*strict, '-O']),
+        (['helpers/md-clip-preview.swift', 'tests/md-clip-preview-test-main.swift'], preview, strict),
+        (['tests/test-preview-integration.swift'], board_helper, []),
+        (['tests/preview-accessibility.swift'], accessibility, []),
     ):
-        subprocess.run(['swiftc', '-target', platform.machine()+'-apple-macos14.0', *flags,
-                        str(ROOT/source), '-o', str(binary)], check=True)
+        subprocess.run([*swift, *flags, *(str(ROOT / source) for source in sources),
+                        '-o', str(binary)], check=True)
     (runtime/'helpers/md-clip-preview').symlink_to(preview)
     cli = runtime/'bin/md-clip'
     driver = subprocess.Popen([str(board_helper), str(undo), str(cli), str(work/'board'), '--serve-private-board'],
@@ -122,13 +125,29 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
     ready = receive()
     environment = dict(os.environ, MD_CLIP_TEST_PASTEBOARD=ready['board'],
                        MD_CLIP_TEST_DIRECTORY=ready['directory'],
-                       MD_CLIP_TEST_PREVIEW_EVIDENCE=str(work/'observed.json'))
-    environment.pop('MD_CLIP_TEST_PREVIEW_BACKGROUND', None)
+                       MD_CLIP_TEST_PREVIEW_EVIDENCE=str(work/'observed.json'),
+                       MD_CLIP_TEST_PREVIEW_INPUT=str(work/'input-event.json'))
+    if args.background:
+        environment['MD_CLIP_TEST_PREVIEW_BACKGROUND'] = '1'
+    else:
+        environment.pop('MD_CLIP_TEST_PREVIEW_BACKGROUND', None)
     environment.pop('MD_CLIP_TEST_PREVIEW_ACTION', None)
     input_file = work/'body.txt'
     input_file.write_text(BODY)
     observed = work/'observed.json'
-    original_front = osa('tell application "System Events" to get name of first application process whose frontmost is true')
+    event_file = work/'input-event.json'
+
+    input_serial = count(1)
+
+    def send_input(**value):
+        identifier = next(input_serial)
+        pending = event_file.with_suffix('.pending')
+        pending.write_text(json.dumps(dict(id=identifier, **value)))
+        pending.replace(event_file)
+        return identifier
+
+    def send_key(code, characters, command=False, shift=False):
+        return send_input(code=code, characters=characters, command=command, shift=shift)
 
     def board(operation, **values):
         driver.stdin.write(json.dumps(dict(operation=operation, **values))+'\n')
@@ -143,6 +162,10 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
                 value = json.loads(observed.read_text())
             except (FileNotFoundError, json.JSONDecodeError):
                 value = {}
+            if value and args.background:
+                assert value.get('front_pid') != value.get('preview_pid'), (
+                    'Die private Vorschau hat im Hintergrundmodus den Systemfokus übernommen'
+                )
             if predicate(value):
                 return value
             time.sleep(.05)
@@ -150,13 +173,15 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
 
     def start():
         observed.unlink(missing_ok=True)
+        event_file.unlink(missing_ok=True)
         process = subprocess.Popen([str(cli), '--input', str(input_file), '--plain', '--replace', '--preview-window', '--quiet'],
                                    env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         children.append(process)
         try:
             value = observation(process)
             pid = value['preview_pid']
-            events(pid, 'set frontmost to true')
+            if args.allow_focus:
+                activate(pid)
             return process, pid
         except Exception:
             terminate(process)
@@ -164,8 +189,11 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
 
     def focus(process, pid, name):
         target = {'content': 'md-clip-preview-content', 'notes': 'Quelle und Konvertierungshinweise'}[name]
-        subprocess.run([str(accessibility), str(pid), 'focus', target], check=True, capture_output=True, timeout=6)
-        return observation(process, lambda value: value.get('focus') == name and value.get('key_window'))
+        if args.allow_focus:
+            subprocess.run([str(accessibility), str(pid), 'focus', target], check=True, capture_output=True, timeout=6)
+            return observation(process, lambda value: value.get('focus') == name and value.get('key_window'))
+        identifier = send_input(focus=name)
+        return observation(process, lambda value: value.get('last_input') == identifier and value.get('focus') == name)
 
     def finished(process, expected):
         try:
@@ -174,33 +202,32 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
             return False, None, 'Fenster blieb offen'
         return process.returncode == expected and not output, process.returncode, error.decode('utf-8', 'replace')
 
-    def tab_sequence(process, pid, reverse=False):
+    def tab_sequence(process, reverse=False):
         sequence = []
         for _ in range(8):
-            before = observation(process, lambda value: bool(value))
-            events(pid, 'key code 48'+(' using shift down' if reverse else ''))
-            current = observation(process, lambda value: value.get('observed_at', 0) > before['observed_at'])
+            identifier = send_key(48, '\t', shift=reverse)
+            current = observation(process, lambda value: value.get('last_input') == identifier)
             sequence.append(current['focus'])
         return sequence
 
     try:
-        for name, location, command, expected in (
-            ('return-initial', None, 'key code 36', 0),
-            ('return-content', 'content', 'key code 36', 0),
-            ('enter-content', 'content', 'key code 76', 0),
-            ('return-notes', 'notes', 'key code 36', 0),
-            ('escape-content', 'content', 'key code 53', 4),
-            ('escape-notes', 'notes', 'key code 53', 4),
-            ('command-return-content', 'content', 'key code 36 using command down', 0),
-            ('command-q-content', 'content', 'keystroke "q" using command down', 4),
-            ('command-z-content', 'content', 'keystroke "z" using command down', 0),
+        for name, location, key, expected in (
+            ('return-initial', None, (36, '\r'), 0),
+            ('return-content', 'content', (36, '\r'), 0),
+            ('enter-content', 'content', (76, '\x03'), 0),
+            ('return-notes', 'notes', (36, '\r'), 0),
+            ('escape-content', 'content', (53, '\x1b'), 4),
+            ('escape-notes', 'notes', (53, '\x1b'), 4),
+            ('command-return-content', 'content', (36, '\r', True), 0),
+            ('command-q-content', 'content', (12, 'q', True), 4),
+            ('command-z-content', 'content', (6, 'z', True), 0),
         ):
             seeded = board('seed', previous=name.startswith('command-z'))
             process = None
             try:
                 process, pid = start()
                 before = focus(process, pid, location) if location else observation(process)
-                events(pid, command)
+                send_key(*key)
                 passed, actual, error = finished(process, expected)
                 snapshot = board('snapshot')
                 if passed and name.startswith('command-z'):
@@ -226,8 +253,8 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
         try:
             initial = observation(process)
             if initial['keyboard_access']:
-                forward = tab_sequence(process, pid)
-                backward = tab_sequence(process, pid, reverse=True)
+                forward = tab_sequence(process)
+                backward = tab_sequence(process, reverse=True)
                 expected = {'content', 'notes', 'accept', 'cancel', 'undo'}
                 record('tab-and-shift-tab', expected.issubset(forward) and expected.issubset(backward),
                        keyboard_access=True, forward=forward, backward=backward)
@@ -238,8 +265,8 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
             board('write', text='Neue private Generation')
             invalid = observation(process, lambda value: not value.get('accept') and not value.get('undo'))
             if initial['keyboard_access']:
-                forward = tab_sequence(process, pid)
-                backward = tab_sequence(process, pid, reverse=True)
+                forward = tab_sequence(process)
+                backward = tab_sequence(process, reverse=True)
                 record('tab-skips-unavailable-actions', {'content', 'notes', 'cancel'}.issubset(forward)
                        and {'content', 'notes', 'cancel'}.issubset(backward)
                        and not {'accept', 'undo'}.intersection(forward+backward),
@@ -253,13 +280,13 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
         process, pid = start()
         try:
             focus(process, pid, 'content')
-            events(pid, 'keystroke "a" using command down')
+            send_key(0, 'a', True)
             selection = observation(process, lambda value: value.get('selection') == [0, len(BODY.encode('utf-16-le'))//2])
-            events(pid, 'keystroke "X"')
-            time.sleep(1.1)
-            unchanged = observation(process)['content'] == BODY
+            typed = send_key(7, 'X')
+            after_typing = observation(process, lambda value: value.get('last_input') == typed)
+            unchanged = after_typing['content'] == BODY
             record('read-only-select-all', unchanged, selection=selection['selection'])
-            events(pid, 'keystroke "c" using command down')
+            send_key(8, 'c', True)
             invalid = observation(process, lambda value: value.get('accept') is False)
             snapshot = board('snapshot')
             encoded = base64.b64encode(BODY.encode()).decode()
@@ -267,10 +294,10 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
                    and snapshot['host_change_count'] == seeded['host_change_count'], status=invalid['status'],
                    private_items=snapshot['items'], host_change_count_before=seeded['host_change_count'],
                    host_change_count_after=snapshot['host_change_count'])
-            events(pid, 'key code 36')
-            time.sleep(.3)
+            refused = send_key(36, '\r')
+            observation(process, lambda value: value.get('last_input') == refused)
             record('invalid-return-does-not-write', process.poll() is None and board('snapshot')['change_count'] == snapshot['change_count'])
-            events(pid, 'key code 53')
+            send_key(53, '\x1b')
             record('invalid-escape-closes', finished(process, 4)[0])
         finally:
             terminate(process)
@@ -280,7 +307,7 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
         try:
             expired = observation(process, lambda value: value.get('accept') is False and value.get('undo') is True)
             record('pending-expiry-keeps-undo', board('snapshot')['items'] == seeded['items'], status=expired['status'])
-            events(pid, 'keystroke "z" using command down')
+            send_key(6, 'z', True)
             record('undo-after-pending-expiry', finished(process, 0)[0] and board('snapshot')['items'] == seeded['original'])
         finally:
             terminate(process)
@@ -291,8 +318,7 @@ with tempfile.TemporaryDirectory(prefix='md-clip-foreground-', dir='/private/tmp
             board('stop')
         finally:
             terminate(driver)
-        osa('on run argv\ntell application "System Events" to set frontmost of process (item 1 of argv) to true\nend run', original_front)
 
 if not results or not all(item['passed'] for item in results):
     raise SystemExit(1)
-print('OK: fokussierte Vorschau, echte Tasten und private native CLI/Undo-Integration')
+print('OK: Vorschau mit fensterlokalen AppKit-Ereignissen und privater CLI-/Undo-Integration')

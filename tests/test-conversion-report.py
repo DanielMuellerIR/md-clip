@@ -47,18 +47,25 @@ with tempfile.TemporaryDirectory(prefix="md-clip-report-") as tmp:
     records, _ = pipeline("convert_html", table, strict=True, target="markdown")
     assert not records
     for html, reason in (("<p>&nbsp;</p>", "empty-document"),
+                         ("<strong>&nbsp;</strong>", "empty-document"),
                          ('<table><tr><td colspan="2">x</td></tr></table>', "table-spanned"),
                          ('<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>', "table-nested")):
         records, _ = pipeline("convert_html", html, success=False)
         assert records == [[reason, "1"]], records
+    # Auch ohne AST sind die tatsächlichen Ausgabebytes zu prüfen.
+    for writer_output in ("\u00a0", "\u200e", "\u2061", "  "):
+        process = subprocess.run(["bash", "-c", 'source "$1"; tidy_markdown gfm --require-visible',
+                                  "report-test", str(ROOT / "lib/pipeline.sh")],
+                                 input=writer_output.encode(), capture_output=True, timeout=5)
+        assert process.returncode == 1 and not process.stdout and not process.stderr
     layout = '<table><tr><td><p>first</p></td></tr></table><table><tr><td><p>second</p></td></tr></table>'
-    records, output = pipeline("flatten_layout_tables", layout)
+    records, output = pipeline("preprocess_rtf_html", layout)
     assert records == [["layout-tables-flattened", "2"]], records
     assert b"first" in output and b"second" in output and b"<table" not in output
-    records, _ = pipeline("flatten_layout_tables", layout, strict=True, success=False)
+    records, _ = pipeline("preprocess_rtf_html", layout, strict=True, success=False)
     assert records == [["layout-tables-flattened", "1"]], records
     nested = '<table><tr><td>outer<table><tr><td>inner</td></tr></table></td></tr></table>'
-    records, _ = pipeline("flatten_layout_tables", nested)
+    records, _ = pipeline("preprocess_rtf_html", nested)
     assert records == [["layout-tables-flattened", "2"]], records
     records, _ = pipeline("convert_rtf", '<table><tr><td>layout</td></tr></table>' + table)
     assert records == [["layout-tables-flattened", "1"], ["table-cells-flattened", "2"]], records
@@ -70,4 +77,13 @@ with tempfile.TemporaryDirectory(prefix="md-clip-report-") as tmp:
                        capture_output=True, env=env, timeout=20)
     assert p.returncode == 0, p.stderr
     assert result_file.read_text() == "layout-tables-flattened\t1\ntable-cells-flattened\t2\n"
+    # Beide Produzenten müssen einen defekten Berichtspfad melden, bevor
+    # Markdown aus einer unvollständig protokollierten Konvertierung ankommt.
+    env['MD_CLIP_RESULT_FILE'] = tmp
+    for function, html in (("preprocess_rtf_html", layout), ("convert_html", table)):
+        process = subprocess.run(["bash", "-c", 'set -o pipefail; source "$1"; "$2" gfm',
+                                  "report-test", str(ROOT / "lib/pipeline.sh"), function],
+                                 input=html.encode(), capture_output=True, env=env, timeout=20)
+        assert process.returncode != 0 and not process.stdout
+        assert "Konvertierungsbericht konnte nicht geschrieben werden.".encode() in process.stderr
 print("OK: Berichtskennungen, Anzahlen, Anhängen und strikte Abbrüche vor Ausgabe")

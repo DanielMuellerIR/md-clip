@@ -34,14 +34,13 @@ cd "$PROJECT_ROOT"
 # beweisen die Produkt-Roundtrips, dass ein sauberer Checkout keine bereits
 # kompilierten, ignorierten Helper aus dem Arbeitsverzeichnis benötigt.
 TEST_RUNTIME=$(mktemp -d)
-mkdir -p "$TEST_RUNTIME/bin"
-cp "$PROJECT_ROOT/bin/md-clip" "$TEST_RUNTIME/bin/md-clip"
-cp "$PROJECT_ROOT/lib/pipeline.sh" "$TEST_RUNTIME/bin/pipeline.sh"
-cp "$PROJECT_ROOT/lib/tables.lua" "$TEST_RUNTIME/bin/tables.lua"
-cp "$PROJECT_ROOT/lib/preprocess-html.pl" "$TEST_RUNTIME/bin/preprocess-html.pl"
-cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$TEST_RUNTIME/bin/tidy-markdown.pl"
+# shellcheck source=../wrappers/stage-runtime.sh
+source "$PROJECT_ROOT/wrappers/stage-runtime.sh"
+stage_runtime "$PROJECT_ROOT" "$TEST_RUNTIME/bin"
 if [ "$(uname -s)" = Linux ]; then
   cp "$PROJECT_ROOT/helpers/clipboard-undo-linux.py" "$TEST_RUNTIME/bin/clipboard-undo-linux.py"
+  mkdir -p "$TEST_RUNTIME/bin/clipboard_undo"
+  cp "$PROJECT_ROOT/helpers/clipboard_undo/"*.py "$TEST_RUNTIME/bin/clipboard_undo/"
   # Die Testkopie darf weder eine echte Undo-Sicherung benutzen noch deren Dienst stoppen.
   if [ -n "${WAYLAND_DISPLAY:-}" ] && [ "${WAYLAND_DISPLAY#/}" = "$WAYLAND_DISPLAY" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
     export WAYLAND_DISPLAY="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
@@ -94,21 +93,11 @@ else
   export LC_ALL=C.UTF-8 LANG=C.UTF-8
 fi
 
-# Die produktive Pipeline wird direkt geladen; nur der plattformspezifische
-# RTF-Adapter bleibt im Test-Runner.
 TO=gfm
 # shellcheck source=../lib/pipeline.sh
 source "$PROJECT_ROOT/lib/pipeline.sh"
-
-rtf_to_html() {
-  # codereview-ok: Dieser Adapter ist laut AGENTS.md bewusst der jeweilige
-  # Plattform-Rand; nur die danach gemeinsame Pipeline lebt in lib/. (2026-08-20)
-  if [ "$PLATFORM" = "macos" ]; then
-    textutil -convert html -format rtf -stdin -stdout
-  else
-    rtf_fix_escaped_newlines | pandoc -f rtf -t html
-  fi
-}
+# shellcheck source=../lib/platform.sh
+source "$PROJECT_ROOT/lib/platform.sh"
 
 # Zähler für Statistik am Ende.
 TOTAL=0
@@ -191,17 +180,17 @@ run_test "word-rtf (RTF-Pfad, $PLATFORM)" \
 # werden. Eine einspaltige Tabelle ohne Kopf bleibt dagegen bewusst Layout.
 actual_file="$TEST_RUNTIME/data-table.actual"
 printf '%s' '<table><tr><th>Name</th><th>Wert</th></tr><tr><td>A</td><td>1</td></tr></table>' \
-  | flatten_layout_tables | unwrap_list_paragraphs | html_to_markdown gfm > "$actual_file"
+  | preprocess_rtf_html | html_to_markdown gfm > "$actual_file"
 run_test "data-table (Zeilen und Spalten bleiben erhalten)" \
   "$actual_file" "$FIXTURES/data-table.expected.md"
 
 layout_table_actual=$(
   printf '%s' '<table><colgroup><col width="100"><tr><td>A</td></tr><tr><td>B</td></tr></table>' \
-    | flatten_layout_tables
+    | preprocess_rtf_html
 )
 formatted_list_actual=$(
   printf '%s' '<ul><li><p><strong>fett</strong> und mehr</p></li></ul>' \
-    | unwrap_list_paragraphs
+    | preprocess_rtf_html
 )
 TOTAL=$((TOTAL + 1))
 if [ "$layout_table_actual" = '<p>A</p><p>B</p>' ] \
@@ -224,20 +213,8 @@ run_test "empty-link (leerer Anker-Text → URL als Text)" \
   "$FIXTURES/empty-link.expected.md"
 
 # --- Test 4b: Anker um ein Inline-SVG behält seine Grafik ---
-# Kein Fixture, sondern eine gezielte Zusicherung: pandoc bettet ein Inline-SVG
-# als `data:`-Bild ein, und dessen Base64 hängt an der pandoc-Version — eine
-# Erwartungsdatei könnte macOS 3.9 und Ubuntu 3.1.3 nicht gleichzeitig erfüllen
-# (AGENTS: „Ein Fixture darf nichts festschreiben, was von der pandoc-Version
-# abhängt"). Geprüft wird deshalb nur das, was versionsunabhängig gelten muss:
-# Die Grafik muss als Markdown-Bild mit `data:image/svg+xml` IM Ziellink
-# stehen — genau das verlor fill_empty_html_links bis zum Review-Fund
-# 2026-08-05.
-#
-# Die Prüfung ist bewusst POSITIV formuliert. Vorher stand hier nur „Ergebnis
-# ist ungleich [https://ziel](https://ziel)"; eine leere Ausgabe oder ein
-# `[](https://ziel)` wäre damit als Erfolg durchgegangen, obwohl die Grafik
-# komplett fehlt (Review-Fund 2026-08-06).
-
+# SVG-Serialisierung kann mit der Pandoc-Version variieren. Geprüft wird,
+# ob ein eingebettetes SVG-Bild im richtigen Link erhalten bleibt.
 # svg_link_ok: Steht in der Ausgabe ein Bild mit SVG-Datenquelle, und liegt es
 # innerhalb des Ziellinks? Fixe Zeichenketten, kein Muster — die Base64-Bytes
 # des Bildes unterscheiden sich je pandoc-Version und dürfen hier nicht zählen.
@@ -373,10 +350,7 @@ run_test "code-blocks (Backslash in Code bleibt Code)" \
 # Der Test pinnt beide Seiten: im Fließtext fällt der Backslash weg, in der
 # Tabellenzeile und vor der Zeilenanfangs-Raute bleibt er stehen.
 #
-# Die Zeile „Code mit Schluss-Backslash" sichert den Sonderfall aus dem
-# Review-Fund 2026-08-06: Endet Inline-Code auf einen Backslash, schließt der
-# folgende Backtick den Code trotzdem. Vorher galt er als maskiert, der Span
-# blieb offen, und aus `` `\#foo\` `` wurde `` `#foo\` `` — verändertes Code.
+# Ein Backslash vor dem schließenden Backtick bleibt Teil des Inline-Codes.
 actual_file="$TEST_RUNTIME/escaped-markers.actual"
 convert_html "$TO" < "$FIXTURES/escaped-markers.html" > "$actual_file"
 run_test "escaped-markers (überzählige Backslashes weg)" \
@@ -394,10 +368,7 @@ else
   PASSED=$((PASSED + 1))
 fi
 
-# Unsichtbar heißt auch: nur ein geschütztes Leerzeichen. `\S` auf rohen Bytes
-# hielt dessen zwei UTF-8-Bytes (0xC2 0xA0) für Inhalt — der Auto-Modus
-# unterdrückte dann den vorhandenen Plain-Text-Fallback, und mit --replace
-# ersetzte Unsichtbares das Clipboard (Review-Fund 2026-08-21).
+# Geschützte Leerzeichen sind auch in UTF-8-Testdaten kein Inhalt.
 for invisible_html in '<p>&nbsp;</p>' '<p>&#8203;</p>' '<p> </p>'; do
   TOTAL=$((TOTAL + 1))
   if printf '%s' "$invisible_html" | convert_html gfm \
@@ -447,8 +418,7 @@ fi
 # --- Test 10b: römisch nummerierte Liste beim Ziel `markdown` ---
 # `md-clip --to markdown` schaltet pandocs Fancy Lists frei; aus
 # `<ol type="i" start="4">` wird dort der MEHRSTELLIGE Marker `iv.`. Erkennt
-# die Escape-Regel ihn nicht, fällt der Backslash vor der Raute weg und aus dem
-# Listentext wird eine Überschrift erster Ebene (Review-Fund 2026-08-06).
+# die Escape-Regel ihn nicht, entsteht nach `iv.` eine Überschrift.
 #
 # Geprüft wird nicht der Text, sondern die STRUKTUR: Das Ergebnis wird erneut
 # von pandoc gelesen und darf keinen Header enthalten. Das ist unabhängig davon,
@@ -509,7 +479,7 @@ else
   FAILED=$((FAILED + 1))
 fi
 
-# --- Test 10c2: Mehrpunkt- und Blockquote-Sonderlisten (Review-Fund 2026-08-17) ---
+# --- Test 10c2: Mehrpunkt- und Blockquote-Sonderlisten ---
 # Drei Fälle, die die frühere „Hard-Break davor ⇒ kein Listenpunkt"-Regel
 # fälschlich verwarf:
 #   a) eine enge a./b.-Liste, deren erster Punkt auf <br> endet — `b.` ist der
@@ -696,7 +666,7 @@ for target_format in gfm markdown commonmark; do
   fi
 done
 
-# --- Test 10f2: Tabellen überleben in jedem Zieldialekt (Review-Fund 2026-09-03) ---
+# --- Test 10f2: Tabellen überleben in jedem Zieldialekt ---
 # Drei Befunde stecken in diesem einen Fall, alle drei mit Totalverlust oder
 # verschobenem Text:
 #
@@ -757,7 +727,7 @@ for target_format in gfm markdown commonmark; do
   fi
 done
 
-# --- Test 10f3: Die Pipeline kommt mit Perl-Bordmitteln aus (Review-Fund 2026-09-03) ---
+# --- Test 10f3: Die Pipeline kommt mit Perl-Bordmitteln aus ---
 # Debian und Ubuntu liefern nur `perl-base` als Pflichtpaket aus; Module wie
 # Encode stecken erst im vollen `perl`-Paket. `command -v perl` bestand deshalb
 # auf einem schlanken System, und trotzdem brach jede Konvertierung mit
@@ -790,7 +760,8 @@ fi
 perl_module_uses=$(
   grep -nE "^[[:space:]]*(use|require)[[:space:]]+[A-Z]" \
     "$PROJECT_ROOT/lib/pipeline.sh" "$PROJECT_ROOT/lib/tidy-markdown.pl" "$PROJECT_ROOT/bin/md-clip" \
-    "$PROJECT_ROOT/lib/tables.lua" "$PROJECT_ROOT/lib/preprocess-html.pl" \
+    "$PROJECT_ROOT/lib/pandoc-filter.lua" "$PROJECT_ROOT/lib/preprocess-html.pl" \
+    "$PROJECT_ROOT/lib/conversion-support.pl" \
     | grep -vE "(use|require)[[:space:]]+(strict|warnings)\b" || true
 )
 if [ -n "$perl_module_uses" ]; then
@@ -810,12 +781,8 @@ else
 fi
 
 # --- Test 10g: unsichtbarer Inhalt gilt als leer ---
-# `require_nonempty_markdown` muss Exit 1 liefern, damit der Auto-Pfad auf den
-# vorhandenen Plain-Text zurueckfaellt und --replace das Clipboard nicht durch
-# Unsichtbares ersetzt. Die frueher handgepflegte Liste kannte nur
-# U+200B..U+200D, U+2060 und U+FEFF; Richtungszeichen, unsichtbare Operatoren
-# und Variation Selectors rutschten als „sichtbarer Inhalt" durch
-# (Review-Fund 2026-08-28).
+# Gilt für reine Leerzeichen, Richtungszeichen und weitere standardmäßig
+# ignorierbare Zeichen, damit Auto sicheren Klartext-Rückfall nutzen kann.
 TOTAL=$((TOTAL + 1))
 invisible_ok=1
 invisible_report=""
@@ -913,7 +880,9 @@ else
     swiftc "$CLIPBOARD_STRING_SRC" -o "$CLIPBOARD_STRING_BIN"
     swiftc "$PROJECT_ROOT/helpers/clipboard-html.swift" -o "$TEST_RUNTIME/bin/clipboard-html"
     swiftc "$PROJECT_ROOT/helpers/clipboard-rtf.swift" -o "$TEST_RUNTIME/bin/clipboard-rtf"
-    swiftc "$PROJECT_ROOT/helpers/clipboard-undo.swift" -o "$TEST_RUNTIME/bin/clipboard-undo"
+    # shellcheck source=../wrappers/macos-helpers.sh
+    source "$PROJECT_ROOT/wrappers/macos-helpers.sh"
+    compile_macos_helper clipboard-undo "$TEST_RUNTIME/bin/clipboard-undo" "$(uname -m)"
 
     clip_put_html() { "$LOAD_CLIPBOARD_BIN" public.html "$1" >/dev/null; }
     clip_get_text() { "$CLIPBOARD_STRING_BIN"; }
@@ -973,11 +942,7 @@ else
   TOTAL=$((TOTAL + 1))
 
   # --- Roundtrip 1b: echter Schluss-Leerabsatz überlebt das Clipboard ---
-  # Der Roundtrip oben hat genau einen nichtleeren Absatz und kann deshalb nicht
-  # sehen, wie viele Schluss-LFs entfernt werden. Endet das Dokument aber auf
-  # einen leeren Absatz, liefert die Kette ZWEI: eines ist Pandocs Dateiende,
-  # das andere der Absatz. Das frühere `s/\n+\z//` nahm beide und verschluckte
-  # damit den Absatz (Review-Fund 2026-08-05).
+  # Nur Pandocs Schluss-LF wird entfernt. Das LF des leeren Absatzes bleibt.
   TRAILING_HTML="$TEST_RUNTIME/trailing.html"
   printf '%s' '<p>a</p><p><br></p>' > "$TRAILING_HTML"
   clip_put_html "$TRAILING_HTML"

@@ -1,0 +1,22 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.{sh,yml,lua}]
+indent_style = space
+indent_size = 2
+
+[bin/md-clip]
+indent_style = space
+indent_size = 2
+
+[*.{py,pl,swift}]
+indent_style = space
+indent_size = 4
+
+# Zwei Leerzeichen am Markdown-Zeilenende können einen Umbruch bezeichnen.
+[*.md]
+trim_trailing_whitespace = false

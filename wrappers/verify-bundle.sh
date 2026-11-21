@@ -70,14 +70,15 @@ ICON="$APP/Contents/Resources/md-clip.icns"
   echo "App-Icon fehlt, ist leer oder nicht lesbar: $ICON" >&2
   exit 66
 }
-for tool in md-clip pipeline.sh pandoc clipboard-html clipboard-rtf clipboard-undo; do
-  [ -x "$APP/Contents/Resources/bin/$tool" ] || {
+for tool in md-clip pandoc clipboard-html clipboard-rtf clipboard-undo; do
+  [ -f "$APP/Contents/Resources/bin/$tool" ] && [ -x "$APP/Contents/Resources/bin/$tool" ] || {
     echo "Werkzeug fehlt im Bundle: Resources/bin/$tool" >&2
     exit 66
   }
 done
-for resource in tidy-markdown.pl tables.lua preprocess-html.pl; do
-  [ -s "$APP/Contents/Resources/bin/$resource" ] && [ -r "$APP/Contents/Resources/bin/$resource" ] || {
+for resource in pipeline.sh platform.sh doctor.sh conversion-report.sh tidy-markdown.pl pandoc-filter.lua preprocess-html.pl conversion-support.pl; do
+  path="$APP/Contents/Resources/bin/$resource"
+  [ -f "$path" ] && [ -s "$path" ] && [ -r "$path" ] || {
     echo "Pipeline-Ressource fehlt oder ist leer: $resource" >&2
     exit 66
   }
@@ -127,105 +128,9 @@ fi
 
 MINIMUM_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO_PLIST" 2>/dev/null || true)"
 
-# BEGIN MACOS_COMPATIBILITY_CHECK
-macos_version_at_most() {
-  local actual="$1"
-  local declared="$2"
-
-  awk -v actual="$actual" -v declared="$declared" '
-    BEGIN {
-      actual_count = split(actual, actual_parts, ".")
-      declared_count = split(declared, declared_parts, ".")
-      for (i = 1; i <= 3; i++) {
-        actual_part = (i <= actual_count ? actual_parts[i] : 0) + 0
-        declared_part = (i <= declared_count ? declared_parts[i] : 0) + 0
-        if (actual_part < declared_part) exit 0
-        if (actual_part > declared_part) exit 1
-      }
-      exit 0
-    }
-  '
-}
-
-macho_minimum_versions() {
-  local binary="$1"
-
-  # Universal-Binaries besitzen je Architektur einen Load Command. Bei alten
-  # SDKs heißt das Feld `version` unter LC_VERSION_MIN_MACOSX, bei neuen
-  # `minos` unter LC_BUILD_VERSION; beide Formen werden vollständig gelesen.
-  vtool -show-build "$binary" | awk '
-    /cmd LC_VERSION_MIN_MACOSX/ { legacy = 1; next }
-    legacy && $1 == "version" { print $2; legacy = 0; next }
-    $1 == "minos" { print $2 }
-  '
-}
-
-verify_macos_compatibility() {
-  local declared="$1"
-  local label="$2"
-  local binary="$3"
-  local minimums minimum
-
-  if ! [[ "$declared" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-    echo "Ungültige LSMinimumSystemVersion: ${declared:-<leer>}." >&2
-    return 65
-  fi
-  if ! minimums="$(macho_minimum_versions "$binary")" || [ -z "$minimums" ]; then
-    echo "macOS-Mindestversion fehlt oder ist nicht lesbar: $label." >&2
-    return 65
-  fi
-
-  while IFS= read -r minimum; do
-    if ! [[ "$minimum" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-      echo "Ungültige macOS-Mindestversion in $label: $minimum." >&2
-      return 65
-    fi
-    if ! macos_version_at_most "$minimum" "$declared"; then
-      echo "$label benötigt macOS $minimum, Info.plist verspricht aber $declared." >&2
-      return 65
-    fi
-  done <<< "$minimums"
-}
-
-# Eine zentrale Zielmenge verhindert, dass Produkt und Regressionstest
-# unterschiedliche Bundle-Bestandteile prüfen. Der markierte Block enthält
-# bewusst auch den Aufruf: Der Test führt damit genau dieselbe Schleife aus.
-verify_all_macos_compatibility() {
-  local declared="$1"
-  local labels=(
-    "Updater-Helfer"
-    "HUD-Helfer"
-    "Vorschau-Helfer"
-    "HTML-Helper"
-    "RTF-Helper"
-    "Undo-Helper"
-    "pandoc"
-    "Sparkle-Framework"
-    "Sparkle-Autoupdate"
-    "Sparkle-Updater"
-  )
-  local binaries=(
-    "$UPDATER"
-    "$APP/Contents/MacOS/md-clip-hud"
-    "$APP/Contents/MacOS/md-clip-preview"
-    "$APP/Contents/Resources/bin/clipboard-html"
-    "$APP/Contents/Resources/bin/clipboard-rtf"
-    "$APP/Contents/Resources/bin/clipboard-undo"
-    "$APP/Contents/Resources/bin/pandoc"
-    "$SPARKLE_FRAMEWORK/Versions/B/Sparkle"
-    "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
-    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"
-  )
-  local index
-
-  for index in "${!labels[@]}"; do
-    verify_macos_compatibility \
-      "$declared" "${labels[$index]}" "${binaries[$index]}"
-  done
-}
-
+# shellcheck source=verify-macos-compatibility.sh
+source "$SCRIPT_DIR/verify-macos-compatibility.sh"
 verify_all_macos_compatibility "$MINIMUM_SYSTEM_VERSION"
-# END MACOS_COMPATIBILITY_CHECK
 
 # ---------- Update-Konfiguration ----------
 
@@ -239,15 +144,7 @@ case "$FEED_URL" in
 esac
 [ -n "$PUBLIC_KEY" ] || { echo "SUPublicEDKey fehlt in der Info.plist." >&2; exit 65; }
 
-# ---------- Signaturen ----------
-#
-# Dieser Abschnitt steht VOR der Versionsprüfung, und das ist der Punkt: Die
-# Versionsprüfung startet das Shell-Skript im übergebenen Bundle. Bei einem
-# fremden oder beschädigten Release-Artefakt liefe damit fremder Code, bevor
-# überhaupt feststeht, ob das Bundle vertrauenswürdig ist — die Prüfung würde
-# es hinterher zwar ablehnen, der Schaden wäre aber schon angerichtet
-# (Review-Fund 2026-08-06). Erst Vertrauensnachweis, dann Ausführung.
-
+# Das eingebettete Skript darf erst nach der Signaturprüfung laufen.
 if [ "$SIGNED" -eq 1 ]; then
   # Diese Pruefung bindet das Bundle vor jeder Ausfuehrung seines eingebetteten
   # CLI-Skripts an Apples Developer-ID-Kette, unsere Team-ID und die Bundle-ID.

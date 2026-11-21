@@ -80,26 +80,25 @@ wirklich sichtbares Scrollende sowie Status- und Prozesswechsel. Zusätzlich
 laufen CLI, Fenster und Undo-Dienst gemeinsam gegen ein privates Pasteboard:
 Übernehmen, Abbrechen, Undo, neues Kopieren und Signale sowie UTF-8-, Größen-
 und Ressourcenfehler werden mit vollständigen Formatbytes geprüft. Die dafür
-verwendete Fenstersteuerung existiert ausschließlich in TEST-Builds.
-Diese Hintergrundprüfungen ersetzen
-keine Abnahme der vollständigen notarisiert installierten App einschließlich
+verwendete Fenstersteuerung wird nur für die Testprogramme unter `tests/`
+mitkompiliert. Die Hintergrundprüfungen ersetzen keine Abnahme der vollständigen notarisiert installierten App einschließlich
 Vordergrund-Fokus, Return/Escape und Systemdialogen. Diese Abnahme gehört zum
 Installations-/Release-Meilenstein.
 
-Die separate Tastaturprüfung übernimmt den Fensterfokus und benötigt eine
-entsperrte macOS-Konsolensitzung sowie eine ausdrückliche Freigabe:
+Die separate Tastaturprüfung adressiert AppKit-Ereignisse direkt an das
+Fenster einer isolierten Test-App. Der Systemfokus bleibt mit `--background`
+unverändert:
 
 ```bash
-python3 tests/test-preview-foreground.py --allow-focus --output /tmp/md-clip-keyboard-results
+python3 tests/test-preview-foreground.py --background --output /tmp/md-clip-keyboard-results
 ```
 
-Die Prüfung kontrolliert zusätzlich zum globalen Konsolenstatus die eigene
-Benutzersitzung. Eine gesperrte Sitzung wird vor dem ersten Fenster abgelehnt.
-
-Der Ergebnisordner muss neu sein. Die Prüfung baut eine isolierte Test-App und
-steuert echte Tasten für Übernehmen, Abbrechen, Undo, Auswahl und Kopieren.
+Für eine Prüfung des Vordergrund-Fokus kann `--allow-focus` anstelle von
+`--background` verwendet werden. Beide Modi benötigen eine entsperrte eigene
+Konsolensitzung und einen neuen Ergebnisordner. Auch im Vordergrund bleiben
+die Tastaturereignisse im Fenster der Test-App.
 CLI, Vorschau und Undo verwenden ausschließlich ein privates Pasteboard.
-Auch Kopieren wird nur im TEST-Build auf dieses Board umgeleitet. Die
+Das Testprogramm leitet auch Kopieren auf dieses Board um. Die
 Tab-Reihenfolge wird anhand der tatsächlichen macOS-Tastaturnavigation bewertet;
 bei ausgeschalteter Navigation wird die vollständige Reihenfolge ausdrücklich
 als übersprungen protokolliert. Deaktivierte Aktionen dürfen dabei nicht

@@ -32,7 +32,6 @@ resolve_notary_profile() {
   fi
 }
 
-# BEGIN NOTARY_PROFILE_CHECK
 notary_profile_works() {
   local profile="$1"
   local attempt output
@@ -51,7 +50,6 @@ notary_profile_works() {
   printf '%s\n' "$output" >&2
   return 1
 }
-# END NOTARY_PROFILE_CHECK
 
 verify_notary_profile() {
   local profile="$1"

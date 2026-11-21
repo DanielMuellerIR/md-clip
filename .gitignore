@@ -10,24 +10,21 @@ tests/captures/
 # Build-Ordner für das self-contained .app-Bundle (inkl. pandoc-Cache).
 build/
 
-# Lokale Sperre des Safe-Commit-Workflows.
+# Lokale Commit-Sperre.
 .commit-lock
 
-# Python-Bytecode — entsteht beim Lauf von assets/generate-icon-v2.py.
+# Python-Bytecode.
 __pycache__/
 
 # macOS-Metadaten.
 .DS_Store
 
-# Frueherer Ablageort der kompilierten Test-Helfer. Heute bauen die
-# Test-Skripte sie nach $TEST_RUNTIME; auf aelteren Arbeitskopien liegen
-# sie noch neben ihrer .swift-Quelle.
+# Früherer Ablageort kompilierter Testhelfer.
 tests/clipboard-string
 tests/load-clipboard
 
-# Frueherer Ausgabeort des App-Bundles — build-app-bundled.sh schreibt
-# heute nach build/md-clip.app.
+# Früherer Ausgabeort des App-Bundles.
 wrappers/md-clip.app/
 
-# Ordner fuer Handversuche, kein Quellcode.
+# Lokale Versuche.
 spike/

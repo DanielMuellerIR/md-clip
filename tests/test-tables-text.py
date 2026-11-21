@@ -120,7 +120,8 @@ with tempfile.TemporaryDirectory(prefix='md-clip-tables-') as tmp:
                 assert reasons=={'tables-text':1}
                 _, reasons, _ = convert(source,target,mode='reject',success=False)
                 assert reasons=={'table-spanned':1}
-        for value in ('&#48', '&#x30', '&#45;1', '&#x', '&#;', '&#50x', '&#x32z'):
+        for value in ('&#48', '&#x30', '&#45;1', '&#x', '&#;', '&#50x', '&#x32z',
+                      '&#1114112;', '&#9999999999999999999999999;', '&#x110000;', '&#xffffffffffffffff;', '&#xD800;'):
             _, reasons, _ = convert('<table><tr><td colspan="'+value+'">X</td></tr></table>',target,success=False)
             assert reasons['table-ambiguous']==1 and not reasons['tables-text'],(value,reasons)
         protected = '<p title="<td rowspan=0>">TEXT</p><!-- <td rowspan="0"> --><script>"<td rowspan=0>"</script><pre><code>&lt;td rowspan="0"&gt;</code></pre>'
@@ -153,7 +154,7 @@ with tempfile.TemporaryDirectory(prefix='md-clip-tables-') as tmp:
         else: broken['blocks'][0]['c'][4][0][3][0][1].pop()
         report.write_bytes(b'')
         env = dict(os.environ, MD_CLIP_RESULT_FILE=str(report), MD_CLIP_TABLES='text', MD_CLIP_STRICT='0')
-        p = subprocess.run(['pandoc', '-f', 'json', '-t', 'gfm', '--lua-filter', str(ROOT / 'lib/tables.lua')],
+        p = subprocess.run(['pandoc', '-f', 'json', '-t', 'gfm', '--lua-filter', str(ROOT / 'lib/pandoc-filter.lua')],
                            input=json.dumps(broken).encode(), env=env, capture_output=True, timeout=20)
         assert p.returncode != 0 and not p.stdout and report.read_text() == 'table-ambiguous\t1\n'
 print('OK: Tabellen-Textmodus, Spannweiten, Verschachtelung, Inhalte, RTF-Adapter und Abbrüche')

@@ -16,12 +16,12 @@ with tempfile.TemporaryDirectory(prefix="md-clip-undo-tests-", dir="/private/tmp
     helper = work / "clipboard-undo"
     driver = work / "undo-tests"
     cache = work / "module-cache"
-    for source, binary, flags in [
-        (root / "helpers/clipboard-undo.swift", helper, ["-D", "TEST"]),
-        (root / "tests/test-undo-macos.swift", driver, []),
-    ]:
-        subprocess.run(["swiftc", "-O" if binary == helper else "-Onone", "-module-cache-path", str(cache), *flags,
-                        str(source), "-o", str(binary)], check=True)
+    target = platform.machine() + "-apple-macos14.0"
+    subprocess.run(["swiftc", "-O", "-target", target, "-swift-version", "6", "-warnings-as-errors",
+                    "-module-cache-path", str(cache), str(root / "helpers/clipboard-undo.swift"),
+                    str(root / "tests/clipboard-undo-test-main.swift"), "-o", str(helper)], check=True)
+    subprocess.run(["swiftc", "-target", target, "-module-cache-path", str(cache),
+                    str(root / "tests/test-undo-macos.swift"), "-o", str(driver)], check=True)
     diagnosis_directory = work / "diagnosis-only"
     diagnosis = subprocess.run([str(helper), "diagnose"], capture_output=True, timeout=10,
                                env=dict(os.environ, MD_CLIP_TEST_DIRECTORY=str(diagnosis_directory),

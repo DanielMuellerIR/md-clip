@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Erlaubt einen Lauf von Hand ueber die Actions-Oberflaeche.
+  # Erlaubt einen Lauf von Hand über die Actions-Oberfläche.
   workflow_dispatch:
 
 # Der Testjob braucht weder Schreibzugriff noch ein dauerhaft hinterlegtes
-# Git-Credential. Das gilt auch fuer push-Laeufe auf main.
+# Git-Credential. Das gilt auch für Push-Läufe auf main.
 permissions:
   contents: read
 
@@ -18,27 +18,21 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       TEST_PYTHON: /usr/bin/python3
-    # Der Lauf dauert normal wenige Minuten. Die Grenze ist gegen Haenger
-    # gerichtet, nicht gegen Langsamkeit: `xvfb-run` haengt als letzter Befehl
-    # einer Shell VOR dem ersten Test, weil es dann PID 1 wird und Xvfbs
-    # Bereitschaftssignal nicht zugestellt bekommt (siehe
-    # tasks/2026-07-05-linux-port/plan.md). Ohne Grenze liefe der Job dann bis
-    # zum GitHub-Standard von sechs Stunden.
     timeout-minutes: 15
 
     steps:
-      # Unveraenderlicher Commit statt eines beweglichen Versions-Tags; derselbe
-      # gepruefte Pin wird im Appcast-Workflow verwendet.
+      # Unveränderlicher Commit statt eines beweglichen Versions-Tags; derselbe
+      # geprüfte Pin wird im Appcast-Workflow verwendet.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       # pandoc + perl = die Konvertierungs-Pipeline, xclip = Clipboard unter X11,
       # xvfb = X-Server ohne Bildschirm (der Runner hat keinen).
-      - name: Abhaengigkeiten installieren
+      - name: Abhängigkeiten installieren
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq pandoc xclip xvfb sway wl-clipboard unzip
+          sudo apt-get install -y -qq pandoc xclip xvfb sway wl-clipboard unzip shellcheck lua5.4
 
       - name: Versionen protokollieren
         run: |
@@ -56,70 +50,19 @@ jobs:
           "$TEST_PYTHON" --version
           ./bin/md-clip --version
 
-      # Erst ohne Display: beweist, dass die Fixture-Tests ohne Clipboard
-      # durchlaufen (der Fall im Container / auf einem Server).
-      - name: Tests ohne Display (Fixtures)
-        run: ./tests/run-tests.sh
-
-      - name: Inhaltsregressionen und Undo ohne Display
+      - name: Shell, Perl, Lua und Workflows prüfen
         run: |
-          bash tests/test-review-content.sh
-          "$TEST_PYTHON" tests/test-html-normalization.py
-          "$TEST_PYTHON" tests/test-conversion-report.py
-          "$TEST_PYTHON" tests/test-images.py
-          "$TEST_PYTHON" tests/test-tables-text.py
-          "$TEST_PYTHON" tests/test-doctor.py
-          "$TEST_PYTHON" tests/test-pandoc-pin.py
-          "$TEST_PYTHON" tests/test-app-actions.py
-          "$TEST_PYTHON" tests/test-undo-linux.py
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          PATH="$(go env GOPATH)/bin:$PATH" ./tests/run-all.sh --lint
 
-      - name: Undo mit isoliertem X11-Clipboard
-        run: xvfb-run -a env MD_CLIP_UNDO_TEST_ISOLATED=1 "$TEST_PYTHON" tests/test-undo-linux.py --integration
+      - name: Fixtures und Verträge ohne System-Clipboard
+        run: ./tests/run-all.sh
 
-      # Dann mit virtuellem X-Server: beweist den echten Clipboard-Weg.
-      - name: Tests mit X11-Clipboard (Xvfb)
-        run: xvfb-run -a ./tests/run-tests.sh
+      - name: Isoliertes X11
+        run: ./tests/run-all.sh --x11
 
-      # Die vier Einzelskripte haengen an keinem Display und keinem echten
-      # Clipboard — sie stellen sich ihre Werkzeuge selbst als Attrappen hin.
-      # Ohne diese Schritte koennten Regressionen der Byte-, Installations-,
-      # RTF- und Wrapper-Regeln trotz gruener CI auf main landen.
-      - name: Plain-Text bleibt bytegenau
-        run: ./tests/test-plain-newlines.sh
-
-      - name: Installer ueberschreibt keine fremden Ziele
-        run: ./tests/test-install-safety.sh
-
-      - name: pandoc ohne RTF-Reader wird abgelehnt
-        run: ./tests/test-dependencies.sh
-
-      - name: Launcher, Release, Appcast und Bundle-Pruefung
-        run: ./tests/test-wrapper-safety.sh
-
-      # Rauchprobe fuer die Fehlerpfade: Ohne Clipboard-Inhalt muss md-clip mit
-      # Exit 1 und klarer Meldung abbrechen, nicht mit einem Bash-Fehler.
-      - name: Leeres Clipboard meldet Exit 1
-        run: |
-          set +e
-          xvfb-run -a ./bin/md-clip --quiet
-          code=$?
-          set -e
-          if [ "$code" -ne 1 ]; then
-            echo "Erwartet Exit 1 bei leerem Clipboard, bekam $code"
-            exit 1
-          fi
-          echo "OK: Exit 1 bei leerem Clipboard"
-
-      - name: CLI-Dateien und strukturelle Tabellenregressionen
-        run: |
-          "$TEST_PYTHON" tests/test-cli-inputs.py
-
-      - name: Compare-Skripte ohne System-Clipboard
-        run: |
-          "$TEST_PYTHON" tests/test-compare.py
-
-      - name: Wayland mit isoliertem Compositor
-        run: env -u WAYLAND_DISPLAY ./tests/run-wayland.sh
+      - name: Isoliertes Wayland
+        run: ./tests/run-all.sh --wayland
 
   macos:
     name: macOS 15 arm64 (pandoc ${{ matrix.converter }})
@@ -158,26 +101,7 @@ jobs:
           test ! -e bin/pandoc && test ! -L bin/pandoc
           ln -s "$(command -v pandoc)" bin/pandoc
       - name: Fixtures, CLI und isolierte Wrapper
-        env:
-          MD_CLIP_SKIP_CLIPBOARD: '1'
-        run: |
-          bash tests/run-tests.sh
-          bash tests/test-plain-newlines.sh
-          bash tests/test-install-safety.sh
-          bash tests/test-dependencies.sh
-          bash tests/test-wrapper-safety.sh
-          "$TEST_PYTHON" tests/test-cli-inputs.py
-          "$TEST_PYTHON" tests/test-compare.py
-          bash tests/test-review-content.sh
-          "$TEST_PYTHON" tests/test-html-normalization.py
-          "$TEST_PYTHON" tests/test-conversion-report.py
-          "$TEST_PYTHON" tests/test-images.py
-          "$TEST_PYTHON" tests/test-tables-text.py
-          "$TEST_PYTHON" tests/test-doctor.py
-          "$TEST_PYTHON" tests/test-pandoc-pin.py
-          "$TEST_PYTHON" tests/test-app-actions.py
-          "$TEST_PYTHON" tests/test-undo-macos.py
-          "$TEST_PYTHON" tests/test-preview-macos.py
+        run: ./tests/run-all.sh
       - name: Unsigniertes Bundle bauen und Konvertierung ausführen
         if: matrix.converter == 'bundled'
         run: |
@@ -186,4 +110,4 @@ jobs:
           cp "$RUNNER_TEMP/md-clip-pandoc/pandoc-${PANDOC_VERSION}-arm64-macOS.zip" \
             "build/cache/pandoc-${PANDOC_VERSION}-arm64.zip"
           bash build.sh
-          "$TEST_PYTHON" tests/test-bundle-conversion.py build/md-clip.app
+          ./tests/run-all.sh --bundle build/md-clip.app

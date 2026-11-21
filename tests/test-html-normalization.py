@@ -214,14 +214,10 @@ for tag in ('textarea','title','script','style'):
     content = '<td rowspan="0"><div data-line="1" style="x">☀</div><div></div><li data-md-clip-classroom="1">literal</li>'
     raw_cases.extend(['<'+tag+'>'+content+'</'+tag+'>', '<'+tag.upper()+'>'+content+'</'+tag.upper()+' >', '<'+tag+'>'+content])
     raw_cases.extend('<'+tag+'>'+content+'</'+tag+ending+'>' for ending in (' data-extra="a > b"', '/'))
-for raw in raw_cases:
-    for mode in ("claude_desktop", "google_classroom"):
-        assert run(["bash", "-c", 'source "$1"; "preprocess_$2"',
-                    "html-test", str(ROOT / "lib/pipeline.sh"), mode], raw.encode()) == raw.encode()
-unfinished = ('<svg>' * 30000 + 'end').encode()
-for mode in ('claude_desktop','google_classroom'):
-    assert run(['bash','-c','source "$1"; "preprocess_$2"',
-                'html-test',str(ROOT/'lib/pipeline.sh'),mode],unfinished) == unfinished
+for raw in raw_cases + ['<svg>' * 30000 + 'end']:
+    for mode in ('preprocess_html', 'preprocess_rtf_html'):
+        assert run(['bash', '-c', 'source "$1"; "$2"',
+                    'html-test', str(ROOT / 'lib/pipeline.sh'), mode], raw.encode()) == raw.encode()
 tidy_cases = []
 for depth in (1, 2, 3):
     prefix = '> ' * depth

@@ -29,6 +29,8 @@ report_failed_check() {
 init_test_environment() {
   TESTS_DIR="$1"
   PROJECT_ROOT="$(dirname "$TESTS_DIR")"
+  # shellcheck source=../../wrappers/stage-runtime.sh
+  source "$PROJECT_ROOT/wrappers/stage-runtime.sh"
   TEST_ROOT=$(mktemp -d)
   # BASH_SOURCE[1] ist das aufrufende Testskript — BASH_SOURCE[0] wäre diese
   # Hilfsdatei und damit die falsche Datei für die Zeilenangabe.
@@ -42,17 +44,16 @@ init_test_environment() {
 copy_install_test_project() {
   local destination="$1"
 
-  mkdir -p "$destination/bin" "$destination/lib" "$destination/helpers"
+  mkdir -p "$destination/bin" "$destination/lib" "$destination/helpers" "$destination/wrappers"
+  cp "$PROJECT_ROOT/wrappers/macos-helpers.sh" "$destination/wrappers/"
   cp "$PROJECT_ROOT/install.sh" "$destination/install.sh"
-  cp "$PROJECT_ROOT/bin/md-clip" "$destination/bin/md-clip"
-  cp "$PROJECT_ROOT/lib/pipeline.sh" "$destination/lib/pipeline.sh"
-  cp "$PROJECT_ROOT/lib/tidy-markdown.pl" "$destination/lib/tidy-markdown.pl"
-  cp "$PROJECT_ROOT/lib/tables.lua" "$destination/lib/tables.lua"
-  cp "$PROJECT_ROOT/lib/preprocess-html.pl" "$destination/lib/preprocess-html.pl"
+  stage_runtime "$PROJECT_ROOT" "$destination/bin" "$destination/lib"
   cp "$PROJECT_ROOT/helpers/clipboard-html.swift" "$destination/helpers/clipboard-html.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-rtf.swift" "$destination/helpers/clipboard-rtf.swift"
   cp "$PROJECT_ROOT/helpers/clipboard-undo.swift" "$destination/helpers/clipboard-undo.swift"
   cp "$PROJECT_ROOT/helpers/md-clip-preview.swift" "$destination/helpers/md-clip-preview.swift"
+  cp "$PROJECT_ROOT/helpers/clipboard-undo-main.swift" "$PROJECT_ROOT/helpers/md-clip-preview-main.swift" \
+    "$destination/helpers/"
   # Die Installer-Prüfung soll weder ein Display öffnen noch einen Dienst starten.
   cat > "$destination/helpers/clipboard-undo-linux.py" <<'SH'
 #!/bin/sh

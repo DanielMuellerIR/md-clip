@@ -1,96 +1,17 @@
-// md-clip-updater — Sparkle-Anbindung der md-clip.app.
-//
-// Die App selbst ist nur ein Shell-Launcher ohne Cocoa-Laufzeit. Sparkle
-// braucht aber einen laufenden Prozess mit Runloop, der Feed-Abruf, Dialoge,
-// Download, Signaturprüfung und den Austausch der App abwickelt. Genau das
-// übernimmt dieses kleine Programm. Es liegt im Bundle unter Contents/MacOS/
-// neben dem Launcher — dadurch ist Bundle.main die md-clip.app selbst, und
-// Sparkle liest Feed-URL und Ed25519-Schlüssel aus deren Info.plist.
-//
-// Zwei Betriebsarten:
-//   --background   Stille Suche nach dem eigentlichen md-clip-Lauf, vom
-//                  Launcher gestartet — höchstens einmal je 24 Stunden.
-//                  Ohne Fund (oder ohne Netz) beendet sich der Prozess
-//                  wortlos; nur wenn es ein Update gibt, zeigt Sparkle
-//                  seinen Dialog.
-//   --interactive  Sichtbare Suche, zeigt auch „Sie sind aktuell" an.
-//                  Wird von `md-clip --check-updates` aufgerufen.
-//
-// Installiert wird ausschließlich nach Zustimmung im Sparkle-Dialog
-// (SUAllowsAutomaticUpdates ist in der Info.plist abgeschaltet). Nach dem
-// Einspielen startet Sparkle die Host-App normalerweise neu — hier bewusst
-// nicht, siehe updaterShouldRelaunchApplication(_:) unten.
-
-import Foundation
-#if !MD_CLIP_UPDATER_MODE_TEST
 import AppKit
+import Foundation
 import Sparkle
-#endif
 
-enum Mode {
-    case background
-    case interactive
-}
-
-func fail(usage message: String) -> Never {
-    FileHandle.standardError.write(Data((message + "\n").utf8))
-    exit(64)
-}
-
-func parseMode(arguments: [String]) -> Mode {
-    guard arguments.count == 2 else {
-        fail(usage: "Aufruf: md-clip-updater --background | --interactive")
-    }
-    switch arguments[1] {
-    case "--background":
-        return .background
-    case "--interactive":
-        return .interactive
-    default:
-        fail(usage: "Unbekannte Option: \(arguments[1])\nAufruf: md-clip-updater --background | --interactive")
-    }
-}
-
-let mode = parseMode(arguments: CommandLine.arguments)
-
-#if MD_CLIP_UPDATER_MODE_TEST
-// Sparkle-freier Programmeinstieg für den repositoryweiten Vertragstest. Er
-// kompiliert und durchläuft denselben Parser wie das ausgelieferte Programm.
-switch mode {
-case .background:
-    print("--background")
-case .interactive:
-    print("--interactive")
-}
-#else
-// Drossel für den Hintergrundmodus: Der Launcher startet diesen Prozess bei
-// jedem Doppelklick auf die App. Damit daraus nicht bei jeder Konvertierung
-// ein Feed-Abruf wird, merken wir uns den letzten Hintergrund-Check selbst —
-// in der Defaults-Domain der App (Bundle.main ist die md-clip.app). Der
-// Betrag fängt zurückgestellte Uhren ab: Läge der gespeicherte Zeitpunkt in
-// der Zukunft, wäre das Intervall sonst dauerhaft „noch nicht um".
-let lastBackgroundCheckKey = "MDClipUpdaterLastBackgroundCheck"
-let backgroundCheckInterval: TimeInterval = 24 * 60 * 60
-if mode == .background {
-    let defaults = UserDefaults.standard
-    if let lastCheck = defaults.object(forKey: lastBackgroundCheckKey) as? Date,
-        abs(Date().timeIntervalSince(lastCheck)) < backgroundCheckInterval {
-        exit(0)
-    }
-    // Zeitstempel VOR dem Check schreiben: Auch ein fehlgeschlagener Abruf
-    // (kein Netz, Feed noch nicht veröffentlicht) zählt als Versuch. Sonst
-    // würde jeder App-Start ohne Netz erneut ins Leere greifen.
-    defaults.set(Date(), forKey: lastBackgroundCheckKey)
-}
-
-/// Verdrahtet Sparkle mit dem Lebenszyklus dieses Einweg-Prozesses: Sparkle
-/// meldet über die Delegate-Methoden, wann nichts mehr zu tun ist — dann
-/// beendet sich der Prozess, statt unsichtbar weiterzulaufen.
-final class UpdaterCoordinator: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
+// Der Standard-User-Driver ruft sein Delegate auf dem Hauptthread auf.
+// Sein Objective-C-Protokoll trägt keine entsprechende Swift-Annotation.
+@MainActor
+final class UpdaterCoordinator: NSObject, SPUUpdaterDelegate,
+    @preconcurrency SPUStandardUserDriverDelegate
+{
     /// Wahr, sobald Sparkle einen Update-Dialog anzeigt. Solange der Nutzer
     /// dort noch entscheidet, darf der Prozess sich nicht beenden.
     private var updateDialogVisible = false
-    private var dialogDeadline: DispatchWorkItem?
+    private var dialogDeadline: Task<Void, Never>?
     private let maximumDialogLifetime: TimeInterval = 30 * 60
 
     func standardUserDriverWillHandleShowingUpdate(
@@ -101,12 +22,10 @@ final class UpdaterCoordinator: NSObject, SPUUpdaterDelegate, SPUStandardUserDri
         guard handleShowingUpdate else { return }
         updateDialogVisible = true
         dialogDeadline?.cancel()
-        let deadline = DispatchWorkItem { NSApp.terminate(nil) }
-        dialogDeadline = deadline
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + maximumDialogLifetime,
-            execute: deadline
-        )
+        dialogDeadline = Task {
+            do { try await Task.sleep(for: .seconds(maximumDialogLifetime)) } catch { return }
+            NSApp.terminate(nil)
+        }
     }
 
     func standardUserDriverWillFinishUpdateSession() {
@@ -118,16 +37,10 @@ final class UpdaterCoordinator: NSObject, SPUUpdaterDelegate, SPUStandardUserDri
         DispatchQueue.main.async { NSApp.terminate(nil) }
     }
 
-    /// Kein Neustart der App nach dem Einspielen. md-clip.app ist eine
-    /// Einweg-App: Jeder Start führt sofort `md-clip --replace --notify` aus
-    /// (siehe wrappers/launcher.sh) und ersetzt damit den Clipboard-Inhalt.
-    /// Sparkles Standard-Neustart würde also eine Konvertierung auslösen, die
-    /// niemand beauftragt hat — und die kann echten Inhalt überschreiben, wenn
-    /// der Nutzer während Dialog oder Download etwas anderes kopiert hat
-    /// (Review-Fund 2026-08-06). Die neue Fassung startet beim nächsten
-    /// Dock-Klick oder Hotkey ganz normal.
+    // Der Launcher konvertiert beim App-Start sofort das Clipboard.
+    // Die neue Version soll erst beim nächsten beauftragten Start laufen.
     func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool {
-        return false
+        false
     }
 
     func updater(
@@ -146,12 +59,13 @@ final class UpdaterCoordinator: NSObject, SPUUpdaterDelegate, SPUStandardUserDri
 
 /// Startet den Updater erst, wenn die App-Laufzeit steht: Sparkle zeigt
 /// Fenster an und braucht dafür eine fertig initialisierte NSApplication.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let mode: Mode
+    private let mode: UpdaterMode
     private let coordinator = UpdaterCoordinator()
     private var updaterController: SPUStandardUpdaterController?
 
-    init(mode: Mode) {
+    init(mode: UpdaterMode) {
         self.mode = mode
     }
 
@@ -175,11 +89,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-let application = NSApplication.shared
-// .accessory: kein Dock-Symbol, kein Menübalken — passend zur LSUIElement-App.
-// Sparkles Standard-Oberfläche holt ihre Dialoge selbst in den Vordergrund.
-application.setActivationPolicy(.accessory)
-let appDelegate = AppDelegate(mode: mode)
-application.delegate = appDelegate
-application.run()
-#endif
+@main
+@MainActor
+enum UpdaterMain {
+    static func main() {
+        let mode = UpdaterMode.parse(arguments: CommandLine.arguments)
+        if mode == .background {
+            let key = "MDClipUpdaterLastBackgroundCheck"
+            let checkInterval: TimeInterval = 24 * 60 * 60
+            let defaults = UserDefaults.standard
+            // Der Betrag berücksichtigt zurückgestellte Systemuhren.
+            if let lastCheck = defaults.object(forKey: key) as? Date,
+                abs(Date().timeIntervalSince(lastCheck)) < checkInterval
+            {
+                return
+            }
+            // Auch ein Abruffehler soll weitere Versuche am selben Tag drosseln.
+            defaults.set(Date(), forKey: key)
+        }
+
+        let application = NSApplication.shared
+        application.setActivationPolicy(.accessory)
+        let delegate = AppDelegate(mode: mode)
+        application.delegate = delegate
+        withExtendedLifetime(delegate) { application.run() }
+    }
+}

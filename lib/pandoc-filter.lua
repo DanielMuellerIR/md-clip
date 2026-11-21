@@ -1,5 +1,5 @@
--- Inhalt und Tabellen vor dem Markdown-Writer prüfen. HTML-Regulärausdrücke können weder
--- verschachtelte Zellen noch Kommentare/Attribute zuverlässig unterscheiden.
+-- Pandocs Dokumentstruktur normalisieren und vor dem Markdown-Writer prüfen.
+local directory = PANDOC_SCRIPT_FILE:match('^(.*/)') or './'
 local flattened_cells = 0
 local strict = os.getenv('MD_CLIP_STRICT') == '1'
 local image_mode = os.getenv('MD_CLIP_IMAGES') or 'keep'
@@ -15,9 +15,10 @@ local images_alt, images_omitted, tables_text = 0, 0, 0
 local function report(code, count)
   local path = os.getenv('MD_CLIP_RESULT_FILE')
   if path and path ~= '' then
-    local file = assert(io.open(path, 'a'))
-    file:write(code, '\t', tostring(count), '\n')
-    file:close()
+    local message = 'Konvertierungsbericht konnte nicht geschrieben werden.'
+    local file = assert(io.open(path, 'a'), message)
+    assert(file:write(code, '\t', tostring(count), '\n'), message)
+    assert(file:close(), message)
   end
 end
 
@@ -298,13 +299,8 @@ local function finalize_document(doc)
     Str = text, Code = text, CodeBlock = text, Math = text,
     Image = visible, HorizontalRule = visible, Table = visible
   }
-  -- Perl bringt die Unicode-Eigenschaften bereits als Kernbordmittel mit.
-  -- pandoc.pipe übergibt Text über stdin, ohne Shell oder temporäre Datei.
-  local verdict = pandoc.pipe('perl', { '-0e', [[
-    my $text = do { local $/; <STDIN> } // q{};
-    utf8::decode($text);
-    print $text =~ /[^\s\p{White_Space}\p{Default_Ignorable_Code_Point}]/ ? 'yes' : 'no';
-  ]] }, table.concat(content, '\n'))
+  local verdict = pandoc.pipe('perl', { directory .. 'conversion-support.pl', 'visible' },
+    table.concat(content, '\n'))
   if verdict ~= 'yes' then
     reject('empty-document', 'Dokument enthält keinen sichtbaren Inhalt.')
   end
