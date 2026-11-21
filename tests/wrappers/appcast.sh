@@ -22,7 +22,7 @@ if grep -Fq 'release:' "$APPCAST_WORKFLOW"; then
   echo "✗ Privilegierter Appcast-Workflow wird weiterhin aus dem Release-Tag geladen" >&2
   exit 1
 fi
-TOOLING_SHA="92bbe437f0a45e38f132614436c58d65ff014717"
+TOOLING_SHA="32ee6e00eb21ad60676d73aebcbfe8b9f57ac4b5"
 grep -Fq "ref: $TOOLING_SHA" "$APPCAST_WORKFLOW"
 grep -Fq "!= \"$TOOLING_SHA\"" "$APPCAST_WORKFLOW"
 if grep -Fq 'TOOLING_REVISION' "$APPCAST_WORKFLOW"; then

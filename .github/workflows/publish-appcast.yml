@@ -46,7 +46,7 @@ jobs:
       - name: Check out trusted appcast tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: 92bbe437f0a45e38f132614436c58d65ff014717
+          ref: 32ee6e00eb21ad60676d73aebcbfe8b9f57ac4b5
           path: tooling
           persist-credentials: false
 
@@ -56,7 +56,7 @@ jobs:
           REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [[ "$(git -C tooling rev-parse HEAD)" != "92bbe437f0a45e38f132614436c58d65ff014717" ]]; then
+          if [[ "$(git -C tooling rev-parse HEAD)" != "32ee6e00eb21ad60676d73aebcbfe8b9f57ac4b5" ]]; then
             echo "FEHLER: Tooling-Checkout entspricht nicht dem freigegebenen Commit." >&2
             exit 1
           fi
